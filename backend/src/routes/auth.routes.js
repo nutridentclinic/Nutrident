@@ -12,7 +12,7 @@ router.post('/login', authLimiter, loginRules, validate, ctrl.login);
 router.post('/refresh-token', ctrl.refreshToken);
 router.post('/verify-phone', protect, ctrl.verifyPhone);
 router.post('/forgot-password', authLimiter, ctrl.forgotPassword);
-router.post('/reset-password/:token', authLimiter, resetPasswordRules, validate, ctrl.resetPassword);
+router.post('/reset-password', authLimiter, resetPasswordRules, validate, ctrl.resetPassword);
 
 router.get('/me', protect, ctrl.getMe);
 router.patch('/update-password', protect, ctrl.updatePassword);

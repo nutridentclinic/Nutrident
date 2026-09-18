@@ -1,4 +1,4 @@
-const { body, param } = require('express-validator');
+const { body } = require('express-validator');
 
 exports.registerRules = [
   body('name').trim().notEmpty().withMessage('Name is required'),
@@ -18,6 +18,7 @@ exports.otpRules = [
 ];
 
 exports.resetPasswordRules = [
-  param('token').notEmpty(),
+  body('email').isEmail().withMessage('Valid email is required').normalizeEmail(),
+  body('otp').isLength({ min: 6, max: 6 }).withMessage('OTP must be 6 digits'),
   body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
 ];

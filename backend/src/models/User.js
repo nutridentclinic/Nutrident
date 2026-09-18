@@ -41,8 +41,6 @@ const userSchema = new mongoose.Schema(
     fcmToken: { type: String, default: null },
 
     passwordChangedAt: Date,
-    passwordResetToken: String,
-    passwordResetExpires: Date,
 
     otpHash: { type: String, select: false },
     otpExpires: { type: Date, select: false },

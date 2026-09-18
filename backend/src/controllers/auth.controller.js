@@ -1,4 +1,4 @@
-const crypto = require('crypto');
+// const crypto = require('crypto');
 const User = require('../models/User');
 const Patient = require('../models/Patient');
 const Dentist = require('../models/Dentist');
@@ -131,42 +131,49 @@ exports.refreshToken = catchAsync(async (req, res, next) => {
 });
 
 // @route POST /api/auth/forgot-password
+// Body: { email }
 exports.forgotPassword = catchAsync(async (req, res, next) => {
-    const user = await User.findOne({ email: req.body.email });
-    // Always respond the same way to avoid leaking which emails are registered
-    if (!user) return success(res, 200, 'If that email exists, a reset link has been sent.');
+  const user = await User.findOne({ email: req.body.email });
+  // Always respond the same way to avoid leaking which emails are registered
+  if (!user) return success(res, 200, 'If that email exists, an OTP has been sent.');
 
-    const resetToken = crypto.randomBytes(32).toString('hex');
-    user.passwordResetToken = crypto.createHash('sha256').update(resetToken).digest('hex');
-    user.passwordResetExpires = Date.now() + 15 * 60 * 1000;
-    await user.save({ validateBeforeSave: false });
+  const { otp, hash } = generateOTP();
+  user.otpHash = hash;
+  user.otpExpires = Date.now() + 10 * 60 * 1000;
+  await user.save({ validateBeforeSave: false });
 
-    const resetUrl = `${process.env.CLIENT_URL}/reset-password/${resetToken}`;
-    sendEmail({
-        to: user.email,
-        subject: 'Password reset request',
-        html: `<p>Click <a href="${resetUrl}">here</a> to reset your password. This link expires in 15 minutes.</p>`,
-    }).catch(() => { });
+  sendEmail({
+    to: user.email,
+    subject: 'Password reset OTP',
+    html: `<p>Your password reset OTP is <b>${otp}</b>. It expires in 10 minutes. If you didn't request this, you can safely ignore this email.</p>`,
+  }).catch(() => {});
 
-    success(res, 200, 'If that email exists, a reset link has been sent.');
+  success(res, 200, 'If that email exists, an OTP has been sent.');
 });
 
-// @route POST /api/auth/reset-password/:token
+// @route POST /api/auth/reset-password
+// Body: { email, otp, password }
 exports.resetPassword = catchAsync(async (req, res, next) => {
-    const hashedToken = crypto.createHash('sha256').update(req.params.token).digest('hex');
-    const user = await User.findOne({
-        passwordResetToken: hashedToken,
-        passwordResetExpires: { $gt: Date.now() },
-    });
-    if (!user) return next(new AppError('Token is invalid or has expired.', 400));
+  const { email, otp, password } = req.body;
 
-    user.password = req.body.password;
-    user.passwordResetToken = undefined;
-    user.passwordResetExpires = undefined;
-    await user.save();
+  const user = await User.findOne({ email }).select('+otpHash +otpExpires');
+  // Generic message so this endpoint can't be used to check which emails exist
+  if (!user) return next(new AppError('Invalid or expired OTP.', 400));
 
-    const tokens = issueTokens(user);
-    success(res, 200, 'Password reset successfully.', tokens);
+  if (!user.otpHash || user.otpExpires < Date.now()) {
+    return next(new AppError('OTP has expired. Please request a new one.', 400));
+  }
+  if (hashOTP(otp) !== user.otpHash) {
+    return next(new AppError('Invalid OTP.', 400));
+  }
+
+  user.password = password;
+  user.otpHash = undefined;
+  user.otpExpires = undefined;
+  await user.save();
+
+  const tokens = issueTokens(user);
+  success(res, 200, 'Password reset successfully.', tokens);
 });
 
 // @route GET /api/auth/me

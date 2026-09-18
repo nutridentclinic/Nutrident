@@ -48,8 +48,18 @@ const appointmentSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Prevent exact duplicate slot booking for the same dentist
+// Regular lookup index (fast queries for slot generation / dentist schedule)
 appointmentSchema.index({ dentist: 1, date: 1, startTime: 1, status: 1 });
 appointmentSchema.index({ patient: 1, date: -1 });
+
+// HARD double-booking guard at the database level. This is a *partial* unique index:
+// it only enforces uniqueness among documents where status is pending/confirmed, so
+// cancelled/completed/rescheduled appointments never block the same slot being reused.
+// Even if two requests race past the application-level assertSlotIsFree() check at the
+// exact same instant, MongoDB itself will reject the second insert with an E11000 error.
+appointmentSchema.index(
+  { dentist: 1, date: 1, startTime: 1 },
+  { unique: true, partialFilterExpression: { status: { $in: ['pending', 'confirmed'] } } }
+);
 
 module.exports = mongoose.model('Appointment', appointmentSchema);

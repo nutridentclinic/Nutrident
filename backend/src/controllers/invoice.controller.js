@@ -5,6 +5,7 @@ const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/appError');
 const { success } = require('../utils/response');
 const generateInvoiceNumber = require('../utils/generateInvoiceNumber');
+const { generateInvoicePDF } = require('../services/pdf.service');
 
 // @route POST /api/invoices  (receptionist/dentist generates an invoice, e.g. after in-clinic treatment)
 exports.createInvoice = catchAsync(async (req, res, next) => {
@@ -64,6 +65,20 @@ exports.getInvoiceById = catchAsync(async (req, res, next) => {
     return next(new AppError('You do not have access to this invoice.', 403));
   }
   success(res, 200, 'Invoice fetched.', invoice);
+});
+
+// @route GET /api/invoices/:id/pdf  - streams a PDF download of the invoice
+exports.downloadInvoicePDF = catchAsync(async (req, res, next) => {
+  const invoice = await Invoice.findById(req.params.id).populate('patient', 'name email phone');
+  if (!invoice) return next(new AppError('Invoice not found.', 404));
+
+  if (req.user.role === 'patient' && !invoice.patient._id.equals(req.user._id)) {
+    return next(new AppError('You do not have access to this invoice.', 403));
+  }
+
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="${invoice.invoiceNumber}.pdf"`);
+  await generateInvoicePDF(invoice, res);
 });
 
 // NOTE: PDF generation/download endpoint intentionally left out for now -

@@ -11,6 +11,7 @@
   "author": "DrNutrident",
   "license": "ISC",
   "dependencies": {
+    "agora-token": "^2.0.6",
     "bcrypt": "^6.0.0",
     "cloudinary": "^1.41.3",
     "compression": "^1.8.2",
@@ -30,6 +31,7 @@
     "multer-storage-cloudinary": "^4.0.0",
     "node-cron": "^4.6.0",
     "nodemailer": "^10.0.10",
+    "pdfkit": "^0.20.2",
     "razorpay": "^2.9.8",
     "socket.io": "^4.8.3",
     "xss-clean": "^0.1.4"

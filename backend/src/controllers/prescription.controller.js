@@ -4,6 +4,7 @@ const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/appError');
 const { success } = require('../utils/response');
 const { notify } = require('../services/notification.service');
+const { generatePrescriptionPDF } = require('../services/pdf.service');
 
 // @route POST /api/prescriptions  (dentist creates)
 exports.createPrescription = catchAsync(async (req, res, next) => {
@@ -53,4 +54,20 @@ exports.getPrescriptionById = catchAsync(async (req, res, next) => {
     .populate({ path: 'dentist', populate: { path: 'user', select: 'name' } });
   if (!prescription) return next(new AppError('Prescription not found.', 404));
   success(res, 200, 'Prescription fetched.', prescription);
+});
+
+// @route GET /api/prescriptions/:id/pdf  - streams a PDF download of the prescription
+exports.downloadPrescriptionPDF = catchAsync(async (req, res, next) => {
+  const prescription = await Prescription.findById(req.params.id)
+    .populate('patient', 'name phone')
+    .populate({ path: 'dentist', populate: { path: 'user', select: 'name' } });
+  if (!prescription) return next(new AppError('Prescription not found.', 404));
+
+  if (req.user.role === 'patient' && !prescription.patient._id.equals(req.user._id)) {
+    return next(new AppError('You do not have access to this prescription.', 403));
+  }
+
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="prescription-${prescription._id}.pdf"`);
+  await generatePrescriptionPDF(prescription, res);
 });

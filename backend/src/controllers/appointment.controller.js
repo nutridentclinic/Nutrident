@@ -6,6 +6,21 @@ const AppError = require('../utils/appError');
 const { success } = require('../utils/response');
 const { assertSlotIsFree } = require('../services/availability.service');
 const { notify } = require('../services/notification.service');
+const { generateAgoraToken, mongoIdToAgoraUid, isConfigured } = require('../config/agora');
+
+// Wraps Appointment.create() so a race-condition duplicate (caught by the DB's
+// partial unique index, not just the application-level assertSlotIsFree check)
+// comes back as a clean 409 instead of a raw MongoDB E11000 error.
+const createAppointmentSafe = async (data) => {
+  try {
+    return await Appointment.create(data);
+  } catch (err) {
+    if (err.code === 11000) {
+      throw new AppError('This slot was just booked by someone else. Please choose another slot.', 409);
+    }
+    throw err;
+  }
+};
 
 // @route POST /api/appointments  (patient books an appointment)
 exports.createAppointment = catchAsync(async (req, res, next) => {
@@ -242,20 +257,32 @@ exports.markNoShow = catchAsync(async (req, res, next) => {
 });
 
 // @route POST /api/appointments/:id/video/join  (returns/creates a room id)
+// @route POST /api/appointments/:id/video/join  (returns an Agora token to join the call)
 exports.joinVideoCall = catchAsync(async (req, res, next) => {
   const appointment = await Appointment.findById(req.params.id).populate('dentist');
   if (!appointment) return next(new AppError('Appointment not found.', 404));
   if (appointment.mode !== 'video') return next(new AppError('This appointment is not a video consultation.', 400));
   if (appointment.status !== 'confirmed') return next(new AppError('Appointment is not confirmed yet.', 400));
+  if (!isConfigured()) return next(new AppError('Video calling is not configured on the server yet.', 503));
 
+  // One Agora channel per appointment - both sides join the same channel name.
+  const channelName = `appt_${appointment._id}`;
   if (!appointment.videoCall.roomId) {
-    appointment.videoCall.roomId = `room_${appointment._id}_${Date.now()}`;
+    appointment.videoCall.roomId = channelName;
   }
   if (req.user.role === 'patient') appointment.videoCall.joinedByPatientAt = new Date();
   if (req.user.role === 'dentist') appointment.videoCall.joinedByDentistAt = new Date();
   await appointment.save();
 
-  // NOTE: roomId is a logical identifier only. Actual video/audio transport
-  // (WebRTC/Agora/Twilio Video etc.) is a separate integration - flag before adding.
-  success(res, 200, 'Video call room ready.', { roomId: appointment.videoCall.roomId });
+  const uid = mongoIdToAgoraUid(req.user._id);
+  const token = generateAgoraToken(channelName, uid);
+  if (!token) return next(new AppError('Could not generate a video call token. Please try again.', 500));
+
+  success(res, 200, 'Video call token issued.', {
+    appId: process.env.AGORA_APP_ID,
+    channelName,
+    uid,
+    token,
+    expiresInSeconds: 7200,
+  });
 });

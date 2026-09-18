@@ -7,5 +7,6 @@ router.use(protect);
 router.post('/', restrictTo('dentist', 'receptionist', 'admin'), ctrl.createInvoice);
 router.get('/me', restrictTo('patient'), ctrl.getMyInvoices);
 router.get('/:id', ctrl.getInvoiceById);
+router.get('/:id/pdf', ctrl.downloadInvoicePDF);
 
 module.exports = router;
