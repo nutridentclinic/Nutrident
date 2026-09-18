@@ -8,6 +8,7 @@ const AppError = require('../utils/appError');
 const { success } = require('../utils/response');
 const { notify } = require('../services/notification.service');
 const logger = require('../utils/logger');
+const { processRefund } = require('../services/payment.service');
 
 // @route POST /api/payments/create-order
 // Body: { appointmentId }  -> creates a Razorpay order for that appointment's total amount
@@ -160,40 +161,18 @@ exports.razorpayWebhook = catchAsync(async (req, res) => {
 
 // @route POST /api/payments/:id/refund  (admin/dentist initiates refund, e.g. on cancellation)
 exports.refundPayment = catchAsync(async (req, res, next) => {
-  const { amount, reason } = req.body; // amount in rupees, optional (defaults to full)
+  const { amount, reason } = req.body;
   const payment = await Payment.findById(req.params.id);
   if (!payment) return next(new AppError('Payment not found.', 404));
-  if (payment.status !== 'paid') return next(new AppError('Only completed payments can be refunded.', 400));
 
-  const refundAmountPaise = amount ? Math.round(amount * 100) : undefined;
-
-  const refund = await razorpay.payments.refund(payment.razorpayPaymentId, {
-    amount: refundAmountPaise, // omit for full refund
-    notes: { reason: reason || 'Requested by clinic' },
-  });
-
-  payment.status = amount && amount < payment.amount ? 'partially_refunded' : 'refunded';
-  payment.refund = {
-    amount: amount || payment.amount,
-    razorpayRefundId: refund.id,
-    reason: reason || '',
-    refundedAt: new Date(),
-  };
-  await payment.save();
-
-  if (payment.appointment) {
-    await Appointment.findByIdAndUpdate(payment.appointment, { paymentStatus: 'refunded' });
+  let updated;
+  try {
+    updated = await processRefund(payment, amount, reason || 'Requested by clinic');
+  } catch (err) {
+    return next(err);
   }
 
-  await notify({
-    userId: payment.patient,
-    title: 'Payment Refunded',
-    message: `₹${amount || payment.amount} has been refunded to your original payment method.`,
-    type: 'payment_refund',
-    relatedId: payment._id,
-  });
-
-  success(res, 200, 'Refund processed.', payment);
+  success(res, 200, 'Refund processed.', updated);
 });
 
 // @route GET /api/payments/me

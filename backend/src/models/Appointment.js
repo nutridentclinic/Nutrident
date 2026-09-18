@@ -13,6 +13,8 @@ const appointmentSchema = new mongoose.Schema(
     mode: { type: String, enum: ['in-clinic', 'video', 'audio'], default: 'in-clinic' },
     reasonForVisit: { type: String, trim: true, default: '' },
 
+    clinic: { type: mongoose.Schema.Types.ObjectId, ref: 'Clinic', default: null },
+
     status: {
       type: String,
       enum: ['pending', 'confirmed', 'cancelled', 'rescheduled', 'completed', 'no-show'],
@@ -61,5 +63,7 @@ appointmentSchema.index(
   { dentist: 1, date: 1, startTime: 1 },
   { unique: true, partialFilterExpression: { status: { $in: ['pending', 'confirmed'] } } }
 );
+
+appointmentSchema.index({ clinic: 1, date: -1 });
 
 module.exports = mongoose.model('Appointment', appointmentSchema);

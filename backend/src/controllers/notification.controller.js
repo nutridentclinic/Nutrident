@@ -36,3 +36,17 @@ exports.updateFcmToken = catchAsync(async (req, res) => {
   await User.findByIdAndUpdate(req.user._id, { fcmToken: req.body.fcmToken });
   success(res, 200, 'Device token saved.');
 });
+
+
+exports.getPreferences = catchAsync(async (req, res) => {
+  success(res, 200, 'Preferences fetched.', req.user.notificationPreferences);
+});
+
+exports.updatePreferences = catchAsync(async (req, res) => {
+  const updates = {};
+  if (typeof req.body.push === 'boolean') updates['notificationPreferences.push'] = req.body.push;
+  if (typeof req.body.email === 'boolean') updates['notificationPreferences.email'] = req.body.email;
+
+  const user = await User.findByIdAndUpdate(req.user._id, updates, { new: true }).select('notificationPreferences');
+  success(res, 200, 'Preferences updated.', user.notificationPreferences);
+});

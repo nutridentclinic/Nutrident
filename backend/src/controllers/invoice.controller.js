@@ -1,5 +1,5 @@
 const Invoice = require('../models/Invoice');
-const Coupon = require('../models/Coupon');
+const { checkCoupon, recordCouponUsage } = require('../services/coupon.service');
 const ClinicSettings = require('../models/ClinicSettings');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/appError');

@@ -57,6 +57,8 @@ app.use('/api/notifications', require('./routes/notification.routes'));
 app.use('/api/queue', require('./routes/queue.routes'));
 app.use('/api/dashboard', require('./routes/dashboard.routes'));
 app.use('/api/clinic-settings', require('./routes/clinicSettings.routes'));
+app.use('/api/staff', require('./routes/staff.routes'));
+app.use('/api/clinics', require('./routes/clinic.routes'));
 
 app.use(notFound);
 app.use(errorMiddleware);

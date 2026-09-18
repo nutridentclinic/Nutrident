@@ -20,6 +20,7 @@ const dentistSchema = new mongoose.Schema(
         coordinates: { type: [Number], default: [0, 0] }, // [lng, lat]
       },
     },
+    clinic: { type: mongoose.Schema.Types.ObjectId, ref: 'Clinic', default: null },
     isVerified: { type: Boolean, default: false }, // admin approves credentials
     isActive: { type: Boolean, default: true }, // can toggle "accepting appointments"
     ratingAverage: { type: Number, default: 0, min: 0, max: 5 },
@@ -47,5 +48,6 @@ const dentistSchema = new mongoose.Schema(
 
 dentistSchema.index({ 'clinicAddress.location': '2dsphere' });
 dentistSchema.index({ specialization: 1 });
+dentistSchema.index({ clinic: 1 });
 
 module.exports = mongoose.model('Dentist', dentistSchema);

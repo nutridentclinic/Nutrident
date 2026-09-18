@@ -13,6 +13,7 @@ const clinicSettingsSchema = new mongoose.Schema(
     taxPercentage: { type: Number, default: 0 },
     currency: { type: String, default: 'INR' },
     reminderHoursBefore: { type: Number, default: 24 },
+    cancellationFullRefundHours: { type: Number, default: 24 },
   },
   { timestamps: true }
 );

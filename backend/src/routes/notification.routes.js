@@ -7,5 +7,7 @@ router.get('/me', ctrl.getMyNotifications);
 router.patch('/:id/read', ctrl.markAsRead);
 router.patch('/read-all', ctrl.markAllAsRead);
 router.put('/fcm-token', ctrl.updateFcmToken);
+router.get('/preferences', ctrl.getPreferences);
+router.patch('/preferences', ctrl.updatePreferences);
 
 module.exports = router;

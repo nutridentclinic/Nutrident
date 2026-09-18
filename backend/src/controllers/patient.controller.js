@@ -3,6 +3,7 @@ const User = require('../models/User');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/appError');
 const { success } = require('../utils/response');
+const { deleteCloudinaryFile } = require('../utils/cloudinaryCleanup');
 
 // @route GET /api/patients/me
 exports.getMyProfile = catchAsync(async (req, res, next) => {
@@ -34,10 +35,15 @@ exports.updateBasicInfo = catchAsync(async (req, res) => {
   allowed.forEach((f) => {
     if (req.body[f] !== undefined) updates[f] = req.body[f];
   });
+
+  let oldPhotoPublicId = null;
   if (req.file) {
+    oldPhotoPublicId = req.user.profilePhoto?.publicId || null;
     updates.profilePhoto = { url: req.file.path, publicId: req.file.filename };
   }
+
   const user = await User.findByIdAndUpdate(req.user._id, updates, { new: true }).select('-password');
+  if (oldPhotoPublicId) await deleteCloudinaryFile(oldPhotoPublicId);
   success(res, 200, 'Basic info updated.', user);
 });
 

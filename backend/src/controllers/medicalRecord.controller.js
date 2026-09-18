@@ -2,6 +2,7 @@ const MedicalRecord = require('../models/MedicalRecord');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/appError');
 const { success } = require('../utils/response');
+const { deleteCloudinaryFile } = require('../utils/cloudinaryCleanup');
 
 // @route POST /api/medical-records  (dentist/patient uploads a file - multipart/form-data, field "file")
 exports.uploadRecord = catchAsync(async (req, res, next) => {
@@ -50,6 +51,7 @@ exports.deleteRecord = catchAsync(async (req, res, next) => {
   }
 
   // NOTE: also delete from Cloudinary using record.file.publicId via cloudinary.uploader.destroy()
-  await record.deleteOne();
+    await record.deleteOne();
+  await deleteCloudinaryFile(record.file.publicId);
   success(res, 200, 'Medical record deleted.');
 });

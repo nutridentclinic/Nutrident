@@ -2,6 +2,7 @@ const Coupon = require('../models/Coupon');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/appError');
 const { success } = require('../utils/response');
+const { checkCoupon } = require('../services/coupon.service');
 
 // @route POST /api/coupons  (admin)
 exports.createCoupon = catchAsync(async (req, res) => {
@@ -16,24 +17,22 @@ exports.getAllCoupons = catchAsync(async (req, res) => {
 });
 
 // @route POST /api/coupons/validate  (patient checks a code before checkout)
+// Note: this only PREVIEWS the discount - it does not consume usage. Usage is
+// only recorded when the coupon is actually applied via invoice creation.
 exports.validateCoupon = catchAsync(async (req, res, next) => {
   const { code, orderAmount } = req.body;
-  const coupon = await Coupon.findOne({ code: code.toUpperCase(), isActive: true });
-  if (!coupon) return next(new AppError('Invalid coupon code.', 404));
-  if (coupon.validUntil < new Date()) return next(new AppError('Coupon has expired.', 400));
-  if (orderAmount < coupon.minOrderAmount) {
-    return next(new AppError(`Minimum order amount for this coupon is ₹${coupon.minOrderAmount}.`, 400));
-  }
-  if (coupon.usageLimit && coupon.usedCount >= coupon.usageLimit) {
-    return next(new AppError('This coupon has reached its usage limit.', 400));
+
+  let result;
+  try {
+    result = await checkCoupon(code, req.user._id, orderAmount);
+  } catch (err) {
+    return next(err);
   }
 
-  const discount =
-    coupon.discountType === 'flat'
-      ? coupon.discountValue
-      : Math.min((orderAmount * coupon.discountValue) / 100, coupon.maxDiscountAmount || Infinity);
-
-  success(res, 200, 'Coupon is valid.', { discount, finalAmount: Math.max(orderAmount - discount, 0) });
+  success(res, 200, 'Coupon is valid.', {
+    discount: result.discount,
+    finalAmount: Math.max(orderAmount - result.discount, 0),
+  });
 });
 
 // @route PATCH /api/coupons/:id  (admin)

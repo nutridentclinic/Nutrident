@@ -44,6 +44,10 @@ const userSchema = new mongoose.Schema(
 
     otpHash: { type: String, select: false },
     otpExpires: { type: Date, select: false },
+    notificationPreferences: {
+      push: { type: Boolean, default: true },
+      email: { type: Boolean, default: true },
+    },
   },
   { timestamps: true }
 );
