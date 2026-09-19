@@ -31,22 +31,26 @@ exports.markAllAsRead = catchAsync(async (req, res) => {
 });
 
 // @route PUT /api/notifications/fcm-token  (app calls this once it has a device FCM token)
-// Kept ready for when push notifications are enabled - currently just stores the token.
 exports.updateFcmToken = catchAsync(async (req, res) => {
   await User.findByIdAndUpdate(req.user._id, { fcmToken: req.body.fcmToken });
   success(res, 200, 'Device token saved.');
 });
 
-
+// @route GET /api/notifications/preferences
 exports.getPreferences = catchAsync(async (req, res) => {
   success(res, 200, 'Preferences fetched.', req.user.notificationPreferences);
 });
 
+// @route PATCH /api/notifications/preferences
+// Body: { push?: boolean, email?: boolean }  - in-app notifications can't be disabled,
+// they're the source of truth the notification list is built from.
 exports.updatePreferences = catchAsync(async (req, res) => {
   const updates = {};
   if (typeof req.body.push === 'boolean') updates['notificationPreferences.push'] = req.body.push;
   if (typeof req.body.email === 'boolean') updates['notificationPreferences.email'] = req.body.email;
 
-  const user = await User.findByIdAndUpdate(req.user._id, updates, { new: true }).select('notificationPreferences');
+  const user = await User.findByIdAndUpdate(req.user._id, updates, { new: true }).select(
+    'notificationPreferences'
+  );
   success(res, 200, 'Preferences updated.', user.notificationPreferences);
 });

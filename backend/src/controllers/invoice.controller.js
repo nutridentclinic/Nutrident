@@ -1,11 +1,11 @@
 const Invoice = require('../models/Invoice');
-const { checkCoupon, recordCouponUsage } = require('../services/coupon.service');
 const ClinicSettings = require('../models/ClinicSettings');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/appError');
 const { success } = require('../utils/response');
 const generateInvoiceNumber = require('../utils/generateInvoiceNumber');
 const { generateInvoicePDF } = require('../services/pdf.service');
+const { checkCoupon, recordCouponUsage } = require('../services/coupon.service');
 
 // @route POST /api/invoices  (receptionist/dentist generates an invoice, e.g. after in-clinic treatment)
 exports.createInvoice = catchAsync(async (req, res, next) => {
@@ -13,20 +13,16 @@ exports.createInvoice = catchAsync(async (req, res, next) => {
 
   const subTotal = items.reduce((sum, i) => sum + i.unitPrice * (i.quantity || 1), 0);
   let discount = 0;
+  let appliedCoupon = null;
 
   if (couponCode) {
-    const coupon = await Coupon.findOne({ code: couponCode.toUpperCase(), isActive: true });
-    if (!coupon) return next(new AppError('Invalid or expired coupon code.', 400));
-    if (coupon.validUntil < new Date()) return next(new AppError('Coupon has expired.', 400));
-    if (subTotal < coupon.minOrderAmount) {
-      return next(new AppError(`Minimum order amount for this coupon is ₹${coupon.minOrderAmount}.`, 400));
+    try {
+      const result = await checkCoupon(couponCode, patientId, subTotal);
+      discount = result.discount;
+      appliedCoupon = result.coupon;
+    } catch (err) {
+      return next(err); // AppError from checkCoupon (invalid/expired/limit reached etc.)
     }
-    discount =
-      coupon.discountType === 'flat'
-        ? coupon.discountValue
-        : Math.min((subTotal * coupon.discountValue) / 100, coupon.maxDiscountAmount || Infinity);
-    coupon.usedCount += 1;
-    await coupon.save();
   }
 
   const settings = (await ClinicSettings.findById('default')) || { taxPercentage: 0 };
@@ -46,6 +42,9 @@ exports.createInvoice = catchAsync(async (req, res, next) => {
     tax,
     totalAmount,
   });
+
+  // Only record usage now that the invoice has actually been created successfully
+  if (appliedCoupon) await recordCouponUsage(appliedCoupon._id, patientId);
 
   success(res, 201, 'Invoice created.', invoice);
 });
@@ -80,6 +79,3 @@ exports.downloadInvoicePDF = catchAsync(async (req, res, next) => {
   res.setHeader('Content-Disposition', `attachment; filename="${invoice.invoiceNumber}.pdf"`);
   await generateInvoicePDF(invoice, res);
 });
-
-// NOTE: PDF generation/download endpoint intentionally left out for now -
-// would add 'pdfkit' or 'puppeteer' as a new dependency. Flag before adding.

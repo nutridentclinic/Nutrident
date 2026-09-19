@@ -53,6 +53,11 @@ exports.getPrescriptionById = catchAsync(async (req, res, next) => {
     .populate('patient', 'name phone')
     .populate({ path: 'dentist', populate: { path: 'user', select: 'name' } });
   if (!prescription) return next(new AppError('Prescription not found.', 404));
+
+  if (req.user.role === 'patient' && !prescription.patient._id.equals(req.user._id)) {
+    return next(new AppError('You do not have access to this prescription.', 403));
+  }
+
   success(res, 200, 'Prescription fetched.', prescription);
 });
 

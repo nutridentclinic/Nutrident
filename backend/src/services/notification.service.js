@@ -44,9 +44,11 @@ const notify = async ({ userId, title, message, type, relatedId = null }) => {
   // Fire and forget - don't block the main request on this
   if (isConfigured()) {
     User.findById(userId)
-      .select('fcmToken')
+      .select('fcmToken notificationPreferences')
       .then((user) => {
-        if (user?.fcmToken) sendPush({ fcmToken: user.fcmToken, title, message });
+        if (user?.fcmToken && user.notificationPreferences?.push !== false) {
+          sendPush({ fcmToken: user.fcmToken, title, message });
+        }
       })
       .catch((e) => logger.error(e.message));
   }

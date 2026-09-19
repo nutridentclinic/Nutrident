@@ -1,11 +1,14 @@
 const Appointment = require('../models/Appointment');
 const Dentist = require('../models/Dentist');
 const ClinicSettings = require('../models/ClinicSettings');
+const Payment = require('../models/Payment');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/appError');
+const logger = require('../utils/logger');
 const { success } = require('../utils/response');
-const { assertSlotIsFree } = require('../services/availability.service');
+const { assertSlotIsFree, getAvailableSlots } = require('../services/availability.service');
 const { notify } = require('../services/notification.service');
+const { processRefund } = require('../services/payment.service');
 const { generateAgoraToken, mongoIdToAgoraUid, isConfigured } = require('../config/agora');
 
 // Wraps Appointment.create() so a race-condition duplicate (caught by the DB's
@@ -31,7 +34,17 @@ exports.createAppointment = catchAsync(async (req, res, next) => {
     return next(new AppError('This dentist is not available for booking.', 400));
   }
 
-  // Re-validate the slot is still free right before creating (race-condition guard)
+  // Confirm the requested date/time is actually one of the dentist's published,
+  // still-open slots - not just "not already booked" (assertSlotIsFree below only
+  // catches the latter). Without this, a client could book any arbitrary time,
+  // including outside the dentist's working hours or on a day off.
+  const publishedSlots = await getAvailableSlots(dentistId, date);
+  if (!publishedSlots.some((s) => s.startTime === startTime)) {
+    return next(new AppError('This slot is not available for booking.', 400));
+  }
+
+  // Re-validate the slot is still free right before creating (closes the race-condition
+  // window between the availability check above and this insert)
   await assertSlotIsFree(dentistId, date, startTime);
 
   const duration = dentist.slotDurationMinutes || 30;
@@ -43,10 +56,11 @@ exports.createAppointment = catchAsync(async (req, res, next) => {
   const consultationFee = dentist.consultationFee;
   const platformFee = settings.platformFee || 0;
 
-  const appointment = await Appointment.create({
+  const appointment = await createAppointmentSafe({
     patient: req.user._id,
     familyMemberName: familyMemberName || null,
     dentist: dentistId,
+    clinic: dentist.clinic || null, // denormalized for fast per-branch reporting
     date,
     startTime,
     endTime,
@@ -170,10 +184,43 @@ exports.cancelAppointment = catchAsync(async (req, res, next) => {
   appointment.cancellationReason = reason || '';
   await appointment.save();
 
+  // --- Auto-refund policy ---
+  // If the appointment was already paid, and it's being cancelled far enough in
+  // advance (per ClinicSettings.cancellationFullRefundHours, default 24h), refund
+  // it automatically. Cancellations inside that window are left as 'paid' for
+  // staff to review manually via POST /api/payments/:id/refund - e.g. a same-day
+  // cancellation might still warrant a partial/no refund depending on clinic policy.
+  let wasAutoRefunded = false;
+  if (appointment.paymentStatus === 'paid' && appointment.payment) {
+    const settings = (await ClinicSettings.findById('default')) || { cancellationFullRefundHours: 24 };
+    const apptDateTime = new Date(appointment.date);
+    const [h, m] = appointment.startTime.split(':').map(Number);
+    apptDateTime.setHours(h, m, 0, 0);
+    const hoursUntilAppointment = (apptDateTime.getTime() - Date.now()) / (1000 * 60 * 60);
+
+    if (hoursUntilAppointment >= (settings.cancellationFullRefundHours ?? 24)) {
+      try {
+        const payment = await Payment.findById(appointment.payment);
+        if (payment && payment.status === 'paid') {
+          await processRefund(payment, null, `Auto-refund: cancelled by ${appointment.cancelledBy}`);
+          appointment.paymentStatus = 'refunded';
+          await appointment.save();
+          wasAutoRefunded = true;
+        }
+      } catch (err) {
+        // Don't fail the cancellation itself if the refund call errors out -
+        // staff can still process it manually. Just log it clearly.
+        logger.error(`Auto-refund failed for appointment ${appointment._id}: ${err.message}`);
+      }
+    }
+  }
+
   await notify({
     userId: appointment.patient,
     title: 'Appointment Cancelled',
-    message: `Your appointment on ${appointment.date.toDateString()} at ${appointment.startTime} has been cancelled.`,
+    message: wasAutoRefunded
+      ? `Your appointment on ${appointment.date.toDateString()} at ${appointment.startTime} has been cancelled and refunded.`
+      : `Your appointment on ${appointment.date.toDateString()} at ${appointment.startTime} has been cancelled.`,
     type: 'appointment_cancelled',
     relatedId: appointment._id,
   });
@@ -190,6 +237,11 @@ exports.rescheduleAppointment = catchAsync(async (req, res, next) => {
     return next(new AppError(`Cannot reschedule an appointment that is ${oldAppointment.status}.`, 400));
   }
 
+  const publishedSlots = await getAvailableSlots(oldAppointment.dentist, date);
+  if (!publishedSlots.some((s) => s.startTime === startTime)) {
+    return next(new AppError('This slot is not available for booking.', 400));
+  }
+
   await assertSlotIsFree(oldAppointment.dentist, date, startTime);
 
   const dentist = await Dentist.findById(oldAppointment.dentist);
@@ -198,10 +250,11 @@ exports.rescheduleAppointment = catchAsync(async (req, res, next) => {
   const endMinutes = h * 60 + m + duration;
   const endTime = `${String(Math.floor(endMinutes / 60)).padStart(2, '0')}:${String(endMinutes % 60).padStart(2, '0')}`;
 
-  const newAppointment = await Appointment.create({
+  const newAppointment = await createAppointmentSafe({
     patient: oldAppointment.patient,
     familyMemberName: oldAppointment.familyMemberName,
     dentist: oldAppointment.dentist,
+    clinic: oldAppointment.clinic,
     date,
     startTime,
     endTime,
@@ -256,7 +309,6 @@ exports.markNoShow = catchAsync(async (req, res, next) => {
   success(res, 200, 'Appointment marked as no-show.', appointment);
 });
 
-// @route POST /api/appointments/:id/video/join  (returns/creates a room id)
 // @route POST /api/appointments/:id/video/join  (returns an Agora token to join the call)
 exports.joinVideoCall = catchAsync(async (req, res, next) => {
   const appointment = await Appointment.findById(req.params.id).populate('dentist');

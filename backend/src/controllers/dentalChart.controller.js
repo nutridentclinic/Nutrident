@@ -1,9 +1,15 @@
 const DentalChart = require('../models/DentalChart');
 const catchAsync = require('../utils/catchAsync');
+const AppError = require('../utils/appError');
 const { success } = require('../utils/response');
 
 // @route GET /api/dental-charts/:patientId
-exports.getChart = catchAsync(async (req, res) => {
+exports.getChart = catchAsync(async (req, res, next) => {
+  // A patient can only view their own chart; staff roles can view any.
+  if (req.user.role === 'patient' && req.params.patientId !== String(req.user._id)) {
+    return next(new AppError('You do not have access to this dental chart.', 403));
+  }
+
   let chart = await DentalChart.findOne({ patient: req.params.patientId });
   if (!chart) {
     chart = await DentalChart.create({ patient: req.params.patientId, teeth: [] });
