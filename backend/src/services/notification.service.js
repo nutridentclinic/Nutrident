@@ -1,7 +1,7 @@
 const Notification = require('../models/Notification');
 const User = require('../models/User');
 const logger = require('../utils/logger');
-const { admin, isConfigured } = require('../config/firebase');
+const { messaging, isConfigured } = require('../config/firebase');
 
 /**
  * Central notification service.
@@ -23,7 +23,7 @@ const createInApp = async ({ userId, title, message, type, relatedId = null }) =
 const sendPush = async ({ fcmToken, title, message }) => {
   if (!isConfigured() || !fcmToken) return null;
   try {
-    return await admin.messaging().send({
+    return await messaging().send({
       token: fcmToken,
       notification: { title, body: message },
     });

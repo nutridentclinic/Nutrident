@@ -8,7 +8,7 @@ const { success } = require('../utils/response');
 const { signAccessToken, signRefreshToken, verifyRefreshToken } = require('../utils/generateToken');
 const { generateOTP, hashOTP } = require('../utils/generateOTP');
 const { sendEmail } = require('../config/email');
-const { admin, isConfigured } = require('../config/firebase');
+const { auth: firebaseAuth, isConfigured } = require('../config/firebase');
 
 const issueTokens = (user) => {
     const payload = { id: user._id, role: user.role };
@@ -200,7 +200,7 @@ exports.verifyPhone = catchAsync(async (req, res, next) => {
 
   let decoded;
   try {
-    decoded = await admin.auth().verifyIdToken(idToken);
+    decoded = await firebaseAuth().verifyIdToken(idToken);
   } catch (err) {
     return next(new AppError('Invalid or expired Firebase token.', 401));
   }
