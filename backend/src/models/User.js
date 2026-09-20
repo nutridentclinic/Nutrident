@@ -52,11 +52,12 @@ const userSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-userSchema.pre('save', async function (next) {
-  if (!this.isModified('password')) return next();
+// Mongoose 9 removed the next() callback from pre middleware entirely - async
+// functions now just return/throw normally, no next parameter, no next() calls.
+userSchema.pre('save', async function () {
+  if (!this.isModified('password')) return;
   this.password = await bcrypt.hash(this.password, Number(process.env.BCRYPT_SALT_ROUNDS) || 10);
   if (!this.isNew) this.passwordChangedAt = Date.now() - 1000;
-  next();
 });
 
 userSchema.methods.comparePassword = async function (candidatePassword) {
