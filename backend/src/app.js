@@ -3,8 +3,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const compression = require('compression');
-const mongoSanitize = require('express-mongo-sanitize');
-const xss = require('xss-clean');
+const sanitizeInput = require('./middleware/sanitize.middleware');
 
 const errorMiddleware = require('./middleware/error.middleware');
 const notFound = require('./middleware/notFound.middleware');
@@ -31,8 +30,7 @@ app.post('/api/payments/webhook', express.raw({ type: 'application/json' }), raz
 // --- Standard body parsing for every other route ---
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
-app.use(mongoSanitize());
-app.use(xss());
+app.use(sanitizeInput);
 
 app.use('/api', apiLimiter);
 
