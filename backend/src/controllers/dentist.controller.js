@@ -1,10 +1,12 @@
 const User = require('../models/User');
 const Dentist = require('../models/Dentist');
 const Review = require('../models/Review');
+const Appointment = require('../models/Appointment');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/appError');
 const { success } = require('../utils/response');
 const { getAvailableSlots } = require('../services/availability.service');
+const escapeRegex = require('../utils/escapeRegex');
 
 // @route POST /api/dentists  (admin only) - onboard a new dentist
 exports.createDentist = catchAsync(async (req, res, next) => {
@@ -25,7 +27,9 @@ exports.createDentist = catchAsync(async (req, res, next) => {
     clinicAddress,
   });
 
-  success(res, 201, 'Dentist onboarded successfully. Pending credential verification.', { user, dentist });
+  const safeUser = user.toObject();
+  delete safeUser.password;
+  success(res, 201, 'Dentist onboarded successfully. Pending credential verification.', { user: safeUser, dentist });
 });
 
 // @route GET /api/dentists  - search/filter/discover dentists
@@ -33,8 +37,8 @@ exports.getDentists = catchAsync(async (req, res) => {
   const { specialization, city, minRating, maxFee, search, sort = '-ratingAverage', page = 1, limit = 10 } = req.query;
 
   const filter = { isActive: true, isVerified: true };
-  if (specialization) filter.specialization = new RegExp(specialization, 'i');
-  if (city) filter['clinicAddress.city'] = new RegExp(city, 'i');
+  if (specialization) filter.specialization = new RegExp(escapeRegex(specialization), 'i');
+  if (city) filter['clinicAddress.city'] = new RegExp(escapeRegex(city), 'i');
   if (minRating) filter.ratingAverage = { $gte: Number(minRating) };
   if (maxFee) filter.consultationFee = { ...(filter.consultationFee || {}), $lte: Number(maxFee) };
 
@@ -42,7 +46,7 @@ exports.getDentists = catchAsync(async (req, res) => {
 
   if (search) {
     // basic name search via populated user - fetch matching user ids first
-    const users = await User.find({ name: new RegExp(search, 'i'), role: 'dentist' }).select('_id');
+    const users = await User.find({ name: new RegExp(escapeRegex(search), 'i'), role: 'dentist' }).select('_id');
     query = Dentist.find({ ...filter, user: { $in: users.map((u) => u._id) } }).populate(
       'user',
       'name profilePhoto phone email'
@@ -143,4 +147,40 @@ exports.verifyDentist = catchAsync(async (req, res, next) => {
   const dentist = await Dentist.findByIdAndUpdate(req.params.id, { isVerified: true }, { new: true });
   if (!dentist) return next(new AppError('Dentist not found.', 404));
   success(res, 200, 'Dentist verified.', dentist);
+});
+
+// @route GET /api/dentists/admin/all (admin-only directory with unverified profiles)
+exports.getAllDentistsAdmin = catchAsync(async (req, res) => {
+  const { isVerified, isActive, search, page = 1, limit = 20 } = req.query;
+  const filter = {};
+  if (isVerified === 'true' || isVerified === 'false') filter.isVerified = isVerified === 'true';
+  if (isActive === 'true' || isActive === 'false') filter.isActive = isActive === 'true';
+  if (search) {
+    const users = await User.find({ name: new RegExp(escapeRegex(search), 'i'), role: 'dentist' }).select('_id');
+    filter.user = { $in: users.map((user) => user._id) };
+  }
+
+  const currentPage = Math.max(1, Number(page) || 1);
+  const pageSize = Math.min(100, Math.max(1, Number(limit) || 20));
+  const [dentists, total] = await Promise.all([
+    Dentist.find(filter)
+      .populate('user', 'name profilePhoto phone email active')
+      .sort('-createdAt')
+      .skip((currentPage - 1) * pageSize)
+      .limit(pageSize),
+    Dentist.countDocuments(filter),
+  ]);
+
+  success(res, 200, 'Dentists fetched.', dentists, { total, page: currentPage, limit: pageSize });
+});
+
+// @route GET /api/dentists/me/patients (E2 - unique patients in this dentist's schedule)
+exports.getMyPatients = catchAsync(async (req, res, next) => {
+  const dentist = await Dentist.findOne({ user: req.user._id });
+  if (!dentist) return next(new AppError('Dentist profile not found.', 404));
+  const patientIds = await Appointment.distinct('patient', { dentist: dentist._id });
+  const patients = await User.find({ _id: { $in: patientIds }, role: 'patient' })
+    .select('name email phone profilePhoto')
+    .sort('name');
+  success(res, 200, 'Patients fetched.', patients);
 });

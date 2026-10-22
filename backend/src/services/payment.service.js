@@ -4,20 +4,27 @@ const AppError = require('../utils/appError');
 const { notify } = require('./notification.service');
 
 const processRefund = async (payment, amount, reason) => {
-  if (payment.status !== 'paid') {
-    throw new AppError('Only completed payments can be refunded.', 400);
+  if (!['paid', 'partially_refunded'].includes(payment.status)) {
+    throw new AppError('Only paid payments can be refunded.', 400);
   }
 
-  const refundAmountPaise = amount ? Math.round(amount * 100) : undefined;
+  const alreadyRefunded = Number(payment.refund?.amount || 0);
+  const remaining = Math.max(0, Number(payment.amount) - alreadyRefunded);
+  const requestedAmount = amount == null ? remaining : Number(amount);
+  if (!Number.isFinite(requestedAmount) || requestedAmount <= 0 || requestedAmount > remaining) {
+    throw new AppError('Refund amount must be greater than zero and no more than the remaining balance.', 400);
+  }
+  const refundAmountPaise = Math.round(requestedAmount * 100);
 
   const refund = await razorpay.payments.refund(payment.razorpayPaymentId, {
     amount: refundAmountPaise,
     notes: { reason: reason || 'Refund' },
   });
 
-  payment.status = amount && amount < payment.amount ? 'partially_refunded' : 'refunded';
+  const totalRefunded = alreadyRefunded + requestedAmount;
+  payment.status = totalRefunded >= payment.amount ? 'refunded' : 'partially_refunded';
   payment.refund = {
-    amount: amount || payment.amount,
+    amount: totalRefunded,
     razorpayRefundId: refund.id,
     reason: reason || '',
     refundedAt: new Date(),
@@ -25,13 +32,15 @@ const processRefund = async (payment, amount, reason) => {
   await payment.save();
 
   if (payment.appointment) {
-    await Appointment.findByIdAndUpdate(payment.appointment, { paymentStatus: 'refunded' });
+    if (payment.status === 'refunded') {
+      await Appointment.findByIdAndUpdate(payment.appointment, { paymentStatus: 'refunded' });
+    }
   }
 
   await notify({
     userId: payment.patient,
     title: 'Payment Refunded',
-    message: `₹${amount || payment.amount} has been refunded to your original payment method.`,
+    message: `₹${requestedAmount} has been refunded to your original payment method.`,
     type: 'payment_refund',
     relatedId: payment._id,
   });

@@ -3,10 +3,21 @@ const Appointment = require('../models/Appointment');
 const ClinicSettings = require('../models/ClinicSettings');
 const { notify } = require('../services/notification.service');
 const logger = require('../utils/logger');
+const getPendingExpiry = require('../utils/pendingExpiry');
 
 // Runs every 30 minutes, sends a reminder for appointments starting
 // within the configured reminder window (default 24h) that haven't been reminded yet.
 const startReminderJob = () => {
+  cron.schedule('* * * * *', async () => {
+    try {
+      const { filter, update } = getPendingExpiry();
+      const result = await Appointment.updateMany(filter, update);
+      if (result.modifiedCount) logger.info(`Expired ${result.modifiedCount} unpaid appointment(s).`);
+    } catch (err) {
+      logger.error(`Pending appointment expiry job failed: ${err.message}`);
+    }
+  });
+
   cron.schedule('*/30 * * * *', async () => {
     try {
       const settings = (await ClinicSettings.findById('default')) || { reminderHoursBefore: 24 };

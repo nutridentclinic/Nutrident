@@ -4,6 +4,7 @@ const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/appError');
 const { success } = require('../utils/response');
 const { deleteCloudinaryFile } = require('../utils/cloudinaryCleanup');
+const escapeRegex = require('../utils/escapeRegex');
 
 // @route GET /api/patients/me
 exports.getMyProfile = catchAsync(async (req, res, next) => {
@@ -73,7 +74,11 @@ exports.getAllPatients = catchAsync(async (req, res) => {
   const { search, page = 1, limit = 20 } = req.query;
   const userFilter = { role: 'patient' };
   if (search) {
-    userFilter.$or = [{ name: new RegExp(search, 'i') }, { phone: new RegExp(search, 'i') }, { email: new RegExp(search, 'i') }];
+    userFilter.$or = [
+      { name: new RegExp(escapeRegex(search), 'i') },
+      { phone: new RegExp(escapeRegex(search), 'i') },
+      { email: new RegExp(escapeRegex(search), 'i') },
+    ];
   }
   const skip = (Number(page) - 1) * Number(limit);
   const [users, total] = await Promise.all([

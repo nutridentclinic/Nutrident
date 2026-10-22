@@ -3,6 +3,7 @@ const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/appError');
 const { success } = require('../utils/response');
 const { checkCoupon } = require('../services/coupon.service');
+const User = require('../models/User');
 
 // @route POST /api/coupons  (admin)
 exports.createCoupon = catchAsync(async (req, res) => {
@@ -20,11 +21,17 @@ exports.getAllCoupons = catchAsync(async (req, res) => {
 // Note: this only PREVIEWS the discount - it does not consume usage. Usage is
 // only recorded when the coupon is actually applied via invoice creation.
 exports.validateCoupon = catchAsync(async (req, res, next) => {
-  const { code, orderAmount } = req.body;
+  const { code, orderAmount, userId } = req.body;
+  let effectiveUserId = req.user._id;
+  if (userId && ['admin', 'receptionist', 'dentist'].includes(req.user.role)) {
+    const patient = await User.findOne({ _id: userId, role: 'patient' }).select('_id');
+    if (!patient) return next(new AppError('Patient not found.', 404));
+    effectiveUserId = patient._id;
+  }
 
   let result;
   try {
-    result = await checkCoupon(code, req.user._id, orderAmount);
+    result = await checkCoupon(code, effectiveUserId, orderAmount);
   } catch (err) {
     return next(err);
   }

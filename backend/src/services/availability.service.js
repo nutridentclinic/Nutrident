@@ -1,6 +1,7 @@
 const Appointment = require('../models/Appointment');
 const Dentist = require('../models/Dentist');
 const AppError = require('../utils/appError');
+const { getClinicDateTime } = require('../utils/appointmentAccess');
 
 // Converts "HH:MM" to minutes since midnight for easy comparison
 const toMinutes = (t) => {
@@ -22,15 +23,18 @@ const getAvailableSlots = async (dentistId, dateStr) => {
   const dentist = await Dentist.findById(dentistId);
   if (!dentist) throw new AppError('Dentist not found', 404);
 
-  const date = new Date(dateStr);
-  date.setHours(0, 0, 0, 0);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dateStr || ''))) return [];
+  const date = new Date(`${dateStr}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== dateStr) return [];
+  const { date: today, time: currentTime } = getClinicDateTime();
+  if (dateStr < today) return [];
 
   const isUnavailable = dentist.unavailableDates.some(
-    (d) => new Date(d).toDateString() === date.toDateString()
+    (unavailableDate) => new Date(unavailableDate).toISOString().slice(0, 10) === dateStr
   );
   if (isUnavailable || !dentist.isActive) return [];
 
-  const dayOfWeek = date.getDay();
+  const dayOfWeek = date.getUTCDay();
   const dayAvailability = dentist.weeklyAvailability.find((d) => d.day === dayOfWeek);
   if (!dayAvailability || dayAvailability.slots.length === 0) return [];
 
@@ -59,7 +63,9 @@ const getAvailableSlots = async (dentistId, dateStr) => {
 
   const bookedTimes = new Set(booked.map((b) => b.startTime));
 
-  return allSlots.filter((s) => !bookedTimes.has(s.startTime));
+  return allSlots.filter((slot) =>
+    !bookedTimes.has(slot.startTime) && !(dateStr === today && slot.startTime <= currentTime)
+  );
 };
 
 /**

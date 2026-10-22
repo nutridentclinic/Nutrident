@@ -2,6 +2,7 @@ const User = require('../models/User');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/appError');
 const { success } = require('../utils/response');
+const escapeRegex = require('../utils/escapeRegex');
 
 // @route POST /api/staff  (admin only) - onboard a receptionist or another admin
 // Dentists have their own richer onboarding flow (see dentist.controller.js) since they
@@ -18,7 +19,9 @@ exports.createStaff = catchAsync(async (req, res, next) => {
 
   const user = await User.create({ name, email, phone, password, role, isEmailVerified: true });
 
-  success(res, 201, `${role === 'admin' ? 'Admin' : 'Receptionist'} account created.`, user);
+  const safeUser = user.toObject();
+  delete safeUser.password;
+  success(res, 201, `${role === 'admin' ? 'Admin' : 'Receptionist'} account created.`, safeUser);
 });
 
 // @route GET /api/staff  (admin only) - list receptionists and admins
@@ -29,15 +32,15 @@ exports.getAllStaff = catchAsync(async (req, res) => {
   if (role && ['receptionist', 'admin'].includes(role)) filter.role = role;
   if (search) {
     filter.$or = [
-      { name: new RegExp(search, 'i') },
-      { email: new RegExp(search, 'i') },
-      { phone: new RegExp(search, 'i') },
+      { name: new RegExp(escapeRegex(search), 'i') },
+      { email: new RegExp(escapeRegex(search), 'i') },
+      { phone: new RegExp(escapeRegex(search), 'i') },
     ];
   }
 
   const skip = (Number(page) - 1) * Number(limit);
   const [staff, total] = await Promise.all([
-    User.find(filter).select('-password').skip(skip).limit(Number(limit)).sort('-createdAt'),
+    User.find(filter).select('-password +active').skip(skip).limit(Number(limit)).sort('-createdAt'),
     User.countDocuments(filter),
   ]);
 

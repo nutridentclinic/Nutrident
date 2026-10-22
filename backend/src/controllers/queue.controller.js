@@ -4,34 +4,46 @@ const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/appError');
 const { success } = require('../utils/response');
 const { notify } = require('../services/notification.service');
+const canAccessDentistQueue = require('../utils/queueAccess');
+const { getClinicDateTime } = require('../utils/appointmentAccess');
 
 const startOfDay = (date) => {
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  return d;
+  const dateKey = typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)
+    ? date
+    : getClinicDateTime(date || new Date()).date;
+  return new Date(`${dateKey}T00:00:00.000Z`);
 };
 
 // @route POST /api/queue/check-in  (receptionist checks in a walk-in or arriving patient)
 exports.checkIn = catchAsync(async (req, res, next) => {
   const { dentistId, patientId, walkInName, appointmentId, date } = req.body;
-  const day = startOfDay(date || new Date());
-
-  const lastEntry = await Queue.findOne({ dentist: dentistId, date: day }).sort('-tokenNumber');
-  const tokenNumber = lastEntry ? lastEntry.tokenNumber + 1 : 1;
-
+  if (!patientId && !String(walkInName || '').trim()) {
+    return next(new AppError('patientId or walkInName is required.', 400));
+  }
   const dentist = await Dentist.findById(dentistId);
+  if (!dentist) return next(new AppError('Dentist not found.', 404));
+  const day = startOfDay(date || new Date());
   const avgConsultMinutes = dentist?.slotDurationMinutes || 15;
   const waitingCount = await Queue.countDocuments({ dentist: dentistId, date: day, status: 'waiting' });
-
-  const entry = await Queue.create({
-    dentist: dentistId,
-    patient: patientId || null,
-    walkInName: walkInName || null,
-    appointment: appointmentId || null,
-    tokenNumber,
-    date: day,
-    estimatedWaitMinutes: waitingCount * avgConsultMinutes,
-  });
+  let entry;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const lastEntry = await Queue.findOne({ dentist: dentistId, date: day }).sort('-tokenNumber');
+    const tokenNumber = lastEntry ? lastEntry.tokenNumber + 1 : 1;
+    try {
+      entry = await Queue.create({
+        dentist: dentistId,
+        patient: patientId || null,
+        walkInName: walkInName?.trim() || null,
+        appointment: appointmentId || null,
+        tokenNumber,
+        date: day,
+        estimatedWaitMinutes: waitingCount * avgConsultMinutes,
+      });
+      break;
+    } catch (error) {
+      if (error.code !== 11000 || attempt === 2) throw error;
+    }
+  }
 
   req.app.get('io')?.to(`queue_${dentistId}`).emit('queue:updated', { action: 'check-in', entry });
 
@@ -49,7 +61,11 @@ exports.checkIn = catchAsync(async (req, res, next) => {
 });
 
 // @route GET /api/queue/dentist/:dentistId?date=YYYY-MM-DD
-exports.getQueueForDentist = catchAsync(async (req, res) => {
+exports.getQueueForDentist = catchAsync(async (req, res, next) => {
+  const dentistProfile = req.user.role === 'dentist' ? await Dentist.findOne({ user: req.user._id }) : null;
+  if (!canAccessDentistQueue(req.user, req.params.dentistId, dentistProfile)) {
+    return next(new AppError('You do not have access to this dentist queue.', 403));
+  }
   const day = startOfDay(req.query.date || new Date());
   const queue = await Queue.find({ dentist: req.params.dentistId, date: day })
     .populate('patient', 'name phone')

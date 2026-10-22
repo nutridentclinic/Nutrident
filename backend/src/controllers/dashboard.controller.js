@@ -3,6 +3,7 @@ const Dentist = require('../models/Dentist');
 const Appointment = require('../models/Appointment');
 const Payment = require('../models/Payment');
 const Review = require('../models/Review');
+const Queue = require('../models/Queue');
 const catchAsync = require('../utils/catchAsync');
 const { success } = require('../utils/response');
 
@@ -100,5 +101,29 @@ exports.getDentistStats = catchAsync(async (req, res, next) => {
     monthEarnings: monthEarningsAgg[0]?.total || 0,
     ratingAverage: dentist.ratingAverage,
     reviewCount,
+  });
+});
+
+// @route GET /api/dashboard/receptionist (E4 - front-desk daily workload)
+exports.getReceptionistStats = catchAsync(async (req, res) => {
+  const today = new Intl.DateTimeFormat('en-CA', {
+    timeZone: process.env.CLINIC_TIMEZONE || 'Asia/Kolkata',
+  }).format(new Date());
+  const startOfDay = new Date(`${today}T00:00:00.000Z`);
+  const endOfDay = new Date(startOfDay);
+  endOfDay.setUTCDate(endOfDay.getUTCDate() + 1);
+  const [appointmentsToday, confirmedToday, pendingToday, waitingQueue, totalPatients] = await Promise.all([
+    Appointment.countDocuments({ date: { $gte: startOfDay, $lt: endOfDay } }),
+    Appointment.countDocuments({ date: { $gte: startOfDay, $lt: endOfDay }, status: 'confirmed' }),
+    Appointment.countDocuments({ date: { $gte: startOfDay, $lt: endOfDay }, status: 'pending' }),
+    Queue.countDocuments({ date: { $gte: startOfDay, $lt: endOfDay }, status: 'waiting' }),
+    User.countDocuments({ role: 'patient' }),
+  ]);
+  success(res, 200, 'Receptionist dashboard fetched.', {
+    appointmentsToday,
+    confirmedToday,
+    pendingToday,
+    waitingQueue,
+    totalPatients,
   });
 });

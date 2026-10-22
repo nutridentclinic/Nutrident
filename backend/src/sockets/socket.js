@@ -1,5 +1,7 @@
 const jwt = require('jsonwebtoken');
 const logger = require('../utils/logger');
+const Dentist = require('../models/Dentist');
+const canAccessDentistQueue = require('../utils/queueAccess');
 
 // Initializes Socket.IO: auth via JWT, and rooms for per-dentist live queue updates.
 const initSocket = (io) => {
@@ -11,7 +13,7 @@ const initSocket = (io) => {
       socket.user = decoded;
       next();
     } catch (err) {
-      next(); // don't hard-fail the connection; just treat as unauthenticated
+      next(new Error('Invalid or expired authentication token.'));
     }
   });
 
@@ -19,7 +21,16 @@ const initSocket = (io) => {
     logger.info(`Socket connected: ${socket.id}`);
 
     // Client joins a dentist's queue room to receive live token updates
-    socket.on('queue:join', (dentistId) => {
+    socket.on('queue:join', async (dentistId) => {
+      if (!socket.user || !['admin', 'receptionist', 'dentist'].includes(socket.user.role)) {
+        socket.emit('queue:error', { message: 'Authentication with a staff or owning dentist account is required.' });
+        return;
+      }
+      const dentistProfile = socket.user.role === 'dentist' ? await Dentist.findOne({ user: socket.user.id }) : null;
+      if (!canAccessDentistQueue(socket.user, dentistId, dentistProfile)) {
+        socket.emit('queue:error', { message: 'You do not have access to this dentist queue.' });
+        return;
+      }
       socket.join(`queue_${dentistId}`);
     });
 

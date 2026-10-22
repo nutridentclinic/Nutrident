@@ -22,6 +22,8 @@ const invoiceSchema = new mongoose.Schema(
     totalAmount: { type: Number, required: true },
 
     status: { type: String, enum: ['unpaid', 'paid', 'refunded'], default: 'unpaid' },
+    paidAt: { type: Date, default: null },
+    paymentMethod: { type: String, default: '' },
     payment: { type: mongoose.Schema.Types.ObjectId, ref: 'Payment', default: null },
     pdfUrl: { type: String, default: '' },
   },

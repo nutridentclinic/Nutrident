@@ -9,5 +9,6 @@ router.get('/admin/appointments-weekly', restrictTo('admin'), ctrl.getWeeklyAppo
 router.get('/admin/revenue-monthly', restrictTo('admin'), ctrl.getMonthlyRevenue);
 router.get('/admin/top-specialties', restrictTo('admin'), ctrl.getTopSpecialties);
 router.get('/dentist/me', restrictTo('dentist'), ctrl.getDentistStats);
+router.get('/receptionist', restrictTo('receptionist'), ctrl.getReceptionistStats);
 
 module.exports = router;

@@ -9,14 +9,20 @@ const errorMiddleware = require('./middleware/error.middleware');
 const notFound = require('./middleware/notFound.middleware');
 const { apiLimiter } = require('./middleware/rateLimit.middleware');
 const { razorpayWebhook } = require('./controllers/payment.controller');
+const getCorsOrigins = require('./utils/corsOrigins');
 
 const app = express();
+const corsOrigins = getCorsOrigins();
+app.set('trust proxy', Number(process.env.TRUST_PROXY) || 0);
 
 // --- Security & core middleware ---
 app.use(helmet());
 app.use(
   cors({
-    origin: [process.env.CLIENT_URL, process.env.DENTIST_PANEL_URL].filter(Boolean),
+    origin: (origin, callback) => {
+      if (!origin || corsOrigins.includes(origin)) return callback(null, true);
+      return callback(new Error('Origin is not allowed by CORS.'));
+    },
     credentials: true,
   })
 );

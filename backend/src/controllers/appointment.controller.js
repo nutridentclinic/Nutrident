@@ -10,6 +10,7 @@ const { assertSlotIsFree, getAvailableSlots } = require('../services/availabilit
 const { notify } = require('../services/notification.service');
 const { processRefund } = require('../services/payment.service');
 const { generateAgoraToken, mongoIdToAgoraUid, isConfigured } = require('../config/agora');
+const { isAppointmentParticipant, isWithinVideoWindow } = require('../utils/appointmentAccess');
 
 // Wraps Appointment.create() so a race-condition duplicate (caught by the DB's
 // partial unique index, not just the application-level assertSlotIsFree check)
@@ -141,12 +142,23 @@ exports.getAppointmentById = catchAsync(async (req, res, next) => {
 
 // @route PATCH /api/appointments/:id/confirm  (dentist/receptionist confirms - or auto-confirmed after payment)
 exports.confirmAppointment = catchAsync(async (req, res, next) => {
-  const appointment = await Appointment.findByIdAndUpdate(
-    req.params.id,
-    { status: 'confirmed' },
-    { new: true }
-  );
+  const appointment = await Appointment.findById(req.params.id);
   if (!appointment) return next(new AppError('Appointment not found.', 404));
+  if (appointment.status !== 'pending') {
+    return next(new AppError('Only pending appointments can be confirmed.', 400));
+  }
+  if (req.user.role === 'dentist') {
+    const dentist = await Dentist.findOne({ user: req.user._id });
+    if (!dentist || !appointment.dentist.equals(dentist._id)) {
+      return next(new AppError('You can only confirm your own appointments.', 403));
+    }
+  }
+  const staffOverride = ['admin', 'receptionist'].includes(req.user.role) && req.body.staffOverride === true;
+  if (appointment.paymentStatus !== 'paid' && !staffOverride) {
+    return next(new AppError('Payment is required before confirming this appointment.', 400));
+  }
+  appointment.status = 'confirmed';
+  await appointment.save();
 
   await notify({
     userId: appointment.patient,
@@ -165,7 +177,7 @@ exports.cancelAppointment = catchAsync(async (req, res, next) => {
   const appointment = await Appointment.findById(req.params.id);
   if (!appointment) return next(new AppError('Appointment not found.', 404));
 
-  if (['completed', 'cancelled'].includes(appointment.status)) {
+  if (!['pending', 'confirmed'].includes(appointment.status)) {
     return next(new AppError(`Cannot cancel an appointment that is already ${appointment.status}.`, 400));
   }
 
@@ -233,7 +245,17 @@ exports.rescheduleAppointment = catchAsync(async (req, res, next) => {
   const { date, startTime } = req.body;
   const oldAppointment = await Appointment.findById(req.params.id);
   if (!oldAppointment) return next(new AppError('Appointment not found.', 404));
-  if (['completed', 'cancelled'].includes(oldAppointment.status)) {
+  const isPatientOwner = req.user.role === 'patient' && oldAppointment.patient.equals(req.user._id);
+  const isAdmin = req.user.role === 'admin';
+  let isDentistOwner = false;
+  if (req.user.role === 'dentist') {
+    const dentistProfile = await Dentist.findOne({ user: req.user._id });
+    isDentistOwner = !!dentistProfile && oldAppointment.dentist.equals(dentistProfile._id);
+  }
+  if (!isPatientOwner && !isDentistOwner && !isAdmin) {
+    return next(new AppError('You do not have permission to reschedule this appointment.', 403));
+  }
+  if (!['pending', 'confirmed'].includes(oldAppointment.status)) {
     return next(new AppError(`Cannot reschedule an appointment that is ${oldAppointment.status}.`, 400));
   }
 
@@ -284,12 +306,17 @@ exports.rescheduleAppointment = catchAsync(async (req, res, next) => {
 
 // @route PATCH /api/appointments/:id/complete  (dentist marks visit done)
 exports.completeAppointment = catchAsync(async (req, res, next) => {
-  const appointment = await Appointment.findByIdAndUpdate(
-    req.params.id,
-    { status: 'completed' },
-    { new: true }
-  );
+  const appointment = await Appointment.findById(req.params.id);
   if (!appointment) return next(new AppError('Appointment not found.', 404));
+  const dentist = await Dentist.findOne({ user: req.user._id });
+  if (!dentist || !appointment.dentist.equals(dentist._id)) {
+    return next(new AppError('You can only complete your own appointments.', 403));
+  }
+  if (appointment.status !== 'confirmed') {
+    return next(new AppError('Only confirmed appointments can be completed.', 400));
+  }
+  appointment.status = 'completed';
+  await appointment.save();
 
   await notify({
     userId: appointment.patient,
@@ -304,8 +331,19 @@ exports.completeAppointment = catchAsync(async (req, res, next) => {
 
 // @route PATCH /api/appointments/:id/no-show
 exports.markNoShow = catchAsync(async (req, res, next) => {
-  const appointment = await Appointment.findByIdAndUpdate(req.params.id, { status: 'no-show' }, { new: true });
+  const appointment = await Appointment.findById(req.params.id);
   if (!appointment) return next(new AppError('Appointment not found.', 404));
+  if (req.user.role === 'dentist') {
+    const dentist = await Dentist.findOne({ user: req.user._id });
+    if (!dentist || !appointment.dentist.equals(dentist._id)) {
+      return next(new AppError('You can only update your own appointments.', 403));
+    }
+  }
+  if (appointment.status !== 'confirmed') {
+    return next(new AppError('Only confirmed appointments can be marked as no-show.', 400));
+  }
+  appointment.status = 'no-show';
+  await appointment.save();
   success(res, 200, 'Appointment marked as no-show.', appointment);
 });
 
@@ -313,22 +351,27 @@ exports.markNoShow = catchAsync(async (req, res, next) => {
 exports.joinVideoCall = catchAsync(async (req, res, next) => {
   const appointment = await Appointment.findById(req.params.id).populate('dentist');
   if (!appointment) return next(new AppError('Appointment not found.', 404));
+  if (!isAppointmentParticipant(appointment, req.user)) {
+    return next(new AppError('Only the patient or dentist for this appointment can join.', 403));
+  }
   if (appointment.mode !== 'video') return next(new AppError('This appointment is not a video consultation.', 400));
   if (appointment.status !== 'confirmed') return next(new AppError('Appointment is not confirmed yet.', 400));
+  if (appointment.paymentStatus !== 'paid') return next(new AppError('Payment is required before joining this consultation.', 400));
+  if (!isWithinVideoWindow(appointment)) {
+    return next(new AppError('Video access is available 15 minutes before the appointment until 30 minutes after it ends.', 403));
+  }
   if (!isConfigured()) return next(new AppError('Video calling is not configured on the server yet.', 503));
 
   // One Agora channel per appointment - both sides join the same channel name.
   const channelName = `appt_${appointment._id}`;
-  if (!appointment.videoCall.roomId) {
-    appointment.videoCall.roomId = channelName;
-  }
-  if (req.user.role === 'patient') appointment.videoCall.joinedByPatientAt = new Date();
-  if (req.user.role === 'dentist') appointment.videoCall.joinedByDentistAt = new Date();
-  await appointment.save();
-
   const uid = mongoIdToAgoraUid(req.user._id);
   const token = generateAgoraToken(channelName, uid);
   if (!token) return next(new AppError('Could not generate a video call token. Please try again.', 500));
+
+  if (!appointment.videoCall.roomId) appointment.videoCall.roomId = channelName;
+  if (req.user.role === 'patient') appointment.videoCall.joinedByPatientAt = new Date();
+  if (req.user.role === 'dentist') appointment.videoCall.joinedByDentistAt = new Date();
+  await appointment.save();
 
   success(res, 200, 'Video call token issued.', {
     appId: process.env.AGORA_APP_ID,
@@ -337,4 +380,51 @@ exports.joinVideoCall = catchAsync(async (req, res, next) => {
     token,
     expiresInSeconds: 7200,
   });
+});
+
+// @route GET /api/appointments (E3 - receptionist/admin appointment list)
+exports.getAllAppointments = catchAsync(async (req, res) => {
+  const { date, from, to, status, dentistId, patientId, search, page = 1, limit = 20 } = req.query;
+  const filter = {};
+  if (status) filter.status = status;
+  if (dentistId) filter.dentist = dentistId;
+  if (patientId) filter.patient = patientId;
+  if (date) {
+    const start = new Date(`${date}T00:00:00.000Z`);
+    const end = new Date(start);
+    end.setUTCDate(end.getUTCDate() + 1);
+    filter.date = { $gte: start, $lt: end };
+  } else if (from || to) {
+    filter.date = {};
+    if (from) filter.date.$gte = new Date(`${from}T00:00:00.000Z`);
+    if (to) {
+      const end = new Date(`${to}T00:00:00.000Z`);
+      end.setUTCDate(end.getUTCDate() + 1);
+      filter.date.$lt = end;
+    }
+  }
+  if (search) {
+    const users = await User.find({
+      role: 'patient',
+      $or: [
+        { name: new RegExp(escapeRegex(search), 'i') },
+        { email: new RegExp(escapeRegex(search), 'i') },
+        { phone: new RegExp(escapeRegex(search), 'i') },
+      ],
+    }).select('_id');
+    filter.patient = { $in: users.map((user) => user._id) };
+  }
+
+  const currentPage = Math.max(1, Number(page) || 1);
+  const pageSize = Math.min(100, Math.max(1, Number(limit) || 20));
+  const [appointments, total] = await Promise.all([
+    Appointment.find(filter)
+      .populate('patient', 'name phone email profilePhoto')
+      .populate({ path: 'dentist', populate: { path: 'user', select: 'name profilePhoto' } })
+      .sort('date startTime')
+      .skip((currentPage - 1) * pageSize)
+      .limit(pageSize),
+    Appointment.countDocuments(filter),
+  ]);
+  success(res, 200, 'Appointments fetched.', appointments, { total, page: currentPage, limit: pageSize });
 });

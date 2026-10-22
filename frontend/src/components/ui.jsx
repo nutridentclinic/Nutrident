@@ -1,0 +1,127 @@
+import { createContext, forwardRef, useContext, useEffect, useRef, useState } from 'react'
+import { AlertCircle, CheckCircle2, LoaderCircle, RefreshCw, X } from 'lucide-react'
+
+const ToastContext = createContext(() => {})
+
+export function ToastProvider({ children }) {
+  const [toast, setToast] = useState(null)
+  const notify = (message, type = 'success') => {
+    setToast({ message, type })
+    window.clearTimeout(notify.timeout)
+    notify.timeout = window.setTimeout(() => setToast(null), 4800)
+  }
+
+  useEffect(() => {
+    const handleWaking = (e) => {
+      if (e.detail?.waking) {
+        setToast({ message: 'The clinic server is waking up from idle, please hold on…', type: 'info' })
+      } else {
+        setToast((current) => (current?.type === 'info' ? null : current))
+      }
+    }
+    window.addEventListener('clinic-server-waking', handleWaking)
+    return () => window.removeEventListener('clinic-server-waking', handleWaking)
+  }, [])
+
+  return (
+    <ToastContext.Provider value={notify}>
+      {children}
+      {toast && (
+        <div className={`toast toast-${toast.type}`} role="status">
+          {toast.type === 'error' ? <AlertCircle size={18} /> : toast.type === 'info' ? <LoaderCircle className="spin" size={18} /> : <CheckCircle2 size={18} />}
+          <span>{toast.message}</span>
+          <button className="icon-button" aria-label="Dismiss notification" onClick={() => setToast(null)}><X size={16} /></button>
+        </div>
+      )}
+    </ToastContext.Provider>
+  )
+}
+
+export const useToast = () => useContext(ToastContext)
+
+export function PageTitle({ eyebrow, title, description, actions }) {
+  return (
+    <div className="page-title-row">
+      <div>
+        {eyebrow && <p className="eyebrow">{eyebrow}</p>}
+        <h1 className="page-title">{title}</h1>
+        {description && <p className="page-description">{description}</p>}
+      </div>
+      {actions && <div className="page-actions">{actions}</div>}
+    </div>
+  )
+}
+
+export function LoadingState({ label = 'Loading clinic data…' }) {
+  return <div className="state-view" role="status"><LoaderCircle className="spin" size={20} />{label}</div>
+}
+
+export function ErrorState({ error, onRetry }) {
+  return (
+    <div className="state-view state-error" role="alert">
+      <AlertCircle size={19} />
+      <span>{error?.message || 'We could not load this information.'}</span>
+      {onRetry && <button className="button button-quiet button-small" onClick={onRetry}><RefreshCw size={14} /> Retry</button>}
+    </div>
+  )
+}
+
+export function EmptyState({ title = 'Nothing here yet', children, action }) {
+  return <div className="empty-state"><span className="empty-mark"><CheckCircle2 size={19} /></span><h3>{title}</h3>{children && <p>{children}</p>}{action}</div>
+}
+
+export function StatusBadge({ value }) {
+  const normalized = String(value || 'unknown').toLowerCase().replace(/[^a-z0-9]+/g, '-')
+  return <span className={`status-badge status-${normalized}`}>{String(value || 'Unknown').replaceAll('-', ' ')}</span>
+}
+
+export function Field({ label, error, hint, children, className = '' }) {
+  return <label className={`field ${className}`}><span className="field-label">{label}</span>{children}{hint && <span className="field-hint">{hint}</span>}{error && <span className="field-error">{error}</span>}</label>
+}
+
+export const TextInput = forwardRef(function TextInput({ as: Component = 'input', className = '', ...props }, ref) {
+  return <Component ref={ref} className={`input ${className}`} {...props} />
+})
+
+export function SectionPanel({ title, description, actions, children, className = '' }) {
+  return <section className={`section-panel ${className}`}><div className="section-panel-heading"><div>{title && <h2>{title}</h2>}{description && <p>{description}</p>}</div>{actions}</div>{children}</section>
+}
+
+export function ConfirmDialog({ open, title, description, confirmLabel = 'Confirm', danger = false, busy = false, onConfirm, onCancel, children }) {
+  const cancelRef = useRef(null)
+  useEffect(() => {
+    if (!open) return undefined
+    cancelRef.current?.focus()
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape' && !busy) onCancel()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [open, busy, onCancel])
+
+  if (!open) return null
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onCancel() }}><section className="modal-panel confirm-panel" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-description"><h2 id="confirm-title">{title}</h2><p id="confirm-description">{description}</p>{children}<div className="inline-actions"><button ref={cancelRef} className="button button-quiet" onClick={onCancel} disabled={busy}>Keep</button><button className={`button ${danger ? 'button-danger' : 'button-primary'}`} onClick={onConfirm} disabled={busy}>{busy ? 'Working…' : confirmLabel}</button></div></section></div>
+}
+
+export function AsyncView({ query, empty = false, children, emptyTitle, retry }) {
+  if (query.isLoading) return <LoadingState />
+  if (query.isError) return <ErrorState error={query.error} onRetry={retry || query.refetch} />
+  if (empty) return <EmptyState title={emptyTitle} />
+  return children
+}
+
+export function useConfirm() {
+  const [options, setOptions] = useState(null)
+  const resolveRef = useRef(null)
+  const confirm = (nextOptions) => new Promise((resolve) => {
+    resolveRef.current = resolve
+    setOptions(nextOptions)
+  })
+  const settle = (value) => {
+    resolveRef.current?.(value)
+    resolveRef.current = null
+    setOptions(null)
+  }
+  const dialog = options && <ConfirmDialog {...options} open onConfirm={() => settle(true)} onCancel={() => settle(false)} />
+  return { confirm, dialog }
+}

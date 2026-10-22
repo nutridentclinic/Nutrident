@@ -5,38 +5,38 @@ const mongoose = require('mongoose');
 const User = require('../models/User');
 const ClinicSettings = require('../models/ClinicSettings');
 const logger = require('./logger');
+const getSeedAdminConfig = require('./seedAdminConfig');
 
 const run = async () => {
+  const admin = getSeedAdminConfig();
   await mongoose.connect(process.env.MONGO_URI);
+  try {
+    const existing = await User.findOne({ email: admin.email });
+    if (!existing) {
+      await User.create({
+        name: admin.name,
+        email: admin.email,
+        phone: admin.phone,
+        password: admin.password,
+        role: 'admin',
+        isEmailVerified: true,
+      });
+      logger.info('First admin account created from environment configuration.');
+    } else {
+      logger.info('First admin already exists, skipping.');
+    }
 
-  const adminEmail = 'admin@clinic.com';
-  const existing = await User.findOne({ email: adminEmail });
-
-  if (!existing) {
-    await User.create({
-      name: 'Clinic Admin',
-      email: adminEmail,
-      phone: '9999999999',
-      password: 'Admin@123', // change immediately after first login
-      role: 'admin',
-      isEmailVerified: true,
-    });
-    logger.info(`Admin created -> email: ${adminEmail} / password: Admin@123 (change this immediately)`);
-  } else {
-    logger.info('Admin already exists, skipping.');
+    const settings = await ClinicSettings.findById('default');
+    if (!settings) {
+      await ClinicSettings.create({ _id: 'default' });
+      logger.info('Default clinic settings created.');
+    }
+  } finally {
+    await mongoose.disconnect();
   }
-
-  const settings = await ClinicSettings.findById('default');
-  if (!settings) {
-    await ClinicSettings.create({ _id: 'default' });
-    logger.info('Default clinic settings created.');
-  }
-
-  await mongoose.disconnect();
-  process.exit(0);
 };
 
 run().catch((err) => {
-  console.error(err);
-  process.exit(1);
+  logger.error('Seed failed. Check database connectivity and seed configuration.');
+  process.exitCode = 1;
 });

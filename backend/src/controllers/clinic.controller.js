@@ -3,6 +3,7 @@ const Dentist = require('../models/Dentist');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/appError');
 const { success } = require('../utils/response');
+const escapeRegex = require('../utils/escapeRegex');
 
 exports.createClinic = catchAsync(async (req, res) => {
   const clinic = await Clinic.create(req.body);
@@ -12,8 +13,8 @@ exports.createClinic = catchAsync(async (req, res) => {
 exports.getClinics = catchAsync(async (req, res) => {
   const { city, search } = req.query;
   const filter = { isActive: true };
-  if (city) filter['address.city'] = new RegExp(city, 'i');
-  if (search) filter.name = new RegExp(search, 'i');
+  if (city) filter['address.city'] = new RegExp(escapeRegex(city), 'i');
+  if (search) filter.name = new RegExp(escapeRegex(search), 'i');
 
   const clinics = await Clinic.find(filter).sort('name');
   success(res, 200, 'Clinics fetched.', clinics);

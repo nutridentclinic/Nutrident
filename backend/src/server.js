@@ -7,6 +7,7 @@ const connectDB = require('./config/db');
 const logger = require('./utils/logger');
 const initSocket = require('./sockets/socket');
 const startReminderJob = require('./jobs/appointmentReminder.job');
+const getCorsOrigins = require('./utils/corsOrigins');
 
 const PORT = process.env.PORT || 5000;
 
@@ -14,7 +15,7 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: [process.env.CLIENT_URL, process.env.DENTIST_PANEL_URL].filter(Boolean),
+    origin: getCorsOrigins(),
     credentials: true,
   },
 });

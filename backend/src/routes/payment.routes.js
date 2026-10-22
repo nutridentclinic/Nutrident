@@ -6,6 +6,7 @@ const { restrictTo } = require('../middleware/role.middleware');
 // NOTE: webhook route is mounted separately in app.js (needs raw body), not here.
 
 router.use(protect);
+router.get('/', restrictTo('admin'), ctrl.getAllPayments);
 router.post('/create-order', restrictTo('patient'), ctrl.createOrder);
 router.post('/verify', restrictTo('patient'), ctrl.verifyPayment);
 router.post('/:id/refund', restrictTo('admin', 'dentist'), ctrl.refundPayment);

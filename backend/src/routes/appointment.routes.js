@@ -8,6 +8,7 @@ const { createAppointmentRules, rescheduleRules } = require('../validators/appoi
 router.use(protect);
 
 router.post('/', restrictTo('patient'), createAppointmentRules, validate, ctrl.createAppointment);
+router.get('/', restrictTo('admin', 'receptionist'), ctrl.getAllAppointments);
 router.get('/me', restrictTo('patient'), ctrl.getMyAppointments);
 router.get('/dentist/me', restrictTo('dentist'), ctrl.getDentistAppointments);
 router.get('/:id', ctrl.getAppointmentById);
