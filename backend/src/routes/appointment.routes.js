@@ -3,11 +3,12 @@ const ctrl = require('../controllers/appointment.controller');
 const { protect } = require('../middleware/auth.middleware');
 const { restrictTo } = require('../middleware/role.middleware');
 const validate = require('../middleware/validate.middleware');
-const { createAppointmentRules, rescheduleRules } = require('../validators/appointment.validator');
+const { createAppointmentRules, createStaffAppointmentRules, rescheduleRules } = require('../validators/appointment.validator');
 
 router.use(protect);
 
 router.post('/', restrictTo('patient'), createAppointmentRules, validate, ctrl.createAppointment);
+router.post('/staff', restrictTo('admin', 'receptionist'), createStaffAppointmentRules, validate, ctrl.createStaffAppointment);
 router.get('/', restrictTo('admin', 'receptionist'), ctrl.getAllAppointments);
 router.get('/me', restrictTo('patient'), ctrl.getMyAppointments);
 router.get('/dentist/me', restrictTo('dentist'), ctrl.getDentistAppointments);

@@ -1,5 +1,6 @@
 const Invoice = require('../models/Invoice');
 const User = require('../models/User');
+const Dentist = require('../models/Dentist');
 const ClinicSettings = require('../models/ClinicSettings');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/appError');
@@ -14,6 +15,15 @@ exports.createInvoice = catchAsync(async (req, res, next) => {
   const { patientId, dentistId, appointmentId, items, couponCode } = req.body;
   const patient = await User.findOne({ _id: patientId, role: 'patient' }).select('_id');
   if (!patient) return next(new AppError('Patient not found.', 404));
+
+  const primaryDentist = await Dentist.findOne();
+  let resolvedDentistId = null;
+  if (primaryDentist) {
+    if (dentistId && String(primaryDentist._id) !== String(dentistId)) {
+      return next(new AppError('The specified dentist is not the clinic doctor.', 400));
+    }
+    resolvedDentistId = primaryDentist._id;
+  }
   if (!Array.isArray(items) || items.length === 0 || items.some((item) => !item.description?.trim() || !Number.isFinite(Number(item.unitPrice)) || Number(item.unitPrice) < 0 || Number(item.quantity ?? 1) <= 0)) {
     return next(new AppError('Invoice items must include a description, a non-negative unit price, and a positive quantity.', 400));
   }
@@ -40,7 +50,7 @@ exports.createInvoice = catchAsync(async (req, res, next) => {
   const invoice = await Invoice.create({
     invoiceNumber: generateInvoiceNumber(),
     patient: patientId,
-    dentist: dentistId || null,
+    dentist: resolvedDentistId || null,
     appointment: appointmentId || null,
     items: items.map((i) => ({ ...i, amount: i.unitPrice * (i.quantity || 1) })),
     subTotal,

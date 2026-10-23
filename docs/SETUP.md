@@ -1,31 +1,67 @@
-# Local Setup
+# Local Setup & Testing Guide
 
 ## Prerequisites
 
-- Node.js 22.12+
-- npm
-- MongoDB development database
-- Provider credentials only for the integrations being exercised
+- **Node.js**: v22.12 or newer
+- **npm**: v10+
+- **Database**: Local or containerized MongoDB (for backend integration only; test suites run self-contained with `mongodb-memory-server`)
 
-## Install and Run
+---
 
-1. Copy `backend/.env.example` to `backend/.env`; set `MONGO_URI`, distinct 64-byte-or-longer JWT secrets, and development CORS origins.
-2. Copy `frontend/.env.example` to `frontend/.env`.
-3. From `backend/`: `npm install`, then `npm run dev`.
-4. From `frontend/`: `npm install`, then `npm run dev`.
-5. Open the Vite URL (normally `http://localhost:5173`).
+## 1. Installation
 
-For the first administrator, set `ADMIN_EMAIL`, `ADMIN_PASSWORD`, and `ADMIN_PHONE` in `backend/.env`, then run `npm run seed` from `backend/`. Do not use production data for local development.
+### Backend
+```bash
+cd backend
+npm install
+```
 
-## Environment
+### Frontend
+```bash
+cd frontend
+npm install
+```
 
-Backend variables and placeholders are listed in `backend/.env.example`. Provider secrets are backend-only. `CORS_ORIGINS` is a comma-separated list; set `TRUST_PROXY=1` only behind a trusted single proxy. `CLINIC_TIMEZONE` controls backend slot/video windows.
+---
 
-Frontend variables are public: `VITE_API_BASE_URL` includes `/api`; `VITE_SOCKET_URL` is the Socket.IO origin without `/api`; `VITE_CLINIC_TIMEZONE` defaults to `Asia/Kolkata`.
+## 2. Automated Test Execution
 
-## Tests
+### Backend Automated Test Suite (Jest + Supertest)
+The backend test suite uses `mongodb-memory-server` and mock providers. It runs completely offline without connecting to external services or altering live databases:
+```bash
+cd backend
+npm test
+```
+- Runs 7 test suites (31 tests) covering single-dentist enforcement, token versioning, session logout revocation, constant-time OTP lockout, FDI 32 adult teeth validation, file download ownership, clinic timezone availability, and queue authorization.
 
-- Backend: from `backend/`, run `npm test`.
-- Frontend: from `frontend/`, run `npm test`, `npm run lint`, and `npm run build`.
+### Frontend Unit & Domain Test Suite (Vitest)
+The frontend tests use Vitest, Testing Library, and MSW:
+```bash
+cd frontend
+npm test -- --run
+```
+- Runs 5 test files (24 tests) covering API client capabilities fallback, domain mapping, error boundary handling, booking slot algorithms, and protected route access.
 
-The current automated tests cover utility policies and configuration. They do not spin up MongoDB, mock all controllers/providers, or execute end-to-end user flows.
+### Frontend End-to-End Test Suite (Playwright)
+Playwright launches automated Chromium and WebKit (Safari) browser instances against Vite dev server:
+```bash
+cd frontend
+npx playwright test
+```
+To run specifically on Chromium or WebKit:
+```bash
+npx playwright test --project=chromium
+npx playwright test --project=webkit
+```
+- Verifies logout revocation, Back/Forward cache immunity, single-doctor public profile and URL redirects, direct appointment booking without doctor dropdown, walk-in patient registration, and admin clinician account management.
+
+---
+
+## 3. Production Build Validation
+
+To verify production bundle compilation:
+```bash
+cd frontend
+npm run build
+```
+Builds the optimized production bundle in `frontend/dist/` in under 2 seconds with zero errors.

@@ -4,6 +4,7 @@ const Payment = require('../models/Payment');
 const Appointment = require('../models/Appointment');
 const Invoice = require('../models/Invoice');
 const Dentist = require('../models/Dentist');
+const User = require('../models/User');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/appError');
 const { success } = require('../utils/response');
@@ -177,6 +178,19 @@ exports.verifyPayment = catchAsync(async (req, res, next) => {
       type: 'appointment_confirmed',
       relatedId: appointment._id,
     });
+
+    if (appointment.dentist) {
+      const dentistDoc = await Dentist.findById(appointment.dentist);
+      if (dentistDoc?.user) {
+        await notify({
+          userId: dentistDoc.user,
+          title: 'Payment Received',
+          message: `Payment of ₹${updatedPayment.amount} received for appointment on ${appointment.date.toDateString()} at ${appointment.startTime}.`,
+          type: 'payment_received',
+          relatedId: updatedPayment._id,
+        });
+      }
+    }
   }
 
   success(res, 200, 'Payment verified successfully.', { payment: updatedPayment, appointment });
@@ -200,7 +214,13 @@ exports.razorpayWebhook = catchAsync(async (req, res) => {
     return res.status(400).json({ success: false, message: 'Invalid webhook signature' });
   }
 
-  const event = JSON.parse(req.body.toString());
+  let event;
+  try {
+    event = JSON.parse(req.body.toString());
+  } catch (err) {
+    logger.warn(`Razorpay webhook invalid JSON: ${err.message}`);
+    return res.status(400).json({ success: false, message: 'Invalid JSON payload' });
+  }
 
   if (event.event === 'payment.captured') {
     const orderId = event.payload.payment.entity.order_id;
@@ -275,6 +295,20 @@ exports.refundPayment = catchAsync(async (req, res, next) => {
   try {
     updated = await processRefund(payment, amount, reason || 'Requested by clinic');
   } catch (err) {
+    try {
+      const staffUsers = await User.find({ role: { $in: ['admin', 'receptionist'] } }).select('_id');
+      for (const staff of staffUsers) {
+        await notify({
+          userId: staff._id,
+          title: 'Refund Processing Failed',
+          message: `Refund of ₹${amount || payment.amount} for payment ${payment._id} failed: ${err.message}`,
+          type: 'payment_failed',
+          relatedId: payment._id,
+        });
+      }
+    } catch (notifyErr) {
+      logger.error(`Failed to notify staff about refund failure: ${notifyErr.message}`);
+    }
     return next(err);
   }
 

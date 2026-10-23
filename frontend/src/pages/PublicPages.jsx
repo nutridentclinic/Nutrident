@@ -1,81 +1,658 @@
 import { useMemo, useState } from 'react'
-import { Link, Outlet, useParams, useSearchParams } from 'react-router-dom'
+import { Link, Outlet, Navigate, useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { ArrowDownRight, ArrowRight, CalendarDays, Check, ChevronRight, Clock3, MapPin, Search, ShieldCheck, Sparkles, Star, Stethoscope } from 'lucide-react'
+import {
+  ArrowDownRight,
+  ArrowRight,
+  CalendarDays,
+  Check,
+  ChevronRight,
+  Clock3,
+  MapPin,
+  MessageCircle,
+  ShieldCheck,
+  Sparkles,
+  Star,
+  Stethoscope,
+} from 'lucide-react'
 import { api } from '../api/domains.js'
-import { AsyncView, EmptyState, PageTitle } from '../components/ui.jsx'
+import { usePrimaryDentist } from '../hooks/usePrimaryDentist.js'
+import { AsyncView, EmptyState, LoadingState, PageTitle } from '../components/ui.jsx'
 
 export function PublicLayout() {
-  return <div className="public-shell"><header className="public-header"><Link to="/" className="brand-lockup"><span className="brand-mark"><Stethoscope size={21} strokeWidth={2.2} /></span><span>DrNutrident<span className="brand-sub">Dental care, clearly.</span></span></Link><nav className="public-nav"><Link to="/services">Treatments</Link><Link to="/dentists">Find a dentist</Link><Link to="/about">About</Link><Link to="/contact">Contact</Link></nav><div className="header-actions"><Link className="button button-quiet button-small" to="/login">Sign in</Link><Link className="button button-primary button-small" to="/dentists">Book a visit <ArrowRight size={15} /></Link></div></header><Outlet /><footer className="public-footer"><Link to="/" className="footer-brand">DrNutrident</Link><span>Dental care, with a little more clarity.</span><div><Link to="/privacy">Privacy</Link><Link to="/terms">Terms</Link></div></footer></div>
+  return (
+    <div className="public-shell">
+      <header className="public-header">
+        <Link to="/" className="brand-lockup">
+          <span className="brand-mark">
+            <img src="/favicon.svg" alt="Nutrident logo" className="brand-logo-img" />
+          </span>
+          <span>
+            Nutrident<span className="brand-sub">Dental &amp; Diet Clinic</span>
+          </span>
+        </Link>
+        <nav className="public-nav">
+          <Link to="/services">Treatments</Link>
+          <Link to="/doctor">Meet the doctor</Link>
+          <Link to="/pricing">Fees</Link>
+          <Link to="/about">About</Link>
+          <Link to="/contact">Contact</Link>
+        </nav>
+        <div className="header-actions">
+          <Link className="button button-quiet button-small" to="/login">
+            Sign in
+          </Link>
+          <Link className="button button-primary button-small" to="/app/book">
+            Book a visit <ArrowRight size={15} />
+          </Link>
+        </div>
+      </header>
+      <Outlet />
+      <footer className="public-footer">
+        <Link to="/" className="brand-lockup">
+          <span className="brand-mark">
+            <img src="/favicon.svg" alt="Nutrident logo" className="brand-logo-img" />
+          </span>
+          <span>
+            Nutrident<span className="brand-sub">Dental &amp; Diet Clinic</span>
+          </span>
+        </Link>
+        <span>Thoughtful dental and diet care, with precision and clarity.</span>
+        <div>
+          <Link to="/privacy">Privacy</Link>
+          <Link to="/terms">Terms</Link>
+        </div>
+      </footer>
+    </div>
+  )
 }
 
-function DentistCard({ dentist }) {
+export function DoctorCard({ dentist, isAccepting = true }) {
+  if (!dentist) return null
   const name = dentist.user?.name || 'Dental professional'
   const photo = dentist.user?.profilePhoto?.url
-  return <article className="dentist-card"><div className="dentist-card-top"><div className="dentist-avatar">{photo ? <img src={photo} alt={name} /> : <span>{name.split(' ').map((word) => word[0]).slice(0, 2).join('')}</span>}</div><span className="verified-mark"><ShieldCheck size={14} /> Verified</span></div><h3>Dr. {name}</h3><p className="specialty-line">{dentist.specialization || 'General dentistry'}</p><div className="dentist-meta"><span><Star size={14} fill="currentColor" /> {Number(dentist.ratingAverage || 0).toFixed(1)} <small>({dentist.ratingCount || 0})</small></span><span><MapPin size={14} />{dentist.clinicAddress?.city || 'Clinic location'}</span></div><div className="dentist-card-bottom"><strong>₹{Number(dentist.consultationFee || 0).toLocaleString('en-IN')}<small> / visit</small></strong><Link to={`/dentists/${dentist._id}`} aria-label={`View Dr. ${name}`} className="round-link"><ArrowRight size={17} /></Link></div></article>
+
+  return (
+    <article className="dentist-card single-doctor-card">
+      <div className="dentist-card-top">
+        <div className="dentist-avatar">
+          {photo ? (
+            <img src={photo} alt={name} />
+          ) : (
+            <span>
+              {name
+                .split(' ')
+                .map((word) => word[0])
+                .slice(0, 2)
+                .join('')}
+            </span>
+          )}
+        </div>
+        <span className="verified-mark">
+          <ShieldCheck size={14} /> Verified Doctor
+        </span>
+      </div>
+      <h3>Dr. {name}</h3>
+      <p className="specialty-line">{dentist.specialization || 'Dental Surgeon'}</p>
+      <div className="dentist-meta">
+        <span>
+          <Star size={14} fill="currentColor" /> {Number(dentist.ratingAverage || 0).toFixed(1)}{' '}
+          <small>({dentist.ratingCount || 0} reviews)</small>
+        </span>
+        <span>
+          <MapPin size={14} />
+          {dentist.clinicAddress?.city || 'Clinic location'}
+        </span>
+      </div>
+      <div className="dentist-card-bottom">
+        <strong>
+          ₹{Number(dentist.consultationFee || 0).toLocaleString('en-IN')}
+          <small> / visit</small>
+        </strong>
+        {isAccepting ? (
+          <Link to="/app/book" className="button button-primary button-small">
+            Book appointment <ArrowRight size={14} />
+          </Link>
+        ) : (
+          <span className="status-badge status-inactive">Not accepting visits</span>
+        )}
+      </div>
+    </article>
+  )
+}
+
+export function DoctorProfilePage() {
+  const { dentist, reviews, isLoading, isError, error, isAcceptingAppointments } = usePrimaryDentist()
+  const settingsQuery = useQuery({ queryKey: ['clinic-settings'], queryFn: api.settings.get })
+  const settings = settingsQuery.data?.data
+
+  if (isLoading) {
+    return (
+      <main className="profile-page">
+        <LoadingState label="Loading doctor profile…" />
+      </main>
+    )
+  }
+
+  if (isError || !dentist) {
+    return (
+      <main className="profile-page">
+        <EmptyState
+          title="Doctor profile is currently unavailable"
+          description={error?.message || 'Please contact the clinic directly.'}
+        />
+      </main>
+    )
+  }
+
+  const name = dentist.user?.name || 'Care Specialist'
+  const photo = dentist.user?.profilePhoto?.url
+
+  return (
+    <main className="profile-page">
+      {!isAcceptingAppointments && (
+        <div className="notice notice-warn">
+          The doctor is currently not accepting new appointments online. Please call the clinic directly at{' '}
+          {settings?.contactPhone || 'the clinic'} or check back soon.
+        </div>
+      )}
+      <div className="dentist-profile-head">
+        <div className="profile-photo">
+          {photo ? (
+            <img src={photo} alt={`Dr. ${name}`} />
+          ) : (
+            <span>{name.slice(0, 1)}</span>
+          )}
+        </div>
+        <div>
+          <span className="verified-mark">
+            <ShieldCheck size={14} /> Chief Dental Practitioner
+          </span>
+          <h1>Dr. {name}</h1>
+          <p>
+            {dentist.specialization || 'General Dentistry'} · {dentist.experienceYears || 0} years experience
+          </p>
+          <span className="dentist-meta">
+            <Star size={15} fill="currentColor" /> {Number(dentist.ratingAverage || 0).toFixed(1)} from{' '}
+            {dentist.ratingCount || 0} reviews
+          </span>
+        </div>
+        <div className="profile-fee">
+          <small>Consultation fee</small>
+          <strong>₹{Number(dentist.consultationFee || 0).toLocaleString('en-IN')}</strong>
+          {isAcceptingAppointments ? (
+            <Link className="button button-primary" to="/app/book">
+              Book appointment <ArrowRight size={16} />
+            </Link>
+          ) : (
+            <span className="button button-disabled">Appointments paused</span>
+          )}
+        </div>
+      </div>
+
+      <div className="profile-columns">
+        <section className="section-panel">
+          <span className="eyebrow">About the doctor</span>
+          <h2>Thoughtful, personalized care.</h2>
+          <p>{dentist.about || settings?.aboutText || 'Dedicated to providing high quality, gentle dental care.'}</p>
+          <div className="profile-facts">
+            <span>
+              <Stethoscope size={16} />
+              {dentist.qualifications?.join(', ') || 'BDS / Dental Surgeon'}
+            </span>
+            <span>
+              <MapPin size={16} />
+              {[dentist.clinicAddress?.addressLine, dentist.clinicAddress?.city, dentist.clinicAddress?.state]
+                .filter(Boolean)
+                .join(', ') || settings?.address || 'Clinic location'}
+            </span>
+            <span>
+              <Clock3 size={16} />
+              {dentist.languages?.join(', ') || 'English, Hindi'}
+            </span>
+          </div>
+        </section>
+
+        <section className="section-panel">
+          <div className="section-panel-heading">
+            <div>
+              <span className="eyebrow">Patient experiences</span>
+              <h2>Verified reviews</h2>
+            </div>
+          </div>
+          {reviews && reviews.length > 0 ? (
+            reviews.map((review) => (
+              <article className="review-row" key={review._id}>
+                <div>
+                  <strong>{review.patient?.name || 'Verified Patient'}</strong>
+                  <span className="review-stars">{'★'.repeat(review.rating || 5)}</span>
+                </div>
+                <p>{review.comment}</p>
+                {review.reply?.text && (
+                  <div className="review-reply">
+                    <small>Doctor’s response:</small>
+                    <p>{review.reply.text}</p>
+                  </div>
+                )}
+              </article>
+            ))
+          ) : (
+            <p className="muted-copy">No public reviews have been submitted yet.</p>
+          )}
+        </section>
+      </div>
+    </main>
+  )
 }
 
 export function PublicHome() {
-  const dentists = useQuery({ queryKey: ['public-dentists'], queryFn: () => api.dentists.list({ limit: 3 }) })
+  const { dentist, isAcceptingAppointments } = usePrimaryDentist()
   const treatments = useQuery({ queryKey: ['treatments'], queryFn: api.treatments.list })
   const settings = useQuery({ queryKey: ['clinic-settings'], queryFn: api.settings.get })
-  return <main>
-    <section className="home-hero">
-      <div className="hero-content"><span className="hero-kicker"><span /> Thoughtful dental care starts here</span><h1>Healthy teeth.<br /><em>Clear choices.</em></h1><p>Find a trusted dentist, see available times and plan your next step with less uncertainty.</p><div className="hero-actions"><Link to="/dentists" className="button button-primary">Find your dentist <ArrowRight size={17} /></Link><Link to="/services" className="text-link">Explore treatments <ArrowDownRight size={16} /></Link></div><div className="hero-points"><span><Check size={15} /> Verified dentists</span><span><Check size={15} /> Clear appointment fees</span></div></div>
-      <div className="hero-image-wrap"><img className="hero-image" src="https://images.unsplash.com/photo-1606811971618-4486d14f3f99?auto=format&fit=crop&w=1100&q=85" alt="Dentist preparing a patient for a careful dental examination" /><div className="hero-image-caption"><span className="caption-icon"><CalendarDays size={18} /></span><span><strong>Care that fits your day</strong><small>Choose a time that works for you</small></span><ArrowRight size={18} /></div><div className="hero-index"><span>01</span><i /> A better visit begins</div></div>
-      <span className="hero-orbit hero-orbit-one" /><span className="hero-orbit hero-orbit-two" />
-    </section>
-    <section className="trust-strip"><div><strong>One clear place</strong><span>for your dental care</span></div><div><strong>Real availability</strong><span>from verified clinicians</span></div><div><strong>Connected records</strong><span>appointments to aftercare</span></div></section>
-    <section className="public-section section-dentists"><div className="section-heading"><div><span className="eyebrow">Meet your care team</span><h2>Good care begins<br />with the right dentist.</h2></div><Link to="/dentists" className="text-link">View all dentists <ArrowRight size={16} /></Link></div><AsyncView query={dentists} empty={!dentists.isLoading && !dentists.isError && !(dentists.data?.data || []).length} emptyTitle="No dentists are listed yet"><div className="dentist-grid">{(dentists.data?.data || []).map((dentist) => <DentistCard key={dentist._id} dentist={dentist} />)}</div></AsyncView></section>
-    <section className="public-section care-section"><div className="care-image"><img src="https://images.unsplash.com/photo-1609840114035-3c981b782dfe?auto=format&fit=crop&w=1000&q=85" alt="Dental instruments prepared for a patient visit" /><div className="care-note"><Sparkles size={17} /><span><strong>Care, connected</strong><small>From first visit to follow-up</small></span></div></div><div className="care-copy"><span className="eyebrow">Your next step, made simpler</span><h2>More time for care.<br /><em>Less time figuring it out.</em></h2><p>Book appointments, keep your records close and understand what comes next, all in one place.</p><div className="care-list"><span><i>01</i><strong>Choose a dentist and time</strong><ChevronRight size={16} /></span><span><i>02</i><strong>Keep plans and records together</strong><ChevronRight size={16} /></span><span><i>03</i><strong>Stay in touch with your clinic</strong><ChevronRight size={16} /></span></div><Link to="/dentists" className="button button-outline">Start with a dentist <ArrowRight size={16} /></Link></div></section>
-    <section className="treatment-band"><div><span className="eyebrow">Our treatment catalog</span><h2>Care for every kind<br />of smile.</h2></div><AsyncView query={treatments} empty={!treatments.isLoading && !treatments.isError && !(treatments.data?.data || []).length} emptyTitle="Treatment details are not available yet"><div className="treatment-chips">{(treatments.data?.data || []).slice(0, 6).map((item) => <Link to="/services" key={item._id}>{item.name}<ArrowRight size={15} /></Link>)}</div></AsyncView></section>
-    <section className="booking-callout"><div><span className="eyebrow">Your care, at your pace</span><h2>A small step today can<br />make tomorrow easier.</h2></div><Link className="button button-dark" to="/dentists">Book a dental visit <ArrowRight size={17} /></Link><span className="callout-number">DN / 01</span></section>
-    {settings.data?.data?.name && <div className="clinic-name-footnote">{settings.data.data.name}{settings.data.data.phone ? ` · ${settings.data.data.phone}` : ''}</div>}
-  </main>
+
+  return (
+    <main>
+      <section className="home-hero">
+        <div className="hero-content">
+          <span className="hero-kicker">
+            <span /> Personalized dental care you can trust
+          </span>
+          <h1>
+            Healthy teeth.<br />
+            <em>Clear choices.</em>
+          </h1>
+          <p>
+            Welcome to {settings.data?.data?.clinicName || 'Nutrident Dental Clinic'}. Meet Dr.{' '}
+            {dentist?.user?.name || 'our doctor'}, check convenient appointment hours, and book your visit online.
+          </p>
+          <div className="hero-actions">
+            <Link to="/app/book" className="button button-primary">
+              Book your visit <ArrowRight size={17} />
+            </Link>
+            <Link to="/doctor" className="button button-outline">
+              Meet Dr. {dentist?.user?.name || 'the Doctor'} <ArrowRight size={16} />
+            </Link>
+          </div>
+          <div className="hero-points">
+            <span>
+              <Check size={15} /> Single dedicated clinician
+            </span>
+            <span>
+              <Check size={15} /> Transparent upfront fees
+            </span>
+          </div>
+        </div>
+        <div className="hero-image-wrap">
+          <img
+            className="hero-image"
+            src={
+              dentist?.user?.profilePhoto?.url ||
+              'https://images.unsplash.com/photo-1606811971618-4486d14f3f99?auto=format&fit=crop&w=1100&q=85'
+            }
+            alt="Dentist preparing for patient visit"
+          />
+          <div className="hero-image-caption">
+            <span className="caption-icon">
+              <CalendarDays size={18} />
+            </span>
+            <span>
+              <strong>Care that fits your day</strong>
+              <small>Instant slot confirmation online</small>
+            </span>
+            <ArrowRight size={18} />
+          </div>
+          <div className="hero-index">
+            <span>01</span>
+            <i /> A better visit begins
+          </div>
+        </div>
+        <span className="hero-orbit hero-orbit-one" />
+        <span className="hero-orbit hero-orbit-two" />
+      </section>
+
+      <section className="trust-strip">
+        <div>
+          <strong>Personal clinician</strong>
+          <span>One doctor dedicated to your family</span>
+        </div>
+        <div>
+          <strong>Real-time availability</strong>
+          <span>Instant live appointment booking</span>
+        </div>
+        <div>
+          <strong>Connected care</strong>
+          <span>From digital records to aftercare</span>
+        </div>
+      </section>
+
+      {dentist && (
+        <section className="public-section section-dentists">
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">Your clinician</span>
+              <h2>
+                Good care begins<br />
+                with the right doctor.
+              </h2>
+            </div>
+            <Link to="/doctor" className="text-link">
+              Read doctor profile <ArrowRight size={16} />
+            </Link>
+          </div>
+          <div className="single-doctor-spotlight">
+            <DoctorCard dentist={dentist} isAccepting={isAcceptingAppointments} />
+          </div>
+        </section>
+      )}
+
+      <section className="public-section care-section">
+        <div className="care-image">
+          <img
+            src="https://images.unsplash.com/photo-1609840114035-3c981b782dfe?auto=format&fit=crop&w=1000&q=85"
+            alt="Dental instruments prepared for a patient visit"
+          />
+          <div className="care-note">
+            <Sparkles size={17} />
+            <span>
+              <strong>Care, connected</strong>
+              <small>From first visit to follow-up</small>
+            </span>
+          </div>
+        </div>
+        <div className="care-copy">
+          <span className="eyebrow">Your next step, made simpler</span>
+          <h2>
+            More time for care.<br />
+            <em>Less time figuring it out.</em>
+          </h2>
+          <p>Book visits, keep dental records close and understand what comes next, all in one place.</p>
+          <div className="care-list">
+            <span>
+              <i>01</i>
+              <strong>Pick your preferred slot</strong>
+              <ChevronRight size={16} />
+            </span>
+            <span>
+              <i>02</i>
+              <strong>Keep treatment records together</strong>
+              <ChevronRight size={16} />
+            </span>
+            <span>
+              <i>03</i>
+              <strong>Stay in touch with your clinic</strong>
+              <ChevronRight size={16} />
+            </span>
+          </div>
+          <Link to="/app/book" className="button button-outline">
+            Schedule an appointment <ArrowRight size={16} />
+          </Link>
+        </div>
+      </section>
+
+      <section className="treatment-band">
+        <div>
+          <span className="eyebrow">Our treatment catalog</span>
+          <h2>
+            Care for every kind<br />
+            of smile.
+          </h2>
+        </div>
+        <AsyncView
+          query={treatments}
+          empty={!treatments.isLoading && !treatments.isError && !(treatments.data?.data || []).length}
+          emptyTitle="Treatment details are not available yet"
+        >
+          <div className="treatment-chips">
+            {(treatments.data?.data || []).slice(0, 6).map((item) => (
+              <Link to="/services" key={item._id}>
+                {item.name}
+                <ArrowRight size={15} />
+              </Link>
+            ))}
+          </div>
+        </AsyncView>
+      </section>
+
+      <section className="booking-callout">
+        <div>
+          <span className="eyebrow">Your care, at your pace</span>
+          <h2>
+            A small step today can<br />
+            make tomorrow easier.
+          </h2>
+        </div>
+        <Link className="button button-dark" to="/app/book">
+          Book a visit <ArrowRight size={17} />
+        </Link>
+        <span className="callout-number">DN / 01</span>
+      </section>
+
+      {settings.data?.data?.clinicName && (
+        <div className="clinic-name-footnote">
+          {settings.data.data.clinicName}
+          {settings.data.data.contactPhone ? ` · ${settings.data.data.contactPhone}` : ''}
+          {settings.data.data.address ? ` · ${settings.data.data.address}` : ''}
+        </div>
+      )}
+    </main>
+  )
 }
 
 export function DentistDirectory() {
-  const [searchParams, setSearchParams] = useSearchParams()
-  const [filters, setFilters] = useState(() => Object.fromEntries(searchParams.entries()))
-  const queryFilters = useMemo(() => Object.fromEntries(searchParams.entries()), [searchParams])
-  const query = useQuery({ queryKey: ['dentists', queryFilters], queryFn: () => api.dentists.list({ ...queryFilters, page: queryFilters.page || 1, limit: 12 }) })
-  const list = query.data?.data || []
-  const currentPage = Number(queryFilters.page || 1)
-  const totalPages = Math.max(1, Math.ceil((query.data?.meta?.total || 0) / 12))
-  const setFilter = (key, value) => setFilters((current) => ({ ...current, [key]: value }))
-  const applyFilters = (event) => {
-    event.preventDefault()
-    setSearchParams(Object.fromEntries(Object.entries(filters).filter(([, value]) => value).concat([['page', '1']])))
-  }
-  return <main className="directory-page"><div className="directory-intro"><span className="eyebrow">Browse our care team</span><h1>Find a dentist<br /><em>you can feel good about.</em></h1><p>Compare specialties, availability and consultation fees before choosing your next visit.</p></div><form className="directory-filter" onSubmit={applyFilters}><label className="search-field"><Search size={19} /><input aria-label="Search dentists" placeholder="Search by dentist name" value={filters.search || ''} onChange={(event) => setFilter('search', event.target.value)} /></label><div className="directory-filter-grid"><label className="field"><span className="field-label">Specialty</span><input className="input" value={filters.specialization || ''} onChange={(event) => setFilter('specialization', event.target.value)} /></label><label className="field"><span className="field-label">City</span><input className="input" value={filters.city || ''} onChange={(event) => setFilter('city', event.target.value)} /></label><label className="field"><span className="field-label">Minimum rating</span><select className="input" value={filters.minRating || ''} onChange={(event) => setFilter('minRating', event.target.value)}><option value="">Any rating</option><option value="3">3+ stars</option><option value="4">4+ stars</option><option value="4.5">4.5+ stars</option></select></label><label className="field"><span className="field-label">Maximum fee</span><input className="input" type="number" min="0" value={filters.maxFee || ''} onChange={(event) => setFilter('maxFee', event.target.value)} /></label><label className="field"><span className="field-label">Sort by</span><select className="input" value={filters.sort || '-ratingAverage'} onChange={(event) => setFilter('sort', event.target.value)}><option value="-ratingAverage">Highest rated</option><option value="consultationFee">Lowest fee</option><option value="-consultationFee">Highest fee</option><option value="experienceYears">Experience</option></select></label></div><div className="directory-filter-actions"><button className="button button-primary" type="submit">Apply filters <ArrowRight size={16} /></button><button type="button" className="button button-quiet" onClick={() => { setFilters({}); setSearchParams({}) }}>Clear</button></div></form><div className="directory-results"><div className="result-count">{query.isSuccess ? `${query.data?.meta?.total ?? list.length} clinicians` : 'Dentist directory'}</div><AsyncView query={query} empty={!query.isLoading && !query.isError && list.length === 0} emptyTitle="No dentists match these filters"><div className="dentist-grid">{list.map((dentist) => <DentistCard key={dentist._id} dentist={dentist} />)}</div></AsyncView>{query.data?.meta?.total > 12 && <div className="pagination"><button className="button button-outline button-small" disabled={currentPage <= 1} onClick={() => setSearchParams({ ...filters, page: String(currentPage - 1) })}>Previous</button><span>Page {currentPage} of {totalPages}</span><button className="button button-outline button-small" disabled={currentPage >= totalPages} onClick={() => setSearchParams({ ...filters, page: String(currentPage + 1) })}>Next</button></div>}</div></main>
+  return <Navigate to="/doctor" replace />
 }
 
 export function DentistProfile() {
-  const { id } = useParams()
-  const query = useQuery({ queryKey: ['dentist', id], queryFn: () => api.dentists.detail(id) })
-  const response = query.data?.data
-  const dentist = response?.dentist
-  const reviews = response?.reviews || []
-  return <main className="profile-page"><AsyncView query={query} empty={!query.isLoading && !query.isError && !dentist}><EmptyState title="This dentist could not be found" /></AsyncView>{dentist && <><Link to="/dentists" className="back-link">← All dentists</Link><div className="dentist-profile-head"><div className="profile-photo">{dentist.user?.profilePhoto?.url ? <img src={dentist.user.profilePhoto.url} alt="" /> : <span>{dentist.user?.name?.slice(0, 1) || 'D'}</span>}</div><div><span className="verified-mark"><ShieldCheck size={14} /> Verified profile</span><h1>Dr. {dentist.user?.name}</h1><p>{dentist.specialization} · {dentist.experienceYears || 0} years experience</p><span className="dentist-meta"><Star size={15} fill="currentColor" /> {Number(dentist.ratingAverage || 0).toFixed(1)} from {dentist.ratingCount || 0} reviews</span></div><div className="profile-fee"><small>Consultation from</small><strong>₹{Number(dentist.consultationFee || 0).toLocaleString('en-IN')}</strong><Link className="button button-primary" to={`/app/book/${dentist._id}`}>Choose a time <ArrowRight size={16} /></Link></div></div><div className="profile-columns"><section className="section-panel"><span className="eyebrow">About</span><h2>Care with context.</h2><p>{dentist.about || 'Profile details have not been added yet.'}</p><div className="profile-facts"><span><Stethoscope size={16} />{dentist.qualifications?.join(', ') || 'Qualifications not listed'}</span><span><MapPin size={16} />{[dentist.clinicAddress?.city, dentist.clinicAddress?.state].filter(Boolean).join(', ') || 'Clinic location not listed'}</span><span><Clock3 size={16} />{dentist.languages?.join(', ') || 'Languages not listed'}</span></div></section><section className="section-panel"><div className="section-panel-heading"><div><span className="eyebrow">Patient experiences</span><h2>Reviews</h2></div></div>{reviews.length ? reviews.map((review) => <article className="review-row" key={review._id}><div><strong>{review.patient?.name || 'Patient'}</strong><span className="review-stars">{'★'.repeat(review.rating || 0)}</span></div><p>{review.comment}</p>{review.reply?.text && <p className="review-reply">{review.reply.text}</p>}</article>) : <p className="muted-copy">No reviews have been submitted yet.</p>}</section></div></>}</main>
+  return <Navigate to="/doctor" replace />
 }
 
 function CatalogPage({ title, eyebrow, description, queryKey, queryFn, renderItem, emptyTitle }) {
   const query = useQuery({ queryKey: [queryKey], queryFn })
   const data = query.data?.data || []
-  return <main className="catalog-page"><PageTitle eyebrow={eyebrow} title={title} description={description} /><AsyncView query={query} empty={!query.isLoading && !query.isError && data.length === 0} emptyTitle={emptyTitle}><div className="catalog-grid">{data.map(renderItem)}</div></AsyncView></main>
+  return (
+    <main className="catalog-page">
+      <PageTitle eyebrow={eyebrow} title={title} description={description} />
+      <AsyncView query={query} empty={!query.isLoading && !query.isError && data.length === 0} emptyTitle={emptyTitle}>
+        <div className="catalog-grid">{data.map(renderItem)}</div>
+      </AsyncView>
+    </main>
+  )
 }
 
 export function ServicesPage() {
-  return <CatalogPage eyebrow="Treatment catalog" title="Care that meets you where you are." description="Explore the treatments currently listed by the clinic. Your dentist can help decide what is right for you." queryKey="treatments" queryFn={api.treatments.list} emptyTitle="Treatments are not listed yet" renderItem={(item) => <article className="catalog-item" key={item._id}><span className="catalog-icon"><Sparkles size={18} /></span><div><h2>{item.name}</h2><p>{item.description || 'Treatment information will be provided by your care team.'}</p>{item.category && <small>{item.category}</small>}</div></article>} />
+  return (
+    <CatalogPage
+      eyebrow="Treatment catalog"
+      title="Care that meets you where you are."
+      description="Explore the treatments currently offered by the clinic. Your doctor will tailor every step to your needs."
+      queryKey="treatments"
+      queryFn={api.treatments.list}
+      emptyTitle="Treatments are not listed yet"
+      renderItem={(item) => (
+        <article className="catalog-item" key={item._id}>
+          <span className="catalog-icon">
+            <Sparkles size={18} />
+          </span>
+          <div>
+            <h2>{item.name}</h2>
+            <p>{item.description || 'Treatment information will be provided by your doctor.'}</p>
+            {item.category && <small>{item.category}</small>}
+            {item.defaultCost > 0 && <strong>From ₹{Number(item.defaultCost).toLocaleString('en-IN')}</strong>}
+          </div>
+        </article>
+      )}
+    />
+  )
 }
 
 export function PricingPage() {
-  const dentists = useQuery({ queryKey: ['dentists', { limit: 100 }], queryFn: () => api.dentists.list({ limit: 100 }) })
-  const settings = useQuery({ queryKey: ['clinic-settings'], queryFn: api.settings.get })
-  const fees = (dentists.data?.data || []).map((item) => Number(item.consultationFee || 0))
-  return <main className="catalog-page"><PageTitle eyebrow="Fees, in the open" title="Know what to expect." description="Consultation fees shown here come directly from dentist profiles. The final appointment total is confirmed by the clinic before payment." /><AsyncView query={dentists} empty={false}><section className="pricing-panel"><div><span className="eyebrow">Consultation range</span><strong>{fees.length ? `₹${Math.min(...fees).toLocaleString('en-IN')} – ₹${Math.max(...fees).toLocaleString('en-IN')}` : 'No fees listed'}</strong><p>Based on the currently available dentist profiles.</p></div><div><span className="eyebrow">Platform fee</span><strong>₹{Number(settings.data?.data?.platformFee || 0).toLocaleString('en-IN')}</strong><p>Shown separately when you book.</p></div><Link to="/dentists" className="button button-primary">Compare dentists <ArrowRight size={16} /></Link></section></AsyncView></main>
+  const { dentist } = usePrimaryDentist()
+  const settingsQuery = useQuery({ queryKey: ['clinic-settings'], queryFn: api.settings.get })
+  const settings = settingsQuery.data?.data
+
+  const consultationFee = Number(dentist?.consultationFee || 0)
+  const platformFee = Number(settings?.platformFee || 0)
+  const refundHours = Number(settings?.cancellationFullRefundHours || 24)
+
+  return (
+    <main className="catalog-page">
+      <PageTitle
+        eyebrow="Fees, in the open"
+        title="Know what to expect."
+        description="Our fees are straightforward with no hidden consultation costs."
+      />
+      <section className="pricing-panel">
+        <div>
+          <span className="eyebrow">Doctor consultation</span>
+          <strong>{consultationFee > 0 ? `₹${consultationFee.toLocaleString('en-IN')}` : 'Fee on appointment'}</strong>
+          <p>Standard consultation fee with Dr. {dentist?.user?.name || 'our doctor'}.</p>
+        </div>
+        <div>
+          <span className="eyebrow">Platform fee</span>
+          <strong>₹{platformFee.toLocaleString('en-IN')}</strong>
+          <p>Online booking and secure scheduling processing.</p>
+        </div>
+        <div>
+          <span className="eyebrow">Cancellation policy</span>
+          <strong>{refundHours} hours</strong>
+          <p>Full refund when cancelled at least {refundHours} hours before your visit.</p>
+        </div>
+        <Link to="/app/book" className="button button-primary">
+          Book appointment <ArrowRight size={16} />
+        </Link>
+      </section>
+    </main>
+  )
+}
+
+export function AboutPage() {
+  const { dentist } = usePrimaryDentist()
+  const settingsQuery = useQuery({ queryKey: ['clinic-settings'], queryFn: api.settings.get })
+  const settings = settingsQuery.data?.data
+
+  return (
+    <main className="catalog-page">
+      <PageTitle eyebrow="About the practice" title="A more considered dental visit." />
+      <div className="section-panel">
+        <h2>{settings?.clinicName || 'Nutrident Dental Clinic'}</h2>
+        <p style={{ whiteSpace: 'pre-line', lineHeight: 1.7 }}>
+          {settings?.aboutText ||
+            'Nutrident is dedicated to providing high-quality, gentle dental and nutritional guidance under one roof. Our focus is long-term oral health through thoughtful examinations and transparent treatment.'}
+        </p>
+        {dentist && (
+          <div style={{ marginTop: '1.5rem' }}>
+            <Link to="/doctor" className="button button-outline">
+              Meet Dr. {dentist.user?.name || 'the Doctor'} <ArrowRight size={15} />
+            </Link>
+          </div>
+        )}
+      </div>
+    </main>
+  )
+}
+
+export function ContactPage() {
+  const settingsQuery = useQuery({ queryKey: ['clinic-settings'], queryFn: api.settings.get })
+  const settings = settingsQuery.data?.data
+
+  return (
+    <main className="catalog-page">
+      <PageTitle eyebrow="Contact" title="Get in touch with your clinic." />
+      {settingsQuery.isLoading ? (
+        <LoadingState />
+      ) : settingsQuery.isError ? (
+        <p className="muted-copy">{settingsQuery.error.message}</p>
+      ) : (
+        <div className="section-panel">
+          <h2>{settings?.clinicName || 'Nutrident Dental Clinic'}</h2>
+          <div className="contact-details" style={{ display: 'grid', gap: '0.8rem', marginTop: '1rem' }}>
+            {settings?.address && (
+              <div>
+                <strong>Address:</strong> <p>{settings.address}</p>
+              </div>
+            )}
+            {settings?.openingHours && (
+              <div>
+                <strong>Clinic Hours:</strong> <p>{settings.openingHours}</p>
+              </div>
+            )}
+            {settings?.contactPhone && (
+              <div>
+                <strong>Phone:</strong>{' '}
+                <a href={`tel:${settings.contactPhone}`}>{settings.contactPhone}</a>
+              </div>
+            )}
+            {settings?.contactEmail && (
+              <div>
+                <strong>Email:</strong>{' '}
+                <a href={`mailto:${settings.contactEmail}`}>{settings.contactEmail}</a>
+              </div>
+            )}
+            {settings?.whatsappNumber && (
+              <div>
+                <strong>WhatsApp:</strong>{' '}
+                <a
+                  href={`https://wa.me/${settings.whatsappNumber.replace(/\D/g, '')}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="whatsapp-link"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', color: '#16847c' }}
+                >
+                  <MessageCircle size={16} /> Chat on WhatsApp ({settings.whatsappNumber})
+                </a>
+              </div>
+            )}
+            {settings?.mapUrl && (
+              <div>
+                <a
+                  href={settings.mapUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="button button-outline button-small"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', marginTop: '0.5rem' }}
+                >
+                  <MapPin size={15} /> View on Google Maps
+                </a>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </main>
+  )
+}
+
+export function LegalPage({ type = 'privacy' }) {
+  const settingsQuery = useQuery({ queryKey: ['clinic-settings'], queryFn: api.settings.get })
+  const settings = settingsQuery.data?.data
+  const isPrivacy = type === 'privacy'
+
+  const title = isPrivacy ? 'Privacy Policy' : 'Terms of Service'
+  const customText = isPrivacy ? settings?.privacyPolicy : settings?.termsOfService
+
+  return (
+    <main className="catalog-page">
+      <PageTitle eyebrow="Legal information" title={title} />
+      <div className="section-panel">
+        {customText ? (
+          <div style={{ whiteSpace: 'pre-line', lineHeight: 1.7 }}>{customText}</div>
+        ) : (
+          <p className="muted-copy">
+            {isPrivacy
+              ? 'Nutrident Dental Clinic respects your privacy. All patient medical data and consultation records are handled confidentially in compliance with standard clinical data privacy practices.'
+              : 'By booking an appointment or using services at Nutrident Dental Clinic, you agree to adhere to clinic attendance and cancellation policies.'}
+          </p>
+        )}
+      </div>
+    </main>
+  )
 }
 
 export function SimplePublicPage({ title, eyebrow, children }) {
-  return <main className="catalog-page"><PageTitle eyebrow={eyebrow} title={title} />{children}</main>
+  return (
+    <main className="catalog-page">
+      <PageTitle eyebrow={eyebrow} title={title} />
+      {children}
+    </main>
+  )
 }

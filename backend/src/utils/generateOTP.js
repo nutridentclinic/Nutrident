@@ -7,6 +7,19 @@ const generateOTP = () => {
   return { otp, hash };
 };
 
-const hashOTP = (otp) => crypto.createHash('sha256').update(otp).digest('hex');
+const hashOTP = (otp) => crypto.createHash('sha256').update(String(otp)).digest('hex');
 
-module.exports = { generateOTP, hashOTP };
+const compareOTP = (candidateOtp, storedHash) => {
+  if (!candidateOtp || !storedHash) return false;
+  try {
+    const candidateHash = hashOTP(candidateOtp);
+    const a = Buffer.from(candidateHash, 'hex');
+    const b = Buffer.from(storedHash, 'hex');
+    if (a.length !== b.length) return false;
+    return crypto.timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
+};
+
+module.exports = { generateOTP, hashOTP, compareOTP };

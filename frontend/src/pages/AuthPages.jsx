@@ -3,13 +3,13 @@ import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-do
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { ArrowLeft, ArrowRight, Check, HeartPulse, ShieldCheck } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Check, ShieldCheck } from 'lucide-react'
 import { api } from '../api/domains.js'
 import { useAuthStore } from '../store/auth.js'
 import { Field, TextInput, useToast } from '../components/ui.jsx'
 
 function AuthShell({ eyebrow, title, description, children, asideTitle = 'A calmer way to care for your smile.' }) {
-  return <main className="auth-page"><section className="auth-aside"><Link to="/" className="brand-lockup"><span className="brand-mark"><HeartPulse size={21} /></span><span>DrNutrident<span className="brand-sub">Dental care, clearly.</span></span></Link><div className="auth-aside-copy"><span className="eyebrow">Care that connects</span><h2>{asideTitle}</h2><p>Appointments, treatment plans and your records, thoughtfully brought together.</p><span className="auth-aside-rule" /></div><div className="auth-aside-bottom"><ShieldCheck size={16} /><span>Your account is protected by the clinic’s secure sign-in.</span></div></section><section className="auth-form-wrap"><div className="auth-form"><span className="eyebrow">{eyebrow}</span><h1>{title}</h1><p className="auth-description">{description}</p>{children}</div></section></main>
+  return <main className="auth-page"><section className="auth-aside"><Link to="/" className="brand-lockup"><span className="brand-mark"><img src="/favicon.svg" alt="Nutrident logo" className="brand-logo-img" /></span><span>Nutrident<span className="brand-sub">Dental and Diet Clinic</span></span></Link><div className="auth-aside-copy"><span className="eyebrow">Care that connects</span><h2>{asideTitle}</h2><p>Appointments, treatment plans and your records, thoughtfully brought together.</p><span className="auth-aside-rule" /></div><div className="auth-aside-bottom"><ShieldCheck size={16} /><span>Your account is protected by the clinic’s secure sign-in.</span></div></section><section className="auth-form-wrap"><div className="auth-form"><span className="eyebrow">{eyebrow}</span><h1>{title}</h1><p className="auth-description">{description}</p>{children}</div></section></main>
 }
 
 function getHome(role) {
@@ -26,7 +26,7 @@ const registerSchema = z.object({
 
 export function LoginPage() {
   const [error, setError] = useState('')
-  const { register, handleSubmit, setError: setFieldError, formState: { errors: fieldErrors, isSubmitting } } = useForm({ resolver: zodResolver(loginSchema), defaultValues: { email: '', password: '' } })
+  const { register, handleSubmit, setValue, setError: setFieldError, formState: { errors: fieldErrors, isSubmitting } } = useForm({ resolver: zodResolver(loginSchema), defaultValues: { email: '', password: '' } })
   const setSession = useAuthStore((state) => state.setSession)
   const navigate = useNavigate()
   const location = useLocation()
@@ -39,6 +39,7 @@ export function LoginPage() {
       setSession(result.data)
       navigate(location.state?.returnTo || getHome(result.data.user?.role), { replace: true })
     } catch (cause) {
+      setValue('password', '')
       Object.entries(cause.fieldErrors || {}).forEach(([name, message]) => setFieldError(name, { type: 'server', message }))
       setError(cause.message)
     }

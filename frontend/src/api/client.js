@@ -1,14 +1,35 @@
 import axios from 'axios'
 import { useAuthStore } from '../store/auth.js'
 
+const getBaseUrl = () => {
+  const envUrl = import.meta.env.VITE_API_BASE_URL
+  if (envUrl) return envUrl
+  if (import.meta.env.PROD) {
+    throw new Error('VITE_API_BASE_URL environment variable is required in production.')
+  }
+  return '/api'
+}
+
 const client = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || 'https://drnutrident-backend-wj1n.onrender.com/api',
+  baseURL: getBaseUrl(),
   timeout: 30000,
 })
 
 let refreshPromise
 let pendingRequestsCount = 0
 let wakingTimer = null
+const pendingControllers = new Set()
+
+export const abortInFlightRequests = () => {
+  for (const controller of pendingControllers) {
+    try {
+      controller.abort()
+    } catch {
+      // ignore
+    }
+  }
+  pendingControllers.clear()
+}
 
 const notifyWakingState = (waking) => {
   if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
@@ -41,16 +62,31 @@ const settleRequest = () => {
 client.interceptors.request.use((config) => {
   const token = useAuthStore.getState().accessToken
   if (token) config.headers.Authorization = `Bearer ${token}`
+
+  // Register AbortController to support immediate abort on logout
+  if (!config.signal) {
+    const controller = new AbortController()
+    config.signal = controller.signal
+    config._controller = controller
+    pendingControllers.add(controller)
+  }
+
   startTracking()
   return config
 })
 
 client.interceptors.response.use(
   (response) => {
+    if (response.config?._controller) {
+      pendingControllers.delete(response.config._controller)
+    }
     settleRequest()
     return response
   },
   async (error) => {
+    if (error.config?._controller) {
+      pendingControllers.delete(error.config._controller)
+    }
     settleRequest()
     const request = error.config
     const url = request?.url || ''
@@ -58,7 +94,7 @@ client.interceptors.response.use(
 
     if (error.response?.status === 401 && request && !request._retried && !isAuthRequest) {
       request._retried = true
-      const { refreshToken, setTokens, clearSession } = useAuthStore.getState()
+      const { refreshToken, setTokens } = useAuthStore.getState()
 
       if (refreshToken) {
         refreshPromise ||= axios
@@ -78,13 +114,14 @@ client.interceptors.response.use(
           request.headers.Authorization = `Bearer ${tokens.accessToken}`
           return client(request)
         } catch {
-          clearSession()
-          if (window.location.pathname !== '/login') {
-            window.location.assign('/login?reason=expired')
-          }
+          import('../auth/session.js').then(({ logout }) => {
+            logout({ reason: 'expired' })
+          })
         }
       } else {
-        clearSession()
+        import('../auth/session.js').then(({ logout }) => {
+          logout({ reason: 'expired' })
+        })
       }
     }
 

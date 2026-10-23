@@ -6,10 +6,11 @@ import { api } from './api/domains.js'
 import { useAuthStore } from './store/auth.js'
 import PortalLayout from './layouts/PortalLayout.jsx'
 import { LoadingState } from './components/ui.jsx'
-import { DentistDirectory, DentistProfile, PublicHome, PublicLayout, PricingPage, ServicesPage, SimplePublicPage } from './pages/PublicPages.jsx'
+import { AboutPage, ContactPage, DentistDirectory, DentistProfile, DoctorProfilePage, LegalPage, PricingPage, PublicHome, PublicLayout, ServicesPage, SimplePublicPage } from './pages/PublicPages.jsx'
 import { PatientAppointments, AppointmentBooking, AppointmentDetail, PatientBilling, PatientCare, PatientDashboard, PatientFamily, PatientPrescriptions, PatientProfile, PatientProfilePhoto, PatientRecords } from './pages/PatientPages.jsx'
 import { ClinicalRecord, DentistAvailability, DentistDashboard, DentistProfilePage, DentistReviews, DentistSchedule, PatientDirectory, QueuePage } from './pages/TeamPages.jsx'
 import { AppointmentLookup, InvoiceCreator, NotificationsPage, ReceptionPage } from './pages/ReceptionPages.jsx'
+import SharedSettingsPage from './pages/SharedSettingsPage.jsx'
 import './App.css'
 
 const roleHome = { patient: '/app', dentist: '/dentist', receptionist: '/reception', admin: '/admin' }
@@ -22,25 +23,101 @@ const VerifyOtpPage = lazy(() => import('./pages/AuthPages.jsx').then((module) =
 const ForgotPasswordPage = lazy(() => import('./pages/AuthPages.jsx').then((module) => ({ default: module.ForgotPasswordPage })))
 const ResetPasswordPage = lazy(() => import('./pages/AuthPages.jsx').then((module) => ({ default: module.ResetPasswordPage })))
 
+import { logout } from './auth/session.js'
+
+function GuestOnly({ children }) {
+  const { accessToken, user } = useAuthStore()
+  if (accessToken && user) {
+    return <Navigate to={roleHome[user.role] || '/app'} replace />
+  }
+  return children
+}
+
 function RequireRole({ roles }) {
-  const { user, profile, accessToken, setSession } = useAuthStore()
+  const { accessToken, setUserAndProfile } = useAuthStore()
   const location = useLocation()
-  const shouldLoadProfile = !!accessToken && (!user || (user.role === 'dentist' && !profile))
-  const bootstrap = useQuery({ queryKey: ['auth-bootstrap'], queryFn: api.auth.me, enabled: shouldLoadProfile, retry: false })
 
   useEffect(() => {
-    if (bootstrap.data?.data) setSession({ ...bootstrap.data.data, accessToken: useAuthStore.getState().accessToken, refreshToken: useAuthStore.getState().refreshToken })
-  }, [bootstrap.data, setSession])
+    if (!accessToken) {
+      logout({ reason: 'expired' })
+    }
+  }, [accessToken])
 
-  if (!accessToken) return <Navigate to="/login" replace state={{ returnTo: location.pathname + location.search }} />
-  if (shouldLoadProfile && bootstrap.isLoading) return <LoadingState label="Restoring your secure session…" />
-  const currentUser = user || bootstrap.data?.data?.user
-  const currentProfile = profile || bootstrap.data?.data?.profile
-  if (!currentUser) return <Navigate to="/login?reason=expired" replace />
-  if (!roles.includes(currentUser.role)) return <Navigate to={roleHome[currentUser.role] || '/'} replace />
-  if (currentUser.role === 'dentist' && currentProfile && !(currentProfile.weeklyAvailability || []).some((day) => day.slots?.length) && location.pathname !== '/dentist/availability') {
+  const meQuery = useQuery({
+    queryKey: ['auth-me'],
+    queryFn: api.auth.me,
+    enabled: !!accessToken,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
+    retry: false,
+    staleTime: 0,
+  })
+
+  useEffect(() => {
+    const handleRevalidate = (event) => {
+      if (
+        (event.type === 'pageshow' && event.persisted) ||
+        event.type === 'popstate' ||
+        event.type === 'focus' ||
+        (event.type === 'visibilitychange' && document.visibilityState === 'visible')
+      ) {
+        meQuery.refetch()
+      }
+    }
+
+    window.addEventListener('pageshow', handleRevalidate)
+    window.addEventListener('popstate', handleRevalidate)
+    window.addEventListener('focus', handleRevalidate)
+    document.addEventListener('visibilitychange', handleRevalidate)
+
+    return () => {
+      window.removeEventListener('pageshow', handleRevalidate)
+      window.removeEventListener('popstate', handleRevalidate)
+      window.removeEventListener('focus', handleRevalidate)
+      document.removeEventListener('visibilitychange', handleRevalidate)
+    }
+  }, [meQuery])
+
+  useEffect(() => {
+    if (meQuery.data?.data?.user && accessToken) {
+      setUserAndProfile(meQuery.data.data.user, meQuery.data.data.profile)
+    }
+  }, [meQuery.data, accessToken, setUserAndProfile])
+
+  useEffect(() => {
+    if (meQuery.isError) {
+      logout({ reason: 'expired' })
+    }
+  }, [meQuery.isError])
+
+  if (!accessToken) {
+    return <Navigate to="/login?reason=expired" replace state={{ returnTo: location.pathname + location.search }} />
+  }
+
+  if (meQuery.isLoading || !meQuery.data?.data?.user) {
+    return <LoadingState label="Verifying your secure session…" />
+  }
+
+  const currentUser = meQuery.data.data.user
+  const currentProfile = meQuery.data.data.profile
+
+  if (!currentUser) {
+    return <Navigate to="/login?reason=expired" replace />
+  }
+
+  if (!roles.includes(currentUser.role)) {
+    return <Navigate to={roleHome[currentUser.role] || '/'} replace />
+  }
+
+  if (
+    currentUser.role === 'dentist' &&
+    currentProfile &&
+    !(currentProfile.weeklyAvailability || []).some((day) => day.slots?.length) &&
+    location.pathname !== '/dentist/availability'
+  ) {
     return <Navigate to="/dentist/availability" replace />
   }
+
   return <Outlet />
 }
 
@@ -48,12 +125,6 @@ function Landing() {
   const { accessToken, user } = useAuthStore()
   if (accessToken && user) return <Navigate to={roleHome[user.role] || '/app'} replace />
   return <PublicHome />
-}
-
-function ContactPage() {
-  const query = useQuery({ queryKey: ['clinic-settings'], queryFn: api.settings.get })
-  const settings = query.data?.data
-  return <main className="catalog-page"><div className="eyebrow">Contact</div><h1 className="page-title">Get in touch with your clinic.</h1>{query.isLoading ? <LoadingState /> : query.isError ? <p className="muted-copy">{query.error.message}</p> : settings?.contactPhone || settings?.contactEmail || settings?.address ? <div className="contact-details">{settings.clinicName && <h2>{settings.clinicName}</h2>}{settings.address && <p>{settings.address}</p>}{settings.contactPhone && <a href={`tel:${settings.contactPhone}`}>{settings.contactPhone}</a>}{settings.contactEmail && <a href={`mailto:${settings.contactEmail}`}>{settings.contactEmail}</a>}</div> : <p className="muted-copy">Clinic contact information is not configured.</p>}</main>
 }
 
 function NotFound() {
@@ -68,26 +139,31 @@ export default function App() {
   return <Suspense fallback={<LoadingState label="Preparing your workspace…" />}><Routes>
     <Route element={<PublicLayout />}>
       <Route path="/" element={<Landing />} />
-      <Route path="/about" element={<SimplePublicPage eyebrow="About" title="A more considered dental visit."><p className="muted-copy">Clinic-approved information about the practice can be added here.</p></SimplePublicPage>} />
+      <Route path="/doctor" element={<DoctorProfilePage />} />
+      <Route path="/dentists" element={<Navigate to="/doctor" replace />} />
+      <Route path="/dentists/:id" element={<Navigate to="/doctor" replace />} />
+      <Route path="/about" element={<AboutPage />} />
       <Route path="/services" element={<ServicesPage />} />
-      <Route path="/dentists" element={<DentistDirectory />} />
-      <Route path="/dentists/:id" element={<DentistProfile />} />
       <Route path="/pricing" element={<PricingPage />} />
       <Route path="/contact" element={<ContactPage />} />
-      <Route path="/privacy" element={<SimplePublicPage eyebrow="Legal information" title="Privacy notice"><p className="muted-copy">Privacy terms are a client-provided legal document and have not been supplied. This page is a placeholder and is not legal advice.</p></SimplePublicPage>} />
-      <Route path="/terms" element={<SimplePublicPage eyebrow="Legal information" title="Terms of service"><p className="muted-copy">Terms are a client-provided legal document and have not been supplied. This page is a placeholder and is not legal advice.</p></SimplePublicPage>} />
+      <Route path="/privacy" element={<LegalPage type="privacy" />} />
+      <Route path="/terms" element={<LegalPage type="terms" />} />
     </Route>
-    <Route path="/login" element={<LoginPage />} />
-    <Route path="/register" element={<RegisterPage />} />
-    <Route path="/verify-otp" element={<VerifyOtpPage />} />
-    <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-    <Route path="/reset-password" element={<ResetPasswordPage />} />
+    <Route path="/login" element={<GuestOnly><LoginPage /></GuestOnly>} />
+    <Route path="/register" element={<GuestOnly><RegisterPage /></GuestOnly>} />
+    <Route path="/verify-otp" element={<GuestOnly><VerifyOtpPage /></GuestOnly>} />
+    <Route path="/forgot-password" element={<GuestOnly><ForgotPasswordPage /></GuestOnly>} />
+    <Route path="/reset-password" element={<GuestOnly><ResetPasswordPage /></GuestOnly>} />
     <Route element={<RequireRole roles={['patient']} />}>
       <Route path="/app" element={<PortalLayout />}>
         <Route index element={<PatientDashboard />} /><Route path="appointments" element={<PatientAppointments />} /><Route path="appointments/:id" element={<AppointmentDetail />} />
-        <Route path="book/:dentistId" element={<AppointmentBooking />} /><Route path="prescriptions" element={<PatientPrescriptions />} /><Route path="records" element={<PatientRecords />} />
+        <Route path="book" element={<AppointmentBooking />} />
+        <Route path="book/:dentistId" element={<Navigate to="/app/book" replace />} />
+        <Route path="prescriptions" element={<PatientPrescriptions />} /><Route path="records" element={<PatientRecords />} />
         <Route path="care" element={<PatientCare />} /><Route path="billing" element={<PatientBilling />} /><Route path="family" element={<PatientFamily />} />
-        <Route path="profile" element={<PatientProfileWorkspace />} /><Route path="notifications" element={<NotificationsPage />} />
+        <Route path="profile" element={<PatientProfileWorkspace />} />
+        <Route path="settings" element={<SharedSettingsPage />} />
+        <Route path="notifications" element={<NotificationsPage />} />
       </Route>
     </Route>
     <Route element={<RequireRole roles={['dentist']} />}>
@@ -95,12 +171,16 @@ export default function App() {
         <Route index element={<DentistDashboard />} /><Route path="appointments" element={<DentistSchedule />} /><Route path="availability" element={<DentistAvailability />} />
         <Route path="patients" element={<PatientDirectory mode="dentist" />} /><Route path="patients/:patientId" element={<ClinicalRecord />} />
         <Route path="reviews" element={<DentistReviews />} /><Route path="queue" element={<QueuePage role="dentist" />} /><Route path="profile" element={<DentistProfilePage />} />
+        <Route path="settings" element={<SharedSettingsPage />} />
+        <Route path="notifications" element={<NotificationsPage />} />
       </Route>
     </Route>
     <Route element={<RequireRole roles={['receptionist']} />}>
       <Route path="/reception" element={<PortalLayout />}>
         <Route index element={<ReceptionPage page="dashboard" />} /><Route path="appointments" element={<AppointmentLookup />} /><Route path="patients" element={<PatientDirectory />} />
         <Route path="patients/:patientId" element={<ClinicalRecord readOnly />} /><Route path="queue" element={<QueuePage role="receptionist" />} /><Route path="invoices" element={<InvoiceCreator />} />
+        <Route path="settings" element={<SharedSettingsPage />} />
+        <Route path="notifications" element={<NotificationsPage />} />
       </Route>
     </Route>
     <Route element={<RequireRole roles={['admin']} />}>
@@ -108,7 +188,9 @@ export default function App() {
         <Route index element={<AdminPage page="dashboard" />} /><Route path="dentists" element={<AdminPage page="dentists" />} /><Route path="staff" element={<AdminPage page="staff" />} />
         <Route path="patients" element={<AdminPage page="patients" />} /><Route path="patients/:patientId" element={<ClinicalRecord readOnly />} />
         <Route path="treatments" element={<AdminPage page="treatments" />} /><Route path="coupons" element={<AdminPage page="coupons" />} />
-        <Route path="clinics" element={<AdminPage page="clinics" />} /><Route path="payments" element={<AdminPage page="payments" />} /><Route path="settings" element={<AdminPage page="settings" />} />
+        <Route path="payments" element={<AdminPage page="payments" />} /><Route path="settings" element={<AdminPage page="settings" />} />
+        <Route path="account" element={<SharedSettingsPage />} />
+        <Route path="notifications" element={<NotificationsPage />} />
       </Route>
     </Route>
     <Route element={<RequireRole roles={['patient', 'dentist']} />}>

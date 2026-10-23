@@ -52,9 +52,28 @@ exports.deactivateStaff = catchAsync(async (req, res, next) => {
   if (req.params.id === String(req.user._id)) {
     return next(new AppError('You cannot deactivate your own account.', 400));
   }
-  const user = await User.findByIdAndUpdate(req.params.id, { active: false }, { new: true }).select('+active');
-  if (!user) return next(new AppError('Staff member not found.', 404));
-  success(res, 200, 'Staff account deactivated.', user);
+  const targetUser = await User.findById(req.params.id).select('+active +tokenVersion');
+  if (!targetUser) return next(new AppError('Staff member not found.', 404));
+
+  if (targetUser.role === 'admin') {
+    const activeAdmins = await User.countDocuments({ role: 'admin', active: { $ne: false } });
+    if (activeAdmins <= 1) {
+      return next(new AppError('Cannot deactivate the last active administrator.', 400));
+    }
+  }
+
+  if (targetUser.role === 'dentist') {
+    const activeDentists = await User.countDocuments({ role: 'dentist', active: { $ne: false } });
+    if (activeDentists <= 1) {
+      return next(new AppError("Cannot deactivate the clinic's only dentist account.", 400));
+    }
+  }
+
+  targetUser.active = false;
+  targetUser.tokenVersion = (targetUser.tokenVersion || 0) + 1;
+  await targetUser.save({ validateBeforeSave: false });
+
+  success(res, 200, 'Staff account deactivated.', targetUser);
 });
 
 // @route PATCH /api/staff/:id/activate  (admin only)

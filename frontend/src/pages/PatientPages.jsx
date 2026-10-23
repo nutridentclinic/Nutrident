@@ -1,6 +1,8 @@
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { usePrimaryDentist } from "../hooks/usePrimaryDentist.js";
+import { fetchPrimarySlotsWithFallback } from "../api/capabilities.js";
 import {
   Activity,
   ArrowRight,
@@ -245,7 +247,7 @@ export function PatientAppointments() {
         title="Appointments"
         description="View and manage visits scheduled with your care team."
         actions={
-          <Link className="button button-primary" to="/dentists">
+          <Link className="button button-primary" to="/app/book">
             Book a visit <Plus size={16} />
           </Link>
         }
@@ -627,13 +629,13 @@ function pollPayment(appointmentId, onResult) {
 }
 
 export function AppointmentBooking() {
-  const { dentistId } = useParams();
+  const { dentistId: paramDentistId } = useParams();
   const user = useAuthStore((state) => state.user);
-  const dentistQuery = useQuery({
-    queryKey: ["dentist", dentistId],
-    queryFn: () => api.dentists.detail(dentistId),
-    ...queryOptions,
-  });
+  const primary = usePrimaryDentist();
+  const dentist = primary.dentist;
+  const effectiveDentistId = dentist?._id || paramDentistId;
+  const isAcceptingAppointments = primary.isAcceptingAppointments;
+
   const patientQuery = useQuery({
     queryKey: ["patient-profile"],
     queryFn: api.patients.mine,
@@ -644,6 +646,7 @@ export function AppointmentBooking() {
     queryFn: api.settings.get,
     ...queryOptions,
   });
+  const settings = settingsQuery.data?.data;
   const [date, setDate] = useState(clinicDate());
   const [selectedSlot, setSelectedSlot] = useState("");
   const [mode, setMode] = useState("in-clinic");
@@ -655,14 +658,16 @@ export function AppointmentBooking() {
   const [appointmentId, setAppointmentId] = useState("");
   const [serverFees, setServerFees] = useState(null);
   const slotsQuery = useQuery({
-    queryKey: ["slots", dentistId, date],
-    queryFn: () => api.dentists.slots(dentistId, date),
+    queryKey: ["slots", effectiveDentistId, date],
+    queryFn: () => fetchPrimarySlotsWithFallback(date, effectiveDentistId),
     enabled: !!date,
     refetchInterval: 30000,
     ...queryOptions,
   });
-  const dentist = dentistQuery.data?.data?.dentist;
-  const slots = (slotsQuery.data?.data || []).filter(
+  const rawSlots = Array.isArray(slotsQuery.data)
+    ? slotsQuery.data
+    : (slotsQuery.data?.data || []);
+  const slots = rawSlots.filter(
     (slot) => !isPastSlot(date, slot.startTime),
   );
   const availableDatesMin = clinicDate();
@@ -768,7 +773,7 @@ export function AppointmentBooking() {
     setMessage("");
     try {
       const result = await api.appointments.create({
-        dentistId,
+        dentistId: effectiveDentistId || undefined,
         date,
         startTime: selectedSlot,
         mode,
@@ -800,22 +805,22 @@ export function AppointmentBooking() {
         title="Choose a time that works."
         description={
           dentist
-            ? `Dr. ${dentist.user?.name} · ${dentist.specialization}`
-            : "Select a dentist and available time."
+            ? `Dr. ${dentist.user?.name || "our doctor"} · ${dentist.specialization || "Dental Surgeon"}`
+            : "Select an appointment date and available time slot."
         }
         actions={
-          <Link to={`/dentists/${dentistId}`} className="button button-quiet">
-            ← Dentist profile
+          <Link to="/doctor" className="button button-quiet">
+            ← Doctor profile
           </Link>
         }
       />
-      <AsyncView
-        query={dentistQuery}
-        empty={!dentistQuery.isLoading && !dentistQuery.isError && !dentist}
-      >
-        <EmptyState title="Dentist is not available" />
-      </AsyncView>
-      {dentist && (
+      {!primary.isLoading && (!dentist || !isAcceptingAppointments) && (
+        <div className="notice notice-warn">
+          The doctor is currently not accepting new appointments online. Please call the clinic directly at{" "}
+          {settings?.contactPhone || "the front desk"} or check back soon.
+        </div>
+      )}
+      {dentist && isAcceptingAppointments && (
         <form className="booking-layout" onSubmit={book}>
           <section className="booking-main">
             <SectionPanel

@@ -245,9 +245,11 @@ textarea.input { min-height: 88px; resize: vertical; }
 /* Public site */
 .public-shell { min-height: 100vh; overflow: hidden; background: #f8faf8; }
 .public-header { height: 76px; max-width: 1320px; margin: auto; padding: 0 5vw; display: flex; align-items: center; justify-content: space-between; gap: 28px; border-bottom: 1px solid #e4ece8; }
-.brand-lockup { display: inline-flex; align-items: center; gap: 11px; color: var(--ink); text-decoration: none; font-family: var(--heading); font-weight: 800; font-size: 17px; line-height: 1.15; }
-.brand-mark { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 4px; background: var(--teal); color: #fff; }
-.brand-sub { display: block; margin-top: 4px; color: #819397; font-family: var(--sans); font-weight: 500; font-size: 10px; }
+.brand-lockup { display: inline-flex; align-items: center; gap: 12px; color: var(--ink); text-decoration: none; font-family: var(--heading); font-weight: 800; font-size: 17px; line-height: 1.15; }
+.brand-mark { width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: #ffffff; box-shadow: 0 2px 8px rgba(10, 82, 95, 0.08); padding: 2px; flex-shrink: 0; }
+.brand-logo-img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.footer-logo-img { max-height: 44px; width: auto; object-fit: contain; display: block; }
+.brand-sub { display: block; margin-top: 3px; color: #768a8e; font-family: var(--sans); font-weight: 600; font-size: 10.5px; letter-spacing: 0.2px; }
 .public-nav { display: flex; align-items: center; gap: 28px; }
 .public-nav a, .header-actions a { color: #39535d; text-decoration: none; font-size: 13px; font-weight: 700; }
 .public-nav a:hover { color: var(--teal); }

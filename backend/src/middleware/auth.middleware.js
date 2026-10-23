@@ -8,8 +8,6 @@ exports.protect = catchAsync(async (req, res, next) => {
   let token;
   const authHeader = req.headers.authorization;
 
-
-  
   if (authHeader && authHeader.startsWith('Bearer ')) {
     token = authHeader.split(' ')[1];
   }
@@ -25,11 +23,45 @@ exports.protect = catchAsync(async (req, res, next) => {
     return next(new AppError('Invalid or expired token. Please log in again.', 401));
   }
 
-  const currentUser = await User.findById(decoded.id).select('+active');
+  const currentUser = await User.findById(decoded.id).select('+active +tokenVersion');
   if (!currentUser || currentUser.active === false) {
-    return next(new AppError('The user belonging to this token no longer exists.', 401));
+    return next(new AppError('The user belonging to this token no longer exists or has been deactivated.', 401));
+  }
+
+  // Reject tokens whose tokenVersion differs from current user value
+  const userTv = currentUser.tokenVersion || 0;
+  if (decoded.tv !== undefined && decoded.tv !== userTv) {
+    return next(new AppError('Session invalidated. Please log in again.', 401));
+  }
+
+  if (currentUser.changedPasswordAfter && currentUser.changedPasswordAfter(decoded.iat)) {
+    return next(new AppError('User recently changed password. Please log in again.', 401));
   }
 
   req.user = currentUser;
+  next();
+});
+
+// Best-effort auth middleware (e.g. for logout when access token might have expired)
+exports.optionalProtect = catchAsync(async (req, res, next) => {
+  let token;
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.split(' ')[1];
+  }
+  if (!token) return next();
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const currentUser = await User.findById(decoded.id).select('+active +tokenVersion');
+    if (currentUser && currentUser.active !== false) {
+      const userTv = currentUser.tokenVersion || 0;
+      if (decoded.tv === undefined || decoded.tv === userTv) {
+        req.user = currentUser;
+      }
+    }
+  } catch {
+    // expired or invalid access token; proceed so controller can evaluate refreshToken if provided
+  }
   next();
 });

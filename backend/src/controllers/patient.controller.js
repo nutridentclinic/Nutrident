@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const Patient = require('../models/Patient');
 const User = require('../models/User');
 const catchAsync = require('../utils/catchAsync');
@@ -93,4 +94,48 @@ exports.getPatientById = catchAsync(async (req, res, next) => {
   const patient = await Patient.findOne({ user: req.params.id }).populate('user', '-password');
   if (!patient) return next(new AppError('Patient not found.', 404));
   success(res, 200, 'Patient fetched.', patient);
+});
+
+// @route POST /api/patients (admin/receptionist registers a walk-in/phone patient)
+exports.createPatientByStaff = catchAsync(async (req, res, next) => {
+  const { name, phone, email, gender, dateOfBirth, address } = req.body;
+  if (!name || !phone) {
+    return next(new AppError('Name and phone are required.', 400));
+  }
+
+  const cleanPhone = String(phone).trim();
+  const existingUser = await User.findOne({
+    $or: [
+      { phone: cleanPhone },
+      ...(email ? [{ email: email.toLowerCase().trim() }] : []),
+    ],
+  });
+  if (existingUser) {
+    return next(new AppError('A patient with this phone or email already exists.', 409));
+  }
+
+  const patientEmail = email ? email.toLowerCase().trim() : `${cleanPhone.replace(/\D/g, '')}@walkin.drnutrident.com`;
+  const tempPassword = crypto.randomBytes(8).toString('hex') + 'A1!';
+
+  const user = await User.create({
+    name: name.trim(),
+    phone: cleanPhone,
+    email: patientEmail,
+    password: tempPassword,
+    role: 'patient',
+    isEmailVerified: true,
+    isPhoneVerified: true,
+  });
+
+  const patient = await Patient.create({
+    user: user._id,
+    gender: gender || 'other',
+    dateOfBirth: dateOfBirth || null,
+    address: address || '',
+  });
+
+  const safeUser = user.toObject();
+  delete safeUser.password;
+
+  success(res, 201, 'Patient registered successfully.', { user: safeUser, patient });
 });

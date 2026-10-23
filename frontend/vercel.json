@@ -1,0 +1,25 @@
+{
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
+  ],
+  "headers": [
+    {
+      "source": "/assets/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    },
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store, no-cache, must-revalidate, max-age=0" },
+        { "key": "Pragma", "value": "no-cache" },
+        { "key": "Expires", "value": "0" },
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+        { "key": "Permissions-Policy", "value": "camera=(self), microphone=(self)" },
+        { "key": "Content-Security-Policy", "value": "default-src 'self'; script-src 'self' https://checkout.razorpay.com; connect-src 'self' https://drnutrident-backend-wj1n.onrender.com https://*.razorpay.com https://*.agora.io https://*.agoralabs.com wss://drnutrident-backend-wj1n.onrender.com wss://*.agora.io wss://*.agoralabs.com; frame-src https://api.razorpay.com https://checkout.razorpay.com; img-src 'self' data: blob: https://res.cloudinary.com; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self'; frame-ancestors 'none';" }
+      ]
+    }
+  ]
+}

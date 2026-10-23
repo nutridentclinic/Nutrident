@@ -75,11 +75,11 @@ function AdminDashboard() {
         timeZone: "UTC",
       }),
       count:
-        (weekly.data?.data || []).find((entry) => entry._id === key)?.count ||
+        (Array.isArray(weekly.data?.data) ? weekly.data.data : []).find((entry) => entry._id === key)?.count ||
         0,
     };
   });
-  const monthData = (revenue.data?.data || []).map((entry) => ({
+  const monthData = (Array.isArray(revenue.data?.data) ? revenue.data.data : []).map((entry) => ({
     month: entry._id,
     total: entry.total,
   }));
@@ -92,7 +92,7 @@ function AdminDashboard() {
         description="A live summary of activity reported by the clinic backend."
         actions={
           <Link to="/admin/dentists" className="button button-primary">
-            Manage dentists <ArrowRight size={15} />
+            Doctor profile <ArrowRight size={15} />
           </Link>
         }
       />
@@ -109,8 +109,8 @@ function AdminDashboard() {
             <span className="metric-icon metric-lime">
               <BadgeCheck size={18} />
             </span>
-            <small>Dentists</small>
-            <strong>{numbers.totalDentists ?? "—"}</strong>
+            <small>Doctor on file</small>
+            <strong>{numbers.totalDentists ? "1" : "0"}</strong>
           </article>
           <article>
             <span className="metric-icon metric-blue">
@@ -130,8 +130,7 @@ function AdminDashboard() {
         {numbers.pendingDentistApprovals > 0 && (
           <div className="notice notice-warn">
             <ShieldCheck size={17} />
-            {numbers.pendingDentistApprovals} dentist profiles are awaiting
-            verification. <Link to="/admin/dentists">Review profiles</Link>
+            Doctor profile is awaiting credential verification. <Link to="/admin/dentists">Review profile</Link>
           </div>
         )}
       </AsyncView>
@@ -174,32 +173,6 @@ function AdminDashboard() {
           </div>
         </SectionPanel>
       </div>
-      <SectionPanel
-        title="Common specialties"
-        description="Available dentist specialization breakdown."
-      >
-        <AsyncView
-          query={specialties}
-          empty={
-            !specialties.isLoading &&
-            !specialties.isError &&
-            !(specialties.data?.data || []).length
-          }
-          emptyTitle="No specialties to summarize"
-        >
-          <div className="specialty-bars">
-            {(specialties.data?.data || []).map((entry) => (
-              <div key={entry._id}>
-                <span>{entry._id || "Unspecified"}</span>
-                <div>
-                  <i style={{ width: `${Math.max(3, entry.count * 8)}%` }} />
-                </div>
-                <strong>{entry.count}</strong>
-              </div>
-            ))}
-          </div>
-        </AsyncView>
-      </SectionPanel>
     </div>
   );
 }
@@ -207,8 +180,6 @@ function AdminDashboard() {
 function DentistManagement() {
   const queryClient = useQueryClient();
   const notify = useToast();
-  const [search, setSearch] = useState("");
-  const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({
     name: "",
     email: "",
@@ -220,25 +191,25 @@ function DentistManagement() {
     consultationFee: 0,
     about: "",
   });
+  const [busy, setBusy] = useState(false);
   const query = useQuery({
-    queryKey: ["dentists", "admin", search],
+    queryKey: ["dentists", "admin"],
     queryFn: async () => {
       try {
-        return await api.dentists.adminList({ search, page: 1, limit: 50 });
+        return await api.dentists.adminList({ page: 1, limit: 10 });
       } catch (error) {
         if (error.status !== 404) throw error;
-        const fallback = await api.dentists.list({
-          search,
-          page: 1,
-          limit: 50,
-        });
+        const fallback = await api.dentists.list({ page: 1, limit: 10 });
         return { ...fallback, limited: true };
       }
     },
   });
   const dentists = query.data?.data || [];
+  const doctor = dentists[0] || null;
+
   const createDentist = async (event) => {
     event.preventDefault();
+    setBusy(true);
     const body = {
       ...form,
       experienceYears: Number(form.experienceYears),
@@ -251,8 +222,7 @@ function DentistManagement() {
     try {
       const result = await api.dentists.create(body);
       notify(result.message);
-      setShowForm(false);
-      queryClient.invalidateQueries({ queryKey: ["dentists", "admin"] });
+      queryClient.invalidateQueries({ queryKey: ["dentists"] });
       setForm({
         name: "",
         email: "",
@@ -266,52 +236,122 @@ function DentistManagement() {
       });
     } catch (error) {
       notify(error.message, "error");
+    } finally {
+      setBusy(false);
     }
   };
+
   const verify = async (id) => {
     try {
       const result = await api.dentists.verify(id);
       notify(result.message);
-      queryClient.invalidateQueries({ queryKey: ["dentists", "admin"] });
+      queryClient.invalidateQueries({ queryKey: ["dentists"] });
     } catch (error) {
       notify(error.message, "error");
     }
   };
+
+  const toggleAccepting = async () => {
+    if (!doctor) return;
+    const nextState = doctor.isAcceptingAppointments === false;
+    try {
+      const result = await api.dentists.update(doctor._id, {
+        isAcceptingAppointments: nextState,
+      });
+      notify(result.message || (nextState ? "Doctor is now accepting appointments." : "Appointment bookings paused."));
+      queryClient.invalidateQueries({ queryKey: ["dentists"] });
+      queryClient.invalidateQueries({ queryKey: ["primary-dentist"] });
+    } catch (error) {
+      notify(error.message, "error");
+    }
+  };
+
   return (
     <div>
       <PageTitle
-        eyebrow="Credential review"
-        title="Dentist management"
-        description="Onboard clinicians and verify credentials before public discovery."
-        actions={
-          <button
-            className="button button-primary"
-            onClick={() => setShowForm((value) => !value)}
-          >
-            <UserPlus size={16} /> Add dentist
-          </button>
-        }
+        eyebrow="Clinical lead"
+        title="Doctor profile & account"
+        description="DrNutrident operates with a dedicated chief dental clinician."
       />
+
       {query.data?.limited && (
         <div className="notice notice-warn">
-          The all-dentists admin endpoint is not available yet. Showing
-          verified, active public listings only; pending profiles cannot be
-          reviewed.
+          Using public directory fallback for doctor credentials view.
         </div>
       )}
-      {showForm && (
+
+      {doctor ? (
+        <div className="doctor-management-workspace">
+          <SectionPanel
+            title={`Dr. ${doctor.user?.name || "Doctor Profile"}`}
+            description={`${doctor.specialization || "Dental Surgeon"} · ${doctor.experienceYears || 0} years experience`}
+          >
+            <div className="record-row-content" style={{ display: "grid", gap: "0.8rem", marginBottom: "1.2rem" }}>
+              <div>
+                <strong>Email:</strong> {doctor.user?.email} · <strong>Phone:</strong> {doctor.user?.phone}
+              </div>
+              <div>
+                <strong>Qualifications:</strong> {doctor.qualifications?.join(", ") || "BDS"}
+              </div>
+              <div>
+                <strong>Consultation fee:</strong> {rupees(doctor.consultationFee)}
+              </div>
+              <div>
+                <strong>Languages:</strong> {doctor.languages?.join(", ") || "English, Hindi"}
+              </div>
+              {doctor.about && (
+                <div>
+                  <strong>Profile summary:</strong>
+                  <p style={{ marginTop: "0.2rem" }}>{doctor.about}</p>
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "0.8rem", paddingTop: "1rem", borderTop: "1px solid #e7eeeb" }}>
+              <StatusBadge value={doctor.isVerified ? "verified" : "pending"} />
+              <StatusBadge value={doctor.isActive !== false ? "active" : "inactive"} />
+              <span className={`status-badge ${doctor.isAcceptingAppointments !== false ? "status-active" : "status-inactive"}`}>
+                {doctor.isAcceptingAppointments !== false ? "Accepting visits" : "Visits paused"}
+              </span>
+
+              <div style={{ marginLeft: "auto", display: "flex", gap: "0.5rem" }}>
+                {!doctor.isVerified && (
+                  <button
+                    type="button"
+                    className="button button-outline button-small"
+                    onClick={() => verify(doctor._id)}
+                  >
+                    Verify credentials <Check size={14} />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="button button-primary button-small"
+                  onClick={toggleAccepting}
+                >
+                  {doctor.isAcceptingAppointments !== false ? "Pause appointments" : "Accept appointments"}
+                </button>
+              </div>
+            </div>
+          </SectionPanel>
+
+          <p className="muted-copy" style={{ marginTop: "1rem" }}>
+            Single-Dentist Mode is active. Additional dentist accounts cannot be created while a primary clinician is registered.
+          </p>
+        </div>
+      ) : (
         <SectionPanel
-          title="Create dentist account"
-          description="Dentist accounts are provisioned by an administrator; patients self-register separately."
+          title="Provision clinic doctor account"
+          description="Enter the doctor's details to initialize the single-dentist practice."
         >
           <form className="admin-form-grid" onSubmit={createDentist}>
             {[
               ["name", "Full name"],
               ["email", "Email"],
               ["phone", "Phone"],
-              ["password", "Temporary password"],
+              ["password", "Initial password"],
               ["specialization", "Specialization"],
-              ["qualifications", "Qualifications"],
+              ["qualifications", "Qualifications (comma-separated)"],
               ["experienceYears", "Years of experience"],
               ["consultationFee", "Consultation fee (INR)"],
               ["about", "Profile summary"],
@@ -351,61 +391,12 @@ function DentistManagement() {
                 />
               </Field>
             ))}
-            <button className="button button-primary">
-              Create dentist <Plus size={15} />
+            <button className="button button-primary" disabled={busy}>
+              {busy ? "Provisioning…" : "Provision Doctor Account"} <Plus size={15} />
             </button>
           </form>
         </SectionPanel>
       )}
-      <label className="search-field compact-search">
-        <Search size={17} />
-        <input
-          placeholder="Search dentists"
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-        />
-      </label>
-      <AsyncView
-        query={query}
-        empty={!query.isLoading && !query.isError && !dentists.length}
-        emptyTitle="No dentist profiles found"
-      >
-        <div className="record-list">
-          {dentists.map((dentist) => (
-            <article className="record-row" key={dentist._id}>
-              <span className="avatar avatar-large">
-                <UserPlus size={18} />
-              </span>
-              <div className="record-row-content">
-                <strong>Dr. {dentist.user?.name}</strong>
-                <span>
-                  {dentist.specialization} ·{" "}
-                  {dentist.clinicAddress?.city || "Location not listed"}
-                </span>
-                <small>
-                  {dentist.qualifications?.join(", ") ||
-                    "Qualifications not listed"}{" "}
-                  · {rupees(dentist.consultationFee)}
-                </small>
-              </div>
-              <div className="record-row-actions">
-                <StatusBadge
-                  value={dentist.isVerified ? "verified" : "pending"}
-                />
-                <StatusBadge value={dentist.isActive ? "active" : "inactive"} />
-                {!dentist.isVerified && (
-                  <button
-                    className="button button-outline button-small"
-                    onClick={() => verify(dentist._id)}
-                  >
-                    Verify <Check size={14} />
-                  </button>
-                )}
-              </div>
-            </article>
-          ))}
-        </div>
-      </AsyncView>
     </div>
   );
 }
@@ -563,6 +554,7 @@ function TreatmentCatalog() {
     queryFn: api.treatments.list,
   });
   const [showForm, setShowForm] = useState(false);
+  const [editingItem, setEditingItem] = useState(null);
   const [form, setForm] = useState({
     name: "",
     category: "",
@@ -581,6 +573,24 @@ function TreatmentCatalog() {
       });
       notify(result.message);
       setShowForm(false);
+      queryClient.invalidateQueries({ queryKey: ["treatments"] });
+    } catch (error) {
+      notify(error.message, "error");
+    }
+  };
+  const update = async (event) => {
+    event.preventDefault();
+    if (!editingItem) return;
+    try {
+      const result = await api.treatments.update(editingItem._id, {
+        name: editingItem.name,
+        category: editingItem.category,
+        description: editingItem.description,
+        defaultCost: Number(editingItem.defaultCost),
+        estimatedDurationMinutes: Number(editingItem.estimatedDurationMinutes),
+      });
+      notify(result.message || "Treatment updated successfully.");
+      setEditingItem(null);
       queryClient.invalidateQueries({ queryKey: ["treatments"] });
     } catch (error) {
       notify(error.message, "error");
@@ -669,6 +679,69 @@ function TreatmentCatalog() {
           </form>
         </SectionPanel>
       )}
+
+      {editingItem && (
+        <SectionPanel title={`Edit: ${editingItem.name}`}>
+          <form className="admin-form-grid" onSubmit={update}>
+            <Field label="Name">
+              <TextInput
+                required
+                value={editingItem.name}
+                onChange={(event) =>
+                  setEditingItem({ ...editingItem, name: event.target.value })
+                }
+              />
+            </Field>
+            <Field label="Category">
+              <TextInput
+                value={editingItem.category || ""}
+                onChange={(event) =>
+                  setEditingItem({ ...editingItem, category: event.target.value })
+                }
+              />
+            </Field>
+            <Field label="Default cost (INR)">
+              <TextInput
+                type="number"
+                min="0"
+                required
+                value={editingItem.defaultCost}
+                onChange={(event) =>
+                  setEditingItem({ ...editingItem, defaultCost: event.target.value })
+                }
+              />
+            </Field>
+            <Field label="Estimated minutes">
+              <TextInput
+                type="number"
+                min="1"
+                required
+                value={editingItem.estimatedDurationMinutes}
+                onChange={(event) =>
+                  setEditingItem({
+                    ...editingItem,
+                    estimatedDurationMinutes: event.target.value,
+                  })
+                }
+              />
+            </Field>
+            <Field label="Description" className="field-wide">
+              <TextInput
+                as="textarea"
+                value={editingItem.description || ""}
+                onChange={(event) =>
+                  setEditingItem({ ...editingItem, description: event.target.value })
+                }
+              />
+            </Field>
+            <div style={{ display: "flex", gap: "0.5rem" }} className="field-wide">
+              <button type="submit" className="button button-primary">Save changes</button>
+              <button type="button" className="button button-quiet" onClick={() => setEditingItem(null)}>Cancel</button>
+            </div>
+          </form>
+        </SectionPanel>
+      )}
+
       <AsyncView
         query={query}
         empty={!query.isLoading && !query.isError && !items.length}
@@ -689,12 +762,20 @@ function TreatmentCatalog() {
                 </span>
                 <p>{item.description}</p>
               </div>
-              <button
-                className="button button-quiet button-small"
-                onClick={() => remove(item)}
-              >
-                Remove
-              </button>
+              <div style={{ display: "flex", gap: "0.4rem" }}>
+                <button
+                  className="button button-outline button-small"
+                  onClick={() => setEditingItem(item)}
+                >
+                  Edit
+                </button>
+                <button
+                  className="button button-quiet button-small"
+                  onClick={() => remove(item)}
+                >
+                  Remove
+                </button>
+              </div>
             </article>
           ))}
         </div>
@@ -710,6 +791,7 @@ function CouponManagement() {
   const { confirm, dialog } = useConfirm();
   const query = useQuery({ queryKey: ["coupons"], queryFn: api.coupons.list });
   const [showForm, setShowForm] = useState(false);
+  const [editingCoupon, setEditingCoupon] = useState(null);
   const [form, setForm] = useState({
     code: "",
     description: "",
@@ -738,6 +820,26 @@ function CouponManagement() {
       const result = await api.coupons.create(body);
       notify(result.message);
       setShowForm(false);
+      queryClient.invalidateQueries({ queryKey: ["coupons"] });
+    } catch (error) {
+      notify(error.message, "error");
+    }
+  };
+  const update = async (event) => {
+    event.preventDefault();
+    if (!editingCoupon) return;
+    try {
+      const result = await api.coupons.update(editingCoupon._id, {
+        code: editingCoupon.code,
+        description: editingCoupon.description,
+        discountType: editingCoupon.discountType,
+        discountValue: Number(editingCoupon.discountValue),
+        minOrderAmount: Number(editingCoupon.minOrderAmount || 0),
+        validUntil: editingCoupon.validUntil,
+        isActive: editingCoupon.isActive,
+      });
+      notify(result.message || "Coupon updated successfully.");
+      setEditingCoupon(null);
       queryClient.invalidateQueries({ queryKey: ["coupons"] });
     } catch (error) {
       notify(error.message, "error");
@@ -845,6 +947,90 @@ function CouponManagement() {
           </form>
         </SectionPanel>
       )}
+
+      {editingCoupon && (
+        <SectionPanel title={`Edit Coupon: ${editingCoupon.code}`}>
+          <form className="admin-form-grid" onSubmit={update}>
+            <Field label="Code">
+              <TextInput
+                required
+                value={editingCoupon.code}
+                onChange={(e) =>
+                  setEditingCoupon({ ...editingCoupon, code: e.target.value.toUpperCase() })
+                }
+              />
+            </Field>
+            <Field label="Discount type">
+              <TextInput
+                as="select"
+                value={editingCoupon.discountType}
+                onChange={(e) =>
+                  setEditingCoupon({ ...editingCoupon, discountType: e.target.value })
+                }
+              >
+                <option value="flat">Flat amount</option>
+                <option value="percentage">Percentage</option>
+              </TextInput>
+            </Field>
+            <Field label="Discount value">
+              <TextInput
+                type="number"
+                min="0"
+                required
+                value={editingCoupon.discountValue}
+                onChange={(e) =>
+                  setEditingCoupon({ ...editingCoupon, discountValue: e.target.value })
+                }
+              />
+            </Field>
+            <Field label="Valid until">
+              <TextInput
+                type="date"
+                required
+                value={editingCoupon.validUntil ? editingCoupon.validUntil.slice(0, 10) : ""}
+                onChange={(e) =>
+                  setEditingCoupon({ ...editingCoupon, validUntil: e.target.value })
+                }
+              />
+            </Field>
+            <Field label="Minimum order">
+              <TextInput
+                type="number"
+                min="0"
+                value={editingCoupon.minOrderAmount || 0}
+                onChange={(e) =>
+                  setEditingCoupon({ ...editingCoupon, minOrderAmount: e.target.value })
+                }
+              />
+            </Field>
+            <Field label="Status">
+              <TextInput
+                as="select"
+                value={editingCoupon.isActive !== false ? "active" : "inactive"}
+                onChange={(e) =>
+                  setEditingCoupon({ ...editingCoupon, isActive: e.target.value === "active" })
+                }
+              >
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </TextInput>
+            </Field>
+            <Field label="Description" className="field-wide">
+              <TextInput
+                value={editingCoupon.description || ""}
+                onChange={(e) =>
+                  setEditingCoupon({ ...editingCoupon, description: e.target.value })
+                }
+              />
+            </Field>
+            <div style={{ display: "flex", gap: "0.5rem" }} className="field-wide">
+              <button type="submit" className="button button-primary">Save changes</button>
+              <button type="button" className="button button-quiet" onClick={() => setEditingCoupon(null)}>Cancel</button>
+            </div>
+          </form>
+        </SectionPanel>
+      )}
+
       <AsyncView
         query={query}
         empty={!query.isLoading && !query.isError && !items.length}
@@ -870,12 +1056,20 @@ function CouponManagement() {
                 </small>
               </div>
               <StatusBadge value={coupon.isActive ? "active" : "inactive"} />
-              <button
-                className="button button-quiet button-small"
-                onClick={() => remove(coupon)}
-              >
-                Delete
-              </button>
+              <div style={{ display: "flex", gap: "0.4rem" }}>
+                <button
+                  className="button button-outline button-small"
+                  onClick={() => setEditingCoupon(coupon)}
+                >
+                  Edit
+                </button>
+                <button
+                  className="button button-quiet button-small"
+                  onClick={() => remove(coupon)}
+                >
+                  Delete
+                </button>
+              </div>
             </article>
           ))}
         </div>
@@ -1033,79 +1227,170 @@ function ClinicSettingsPage() {
   });
   const [form, setForm] = useState(null);
   const data = form || query.data?.data || {};
-  const fields = [
-    "clinicName",
-    "logoUrl",
-    "address",
-    "contactPhone",
-    "contactEmail",
-    "platformFee",
-    "taxPercentage",
-    "reminderHoursBefore",
-    "cancellationFullRefundHours",
-  ];
+
   const save = async (event) => {
     event.preventDefault();
     const payload = {
       ...data,
-      platformFee: Number(data.platformFee),
-      taxPercentage: Number(data.taxPercentage),
-      reminderHoursBefore: Number(data.reminderHoursBefore),
-      cancellationFullRefundHours: Number(data.cancellationFullRefundHours),
+      platformFee: Number(data.platformFee || 0),
+      taxPercentage: Number(data.taxPercentage || 0),
+      reminderHoursBefore: Number(data.reminderHoursBefore || 24),
+      cancellationFullRefundHours: Number(data.cancellationFullRefundHours || 24),
     };
     try {
       const result = await api.settings.update(payload);
-      notify(result.message);
+      notify(result.message || "Clinic settings saved successfully.");
       setForm(result.data);
       queryClient.invalidateQueries({ queryKey: ["clinic-settings"] });
     } catch (error) {
       notify(error.message, "error");
     }
   };
+
   return (
     <div>
       <PageTitle
         eyebrow="Clinic configuration"
         title="Clinic settings"
-        description="These values are read by public pages, booking and invoice totals."
+        description="Configure public practice details, booking fees, policies, and clinic contact information."
       />
       <AsyncView query={query} empty={false}>
-        <SectionPanel title="Clinic details & fees">
-          <form className="admin-form-grid" onSubmit={save}>
-            {fields.map((key) => (
-              <Field
-                key={key}
-                label={key
-                  .replace(/([A-Z])/g, " $1")
-                  .replace(/^./, (s) => s.toUpperCase())}
-                className={
-                  ["address", "logoUrl"].includes(key) ? "field-wide" : ""
-                }
-              >
+        <form onSubmit={save} style={{ display: "grid", gap: "1.5rem" }}>
+          <SectionPanel title="General details & contact">
+            <div className="admin-form-grid">
+              <Field label="Clinic name">
                 <TextInput
-                  type={
-                    [
-                      "platformFee",
-                      "taxPercentage",
-                      "reminderHoursBefore",
-                      "cancellationFullRefundHours",
-                    ].includes(key)
-                      ? "number"
-                      : "text"
-                  }
-                  min="0"
-                  value={data[key] ?? ""}
-                  onChange={(event) =>
-                    setForm({ ...data, [key]: event.target.value })
-                  }
+                  value={data.clinicName ?? ""}
+                  onChange={(e) => setForm({ ...data, clinicName: e.target.value })}
                 />
               </Field>
-            ))}
-            <button className="button button-primary">
-              Save settings <Check size={15} />
+              <Field label="Phone number">
+                <TextInput
+                  type="tel"
+                  value={data.contactPhone ?? ""}
+                  onChange={(e) => setForm({ ...data, contactPhone: e.target.value })}
+                />
+              </Field>
+              <Field label="Email address">
+                <TextInput
+                  type="email"
+                  value={data.contactEmail ?? ""}
+                  onChange={(e) => setForm({ ...data, contactEmail: e.target.value })}
+                />
+              </Field>
+              <Field label="WhatsApp number">
+                <TextInput
+                  placeholder="e.g. +91 9876543210"
+                  value={data.whatsappNumber ?? ""}
+                  onChange={(e) => setForm({ ...data, whatsappNumber: e.target.value })}
+                />
+              </Field>
+              <Field label="Opening hours">
+                <TextInput
+                  placeholder="e.g. Mon - Sat: 9:00 AM - 7:00 PM"
+                  value={data.openingHours ?? ""}
+                  onChange={(e) => setForm({ ...data, openingHours: e.target.value })}
+                />
+              </Field>
+              <Field label="Logo image URL">
+                <TextInput
+                  placeholder="https://…"
+                  value={data.logoUrl ?? ""}
+                  onChange={(e) => setForm({ ...data, logoUrl: e.target.value })}
+                />
+              </Field>
+              <Field label="Google Maps link" className="field-wide">
+                <TextInput
+                  placeholder="https://maps.google.com/…"
+                  value={data.mapUrl ?? ""}
+                  onChange={(e) => setForm({ ...data, mapUrl: e.target.value })}
+                />
+              </Field>
+              <Field label="Clinic address" className="field-wide">
+                <TextInput
+                  value={data.address ?? ""}
+                  onChange={(e) => setForm({ ...data, address: e.target.value })}
+                />
+              </Field>
+            </div>
+          </SectionPanel>
+
+          <SectionPanel title="Fees & booking policies">
+            <div className="admin-form-grid">
+              <Field label="Platform fee (INR)">
+                <TextInput
+                  type="number"
+                  min="0"
+                  value={data.platformFee ?? 0}
+                  onChange={(e) => setForm({ ...data, platformFee: e.target.value })}
+                />
+              </Field>
+              <Field label="Tax percentage (%)">
+                <TextInput
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={data.taxPercentage ?? 0}
+                  onChange={(e) => setForm({ ...data, taxPercentage: e.target.value })}
+                />
+              </Field>
+              <Field label="Reminder lead time (hours before)">
+                <TextInput
+                  type="number"
+                  min="1"
+                  value={data.reminderHoursBefore ?? 24}
+                  onChange={(e) => setForm({ ...data, reminderHoursBefore: e.target.value })}
+                />
+              </Field>
+              <Field label="Full refund window (hours before)">
+                <TextInput
+                  type="number"
+                  min="0"
+                  value={data.cancellationFullRefundHours ?? 24}
+                  onChange={(e) => setForm({ ...data, cancellationFullRefundHours: e.target.value })}
+                />
+              </Field>
+            </div>
+          </SectionPanel>
+
+          <SectionPanel title="About practice & patient notices">
+            <div className="admin-form-grid">
+              <Field label="About the practice summary" className="field-wide">
+                <TextInput
+                  as="textarea"
+                  rows={4}
+                  placeholder="Displayed on public homepage and about page"
+                  value={data.aboutText ?? ""}
+                  onChange={(e) => setForm({ ...data, aboutText: e.target.value })}
+                />
+              </Field>
+              <Field label="Privacy policy" className="field-wide">
+                <TextInput
+                  as="textarea"
+                  rows={4}
+                  placeholder="Plain text privacy policy terms"
+                  value={data.privacyPolicy ?? ""}
+                  onChange={(e) => setForm({ ...data, privacyPolicy: e.target.value })}
+                />
+              </Field>
+              <Field label="Terms of service" className="field-wide">
+                <TextInput
+                  as="textarea"
+                  rows={4}
+                  placeholder="Plain text clinic terms of service"
+                  value={data.termsOfService ?? ""}
+                  onChange={(e) => setForm({ ...data, termsOfService: e.target.value })}
+                />
+              </Field>
+            </div>
+          </SectionPanel>
+
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <button type="submit" className="button button-primary">
+              Save all settings <Check size={15} />
             </button>
-          </form>
-        </SectionPanel>
+          </div>
+        </form>
       </AsyncView>
     </div>
   );

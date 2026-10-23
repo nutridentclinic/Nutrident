@@ -8,6 +8,9 @@ const logger = require('./utils/logger');
 const initSocket = require('./sockets/socket');
 const startReminderJob = require('./jobs/appointmentReminder.job');
 const getCorsOrigins = require('./utils/corsOrigins');
+const { validateSecurityEnv } = require('./utils/validateEnv');
+
+validateSecurityEnv();
 
 const PORT = process.env.PORT || 5000;
 

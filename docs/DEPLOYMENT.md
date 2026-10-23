@@ -1,24 +1,86 @@
-# Deployment
+# Deployment Guide
 
-No frontend host is assumed. Deploy the `frontend/` build output (`frontend/dist`) to a static host configured with SPA fallback: unknown paths such as `/app/appointments` must serve `index.html`.
+This guide covers deployment procedures for both the DrNutrident backend (Render) and frontend (Vercel, Netlify, or static host).
 
-## Frontend
+---
 
-- Build: `npm run build` from `frontend/`.
-- Set `VITE_API_BASE_URL` to the backend origin plus `/api`, `VITE_SOCKET_URL` to the Socket.IO origin, and `VITE_CLINIC_TIMEZONE` to the clinic timezone.
-- Serve over HTTPS. Configure response-header CSP at the host; allow only the chosen backend/Socket.IO origin, Razorpay checkout (`checkout.razorpay.com` and its documented payment frames/connect origins), Agora RTC/media origins required by the selected SDK, and the chosen image/font asset origins. Avoid broad wildcards where possible; verify against current Razorpay/Agora requirements before release.
-- If remote Unsplash/Google Font assets are not acceptable, replace them with approved locally hosted assets and narrow CSP accordingly.
+## 1. Frontend Deployment
 
-## Backend
+The frontend is a React 18 single-page application built with Vite. It compiles to static files in `frontend/dist`.
 
-- Set production `CORS_ORIGINS` to the exact frontend origin(s); do not rely on localhost defaults.
-- Set `TRUST_PROXY=1` only when one trusted reverse proxy sits in front of Express; configure the hosting proxy accordingly.
-- Use production MongoDB, unique random JWT secrets of at least 64 random bytes, and backend-only Razorpay, Agora, Cloudinary, Brevo, and Firebase credentials.
-- Set Razorpay webhook URL to `/api/payments/webhook`, verify the raw-body signature, and configure the matching webhook secret/events. Switch to live keys only after explicit clinic approval and provider checks.
-- Ensure Agora token generation is enabled and the frontend uses HTTPS. Validate permission denial, reconnection, and token-renewal behavior on the deployed environment.
-- Before deploying the unique queue index, check existing data for duplicate `{ dentist, date, tokenNumber }` tuples and resolve duplicates additively.
-- Deploy additive schema/index changes, smoke-test health and role authorization, monitor payment/webhook and socket errors, and retain the previous backend/frontend artifacts for rollback.
+### Build Settings
+- **Build Command**: `npm run build`
+- **Output Directory**: `dist`
+- **Node Version**: `22.x`
 
-## Secret Rotation and Rollback
+### Environment Variables
+Configure the following environment variables in your hosting provider's dashboard:
 
-Rotate any credentials previously exposed in source, `.env`, logs, or archives. Do not copy `.env` files into static hosting or build artifacts. Roll back frontend and backend artifacts independently; do not remove newly created documents or indexes as a rollback shortcut without assessing live data.
+| Variable | Value | Purpose |
+|---|---|---|
+| `VITE_API_BASE_URL` | `https://drnutrident-backend-wj1n.onrender.com/api` | Base URL for REST API calls |
+| `VITE_SOCKET_URL` | `https://drnutrident-backend-wj1n.onrender.com` | Socket.IO endpoint for live queue |
+| `VITE_CLINIC_TIMEZONE` | `Asia/Kolkata` | Clinic operating timezone |
+
+### SPA Fallback & Cache-Control Headers
+The frontend requires SPA routing fallback (`index.html`) and strict `no-store` caching for HTML documents to prevent Back/Forward cache exposure.
+
+#### Vercel (`frontend/vercel.json`):
+```json
+{
+  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store, no-cache, must-revalidate, max-age=0" }
+      ]
+    }
+  ]
+}
+```
+
+#### Netlify / Cloudflare Pages (`frontend/public/_headers`):
+```
+/*
+  Cache-Control: no-store, no-cache, must-revalidate, max-age=0
+```
+
+---
+
+## 2. Backend Deployment (Render)
+
+The backend is an Express 5 + Node.js 22 service hosted on Render at `https://drnutrident-backend-wj1n.onrender.com`.
+
+### Environment Configuration Checklist
+Set the following environment variables in the Render Dashboard (**Environment** tab):
+
+- `NODE_ENV=production`
+- `PORT=10000`
+- `MONGO_URI=<your_mongodb_connection_string>`
+- `JWT_SECRET=<minimum_32_random_characters>`
+- `JWT_REFRESH_SECRET=<different_minimum_32_random_characters>`
+- `JWT_EXPIRES_IN=15m`
+- `JWT_REFRESH_EXPIRES_IN=7d`
+- `CORS_ORIGINS=https://drnutrident.com,https://drnutrident.vercel.app` (your frontend production domain)
+- `TRUST_PROXY=1`
+- `CLINIC_TIMEZONE=Asia/Kolkata`
+- `RAZORPAY_KEY_ID=<your_key_id>`
+- `RAZORPAY_KEY_SECRET=<your_key_secret>`
+- `RAZORPAY_WEBHOOK_SECRET=<your_webhook_secret>`
+- `CLOUDINARY_CLOUD_NAME=<your_cloud_name>`
+- `CLOUDINARY_API_KEY=<your_api_key>`
+- `CLOUDINARY_API_SECRET=<your_api_secret>`
+- `BREVO_API_KEY=<your_brevo_api_key>`
+- `EMAIL_FROM=care@drnutrident.com`
+- `AGORA_APP_ID=<your_agora_app_id>`
+- `AGORA_APP_CERTIFICATE=<your_agora_app_certificate>`
+
+> [!CAUTION]
+> In production, `backend/src/config/validateEnv.js` will prevent the server from starting if `JWT_SECRET` and `JWT_REFRESH_SECRET` are identical or less than 32 characters long.
+
+### Post-Deployment Verification
+Once Render finishes deploying:
+1. Verify health check: `curl -I https://drnutrident-backend-wj1n.onrender.com/api/clinic-settings` -> `HTTP/2 200` with `Cache-Control: no-store`.
+2. Verify primary dentist endpoint: `curl https://drnutrident-backend-wj1n.onrender.com/api/dentists/primary` -> returns chief clinician profile.
+3. Test login and token revocation via the frontend web portal.

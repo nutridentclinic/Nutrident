@@ -1,5 +1,6 @@
 const Appointment = require('../models/Appointment');
 const Dentist = require('../models/Dentist');
+const User = require('../models/User');
 const ClinicSettings = require('../models/ClinicSettings');
 const Payment = require('../models/Payment');
 const catchAsync = require('../utils/catchAsync');
@@ -26,27 +27,35 @@ const createAppointmentSafe = async (data) => {
   }
 };
 
+// Helper to resolve the clinic's single dentist
+const resolvePrimaryDentist = async (requestedDentistId) => {
+  const primary = await Dentist.findOne().populate('user', 'name profilePhoto');
+  if (!primary) {
+    throw new AppError('No dentist is configured for this clinic.', 404);
+  }
+  if (requestedDentistId && String(primary._id) !== String(requestedDentistId)) {
+    throw new AppError('The specified dentist is not the clinic doctor.', 400);
+  }
+  return primary;
+};
+
 // @route POST /api/appointments  (patient books an appointment)
 exports.createAppointment = catchAsync(async (req, res, next) => {
   const { dentistId, date, startTime, mode, reasonForVisit, familyMemberName } = req.body;
 
-  const dentist = await Dentist.findById(dentistId);
-  if (!dentist || !dentist.isActive || !dentist.isVerified) {
-    return next(new AppError('This dentist is not available for booking.', 400));
+  const dentist = await resolvePrimaryDentist(dentistId);
+  if (!dentist.isActive || !dentist.isVerified) {
+    return next(new AppError('This doctor is currently not accepting appointments.', 400));
   }
 
-  // Confirm the requested date/time is actually one of the dentist's published,
-  // still-open slots - not just "not already booked" (assertSlotIsFree below only
-  // catches the latter). Without this, a client could book any arbitrary time,
-  // including outside the dentist's working hours or on a day off.
-  const publishedSlots = await getAvailableSlots(dentistId, date);
+  // Confirm the requested date/time is actually one of the dentist's published, still-open slots
+  const publishedSlots = await getAvailableSlots(dentist._id, date);
   if (!publishedSlots.some((s) => s.startTime === startTime)) {
     return next(new AppError('This slot is not available for booking.', 400));
   }
 
-  // Re-validate the slot is still free right before creating (closes the race-condition
-  // window between the availability check above and this insert)
-  await assertSlotIsFree(dentistId, date, startTime);
+  // Re-validate the slot is still free right before creating
+  await assertSlotIsFree(dentist._id, date, startTime);
 
   const duration = dentist.slotDurationMinutes || 30;
   const [h, m] = startTime.split(':').map(Number);
@@ -60,8 +69,8 @@ exports.createAppointment = catchAsync(async (req, res, next) => {
   const appointment = await createAppointmentSafe({
     patient: req.user._id,
     familyMemberName: familyMemberName || null,
-    dentist: dentistId,
-    clinic: dentist.clinic || null, // denormalized for fast per-branch reporting
+    dentist: dentist._id,
+    clinic: dentist.clinic || null,
     date,
     startTime,
     endTime,
@@ -77,12 +86,94 @@ exports.createAppointment = catchAsync(async (req, res, next) => {
   await notify({
     userId: req.user._id,
     title: 'Appointment Requested',
-    message: `Your appointment with Dr. ${dentist.specialization} on ${date} at ${startTime} is pending payment/confirmation.`,
+    message: `Your appointment with Dr. ${dentist.user?.name || dentist.specialization} on ${date} at ${startTime} is pending payment/confirmation.`,
     type: 'appointment_confirmed',
     relatedId: appointment._id,
   });
 
+  if (dentist.user) {
+    const dentistUserId = dentist.user._id || dentist.user;
+    await notify({
+      userId: dentistUserId,
+      title: 'New Appointment Booking',
+      message: `A new appointment has been booked for ${date} at ${startTime}.`,
+      type: 'appointment_confirmed',
+      relatedId: appointment._id,
+    });
+  }
+
   success(res, 201, 'Appointment created. Proceed to payment to confirm.', appointment);
+});
+
+// @route POST /api/appointments/staff  (receptionist/admin books a confirmed walk-in or phone appointment)
+exports.createStaffAppointment = catchAsync(async (req, res, next) => {
+  const { patientId, dentistId, date, startTime, mode, reasonForVisit, familyMemberName } = req.body;
+
+  const patientUser = await User.findOne({ _id: patientId, role: 'patient' });
+  if (!patientUser) {
+    return next(new AppError('Patient not found.', 404));
+  }
+
+  const dentist = await resolvePrimaryDentist(dentistId);
+  if (!dentist.isActive || !dentist.isVerified) {
+    return next(new AppError('This doctor is currently not accepting appointments.', 400));
+  }
+
+  const publishedSlots = await getAvailableSlots(dentist._id, date);
+  if (!publishedSlots.some((s) => s.startTime === startTime)) {
+    return next(new AppError('This slot is not available for booking.', 400));
+  }
+
+  await assertSlotIsFree(dentist._id, date, startTime);
+
+  const duration = dentist.slotDurationMinutes || 30;
+  const [h, m] = startTime.split(':').map(Number);
+  const endMinutes = h * 60 + m + duration;
+  const endTime = `${String(Math.floor(endMinutes / 60)).padStart(2, '0')}:${String(endMinutes % 60).padStart(2, '0')}`;
+
+  const settings = (await ClinicSettings.findById('default')) || { platformFee: 0 };
+  const consultationFee = dentist.consultationFee;
+  const platformFee = settings.platformFee || 0;
+
+  const appointment = await createAppointmentSafe({
+    patient: patientId,
+    familyMemberName: familyMemberName || null,
+    dentist: dentist._id,
+    clinic: dentist.clinic || null,
+    date,
+    startTime,
+    endTime,
+    mode: mode || 'in-clinic',
+    reasonForVisit,
+    fees: {
+      consultationFee,
+      platformFee,
+      totalAmount: consultationFee + platformFee,
+    },
+    status: 'confirmed',
+    paymentStatus: 'pending',
+  });
+
+  await notify({
+    userId: patientId,
+    title: 'Appointment Confirmed',
+    message: `Your appointment with Dr. ${dentist.user?.name || dentist.specialization} on ${date} at ${startTime} has been scheduled. Payment will be settled at the clinic.`,
+    type: 'appointment_confirmed',
+    relatedId: appointment._id,
+  });
+
+  if (dentist.user) {
+    const dentistUserId = dentist.user._id || dentist.user;
+    await notify({
+      userId: dentistUserId,
+      title: 'New Appointment Scheduled',
+      message: `A staff-scheduled appointment for ${date} at ${startTime} has been confirmed.`,
+      type: 'appointment_confirmed',
+      relatedId: appointment._id,
+    });
+  }
+
+  success(res, 201, 'Staff appointment created.', appointment);
 });
 
 // @route GET /api/appointments/me  (patient's own appointments)
@@ -272,6 +363,11 @@ exports.rescheduleAppointment = catchAsync(async (req, res, next) => {
   const endMinutes = h * 60 + m + duration;
   const endTime = `${String(Math.floor(endMinutes / 60)).padStart(2, '0')}:${String(endMinutes % 60).padStart(2, '0')}`;
 
+  const isPaid = oldAppointment.paymentStatus === 'paid';
+  const paymentId = isPaid ? oldAppointment.payment : null;
+  const paymentStatus = isPaid ? 'paid' : 'pending';
+  const newStatus = isPaid ? 'confirmed' : 'pending';
+
   const newAppointment = await createAppointmentSafe({
     patient: oldAppointment.patient,
     familyMemberName: oldAppointment.familyMemberName,
@@ -283,15 +379,23 @@ exports.rescheduleAppointment = catchAsync(async (req, res, next) => {
     mode: oldAppointment.mode,
     reasonForVisit: oldAppointment.reasonForVisit,
     fees: oldAppointment.fees,
-    paymentStatus: oldAppointment.paymentStatus,
-    payment: oldAppointment.payment,
-    status: oldAppointment.paymentStatus === 'paid' ? 'confirmed' : 'pending',
+    paymentStatus,
+    payment: paymentId,
+    status: newStatus,
     rescheduledFrom: oldAppointment._id,
   });
 
-  oldAppointment.status = 'rescheduled';
-  oldAppointment.rescheduledTo = newAppointment._id;
-  await oldAppointment.save();
+  try {
+    oldAppointment.status = 'rescheduled';
+    oldAppointment.rescheduledTo = newAppointment._id;
+    await oldAppointment.save();
+    if (paymentId) {
+      await Payment.findByIdAndUpdate(paymentId, { appointment: newAppointment._id });
+    }
+  } catch (err) {
+    await Appointment.findByIdAndDelete(newAppointment._id);
+    throw err;
+  }
 
   await notify({
     userId: oldAppointment.patient,
@@ -354,30 +458,35 @@ exports.joinVideoCall = catchAsync(async (req, res, next) => {
   if (!isAppointmentParticipant(appointment, req.user)) {
     return next(new AppError('Only the patient or dentist for this appointment can join.', 403));
   }
-  if (appointment.mode !== 'video') return next(new AppError('This appointment is not a video consultation.', 400));
-  if (appointment.status !== 'confirmed') return next(new AppError('Appointment is not confirmed yet.', 400));
-  if (appointment.paymentStatus !== 'paid') return next(new AppError('Payment is required before joining this consultation.', 400));
-  if (!isWithinVideoWindow(appointment)) {
-    return next(new AppError('Video access is available 15 minutes before the appointment until 30 minutes after it ends.', 403));
+  if (!['video', 'audio'].includes(appointment.mode)) {
+    return next(new AppError('This appointment is not a remote (video or audio) consultation.', 400));
   }
-  if (!isConfigured()) return next(new AppError('Video calling is not configured on the server yet.', 503));
+  if (appointment.status !== 'confirmed') return next(new AppError('Appointment is not confirmed yet.', 400));
+  if (appointment.paymentStatus !== 'paid' && appointment.payment) {
+    return next(new AppError('Payment is required before joining this consultation.', 400));
+  }
+  if (!isWithinVideoWindow(appointment)) {
+    return next(new AppError('Consultation call access is available 15 minutes before the appointment until 30 minutes after it ends.', 403));
+  }
+  if (!isConfigured()) return next(new AppError('Video/audio calling is not configured on the server yet.', 503));
 
   // One Agora channel per appointment - both sides join the same channel name.
   const channelName = `appt_${appointment._id}`;
   const uid = mongoIdToAgoraUid(req.user._id);
   const token = generateAgoraToken(channelName, uid);
-  if (!token) return next(new AppError('Could not generate a video call token. Please try again.', 500));
+  if (!token) return next(new AppError('Could not generate a call token. Please try again.', 500));
 
   if (!appointment.videoCall.roomId) appointment.videoCall.roomId = channelName;
   if (req.user.role === 'patient') appointment.videoCall.joinedByPatientAt = new Date();
   if (req.user.role === 'dentist') appointment.videoCall.joinedByDentistAt = new Date();
   await appointment.save();
 
-  success(res, 200, 'Video call token issued.', {
+  success(res, 200, 'Call token issued.', {
     appId: process.env.AGORA_APP_ID,
     channelName,
     uid,
     token,
+    mode: appointment.mode,
     expiresInSeconds: 7200,
   });
 });

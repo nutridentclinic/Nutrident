@@ -14,6 +14,12 @@ const clinicSettingsSchema = new mongoose.Schema(
     currency: { type: String, default: 'INR' },
     reminderHoursBefore: { type: Number, default: 24 },
     cancellationFullRefundHours: { type: Number, default: 24 },
+    aboutText: { type: String, default: '' },
+    openingHours: { type: String, default: 'Mon - Sat: 9:00 AM - 8:00 PM\nSunday: By appointment only' },
+    mapUrl: { type: String, default: '' },
+    whatsappNumber: { type: String, default: '' },
+    privacyPolicy: { type: String, default: '' },
+    termsOfService: { type: String, default: '' },
   },
   { timestamps: true }
 );

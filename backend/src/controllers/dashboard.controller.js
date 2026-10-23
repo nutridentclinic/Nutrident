@@ -39,17 +39,33 @@ exports.getAdminStats = catchAsync(async (req, res) => {
   });
 });
 
-// @route GET /api/dashboard/admin/appointments-weekly  - appointments per day, last 7 days
+// @route GET /api/dashboard/admin/appointments-weekly  - appointments per day, last 7 days (zero-filled, no future dates)
 exports.getWeeklyAppointments = catchAsync(async (req, res) => {
-  const sevenDaysAgo = new Date();
-  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
-  sevenDaysAgo.setHours(0, 0, 0, 0);
+  const timeZone = process.env.CLINIC_TIMEZONE || 'Asia/Kolkata';
+  const now = new Date();
+  
+  // Compute past 7 days strings in clinic timezone
+  const days = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
+    const dateStr = new Intl.DateTimeFormat('en-CA', { timeZone }).format(d);
+    if (!days.includes(dateStr)) days.push(dateStr);
+  }
 
-  const data = await Appointment.aggregate([
-    { $match: { date: { $gte: sevenDaysAgo } } },
+  const startUtc = new Date(`${days[0]}T00:00:00.000Z`);
+  const endUtc = new Date(`${days[days.length - 1]}T23:59:59.999Z`);
+
+  const rawData = await Appointment.aggregate([
+    { $match: { date: { $gte: startUtc, $lte: endUtc } } },
     { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$date' } }, count: { $sum: 1 } } },
-    { $sort: { _id: 1 } },
   ]);
+
+  const countMap = Object.fromEntries(rawData.map((item) => [item._id, item.count]));
+  const data = days.map((day) => ({
+    _id: day,
+    count: countMap[day] || 0,
+  }));
+
   success(res, 200, 'Weekly appointment data fetched.', data);
 });
 
@@ -112,18 +128,32 @@ exports.getReceptionistStats = catchAsync(async (req, res) => {
   const startOfDay = new Date(`${today}T00:00:00.000Z`);
   const endOfDay = new Date(startOfDay);
   endOfDay.setUTCDate(endOfDay.getUTCDate() + 1);
-  const [appointmentsToday, confirmedToday, pendingToday, waitingQueue, totalPatients] = await Promise.all([
+  const [appointmentsToday, confirmedToday, pendingToday, waitingQueue, totalPatients, nextQueueEntry] = await Promise.all([
     Appointment.countDocuments({ date: { $gte: startOfDay, $lt: endOfDay } }),
     Appointment.countDocuments({ date: { $gte: startOfDay, $lt: endOfDay }, status: 'confirmed' }),
     Appointment.countDocuments({ date: { $gte: startOfDay, $lt: endOfDay }, status: 'pending' }),
     Queue.countDocuments({ date: { $gte: startOfDay, $lt: endOfDay }, status: 'waiting' }),
     User.countDocuments({ role: 'patient' }),
+    Queue.findOne({ date: { $gte: startOfDay, $lt: endOfDay }, status: 'waiting' })
+      .sort('tokenNumber')
+      .populate('patient', 'name phone'),
   ]);
+
+  const nextPatient = nextQueueEntry
+    ? {
+        tokenNumber: nextQueueEntry.tokenNumber,
+        name: nextQueueEntry.patient?.name || nextQueueEntry.walkInName || 'Walk-in Patient',
+        phone: nextQueueEntry.patient?.phone || '',
+        estimatedWaitMinutes: nextQueueEntry.estimatedWaitMinutes,
+      }
+    : null;
+
   success(res, 200, 'Receptionist dashboard fetched.', {
     appointmentsToday,
     confirmedToday,
     pendingToday,
     waitingQueue,
     totalPatients,
+    nextPatient,
   });
 });

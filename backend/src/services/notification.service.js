@@ -33,25 +33,42 @@ const sendPush = async ({ fcmToken, title, message }) => {
   }
 };
 
+const { sendEmail } = require('../config/email');
+
 /**
  * Main entry point used by controllers/services throughout the app.
- * Always creates the in-app record; also sends a Firebase push automatically
- * if the user has a saved device token and Firebase is configured.
+ * Always creates the in-app record; also sends a Firebase push and Brevo email
+ * if configured and enabled in user preferences.
  */
 const notify = async ({ userId, title, message, type, relatedId = null }) => {
   const inApp = await createInApp({ userId, title, message, type, relatedId });
 
-  // Fire and forget - don't block the main request on this
-  if (isConfigured()) {
-    User.findById(userId)
-      .select('fcmToken notificationPreferences')
-      .then((user) => {
-        if (user?.fcmToken && user.notificationPreferences?.push !== false) {
-          sendPush({ fcmToken: user.fcmToken, title, message });
+  // Fire and forget - don't block the main request on notification delivery
+  User.findById(userId)
+    .select('email name fcmToken notificationPreferences')
+    .then(async (user) => {
+      if (!user) return;
+
+      // 1. Firebase push
+      if (isConfigured() && user.fcmToken && user.notificationPreferences?.push !== false) {
+        sendPush({ fcmToken: user.fcmToken, title, message });
+      }
+
+      // 2. Email notification (via Brevo)
+      if (process.env.BREVO_API_KEY && user.email && user.notificationPreferences?.email !== false) {
+        try {
+          await sendEmail({
+            to: user.email,
+            subject: title,
+            html: `<div style="font-family:sans-serif;line-height:1.5;"><h3>${title}</h3><p>${message}</p></div>`,
+            text: `${title}\n\n${message}`,
+          });
+        } catch (emailErr) {
+          logger.info(`Email sending failed or unconfigured: ${emailErr.message}`);
         }
-      })
-      .catch((e) => logger.error(e.message));
-  }
+      }
+    })
+    .catch((e) => logger.error(`Notification delivery error: ${e.message}`));
 
   return inApp;
 };

@@ -5,6 +5,8 @@ const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/appError');
 const { success } = require('../utils/response');
 
+const { notify } = require('../services/notification.service');
+
 const recalculateRating = async (dentistId) => {
   const stats = await Review.aggregate([
     { $match: { dentist: dentistId } },
@@ -39,6 +41,18 @@ exports.createReview = catchAsync(async (req, res, next) => {
   });
 
   await recalculateRating(appointment.dentist);
+
+  const dentistDoc = await Dentist.findById(appointment.dentist);
+  if (dentistDoc?.user) {
+    await notify({
+      userId: dentistDoc.user,
+      title: 'New Patient Review',
+      message: `You received a ${rating}-star review: "${comment?.slice(0, 50) || ''}"`,
+      type: 'review_received',
+      relatedId: review._id,
+    });
+  }
+
   success(res, 201, 'Review submitted.', review);
 });
 
@@ -52,11 +66,28 @@ exports.getDentistReviews = catchAsync(async (req, res) => {
 
 // @route POST /api/reviews/:id/reply  (dentist replies to a review)
 exports.replyToReview = catchAsync(async (req, res, next) => {
-  const review = await Review.findByIdAndUpdate(
-    req.params.id,
-    { reply: { text: req.body.text, repliedAt: new Date() } },
-    { new: true }
-  );
+  const review = await Review.findById(req.params.id);
   if (!review) return next(new AppError('Review not found.', 404));
+
+  if (req.user.role === 'dentist') {
+    const dentist = await Dentist.findOne({ user: req.user._id });
+    if (!dentist || !review.dentist.equals(dentist._id)) {
+      return next(new AppError('You can only reply to reviews for your clinic.', 403));
+    }
+  }
+
+  review.reply = { text: req.body.text, repliedAt: new Date() };
+  await review.save();
+
+  if (review.patient) {
+    await notify({
+      userId: review.patient,
+      title: 'Doctor Replied to Your Review',
+      message: 'The clinic doctor responded to your feedback.',
+      type: 'review_reply',
+      relatedId: review._id,
+    });
+  }
+
   success(res, 200, 'Reply posted.', review);
 });

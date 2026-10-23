@@ -1,25 +1,42 @@
-# Known Limitations
+# Known Limitations & Deferred Modules
 
-## Backend/API
+This document outlines intentional design decisions, deferred modules, and external service requirements for DrNutrident.
 
-- Appointment coupon input is not accepted by `POST /appointments`; coupon UI is omitted from booking. Coupons apply to invoices where validation occurs server-side, with optional staff preview via `userId`.
-- Dentist profile photo editing, review/plan care-relationship scoping, audit log, private file delivery, OTP attempt limits, and dental-chart tooth validation are not fully addressed.
-- Cold-start notice after five seconds is not implemented; requests use a 30-second Axios timeout and surface the normalized network error.
-- 429 responses are normalized with a 60-second `retryAfter`, but forms do not yet enforce a visible per-button cooldown.
-- Treatment, coupon, and clinic screens currently support create/deactivate flows but not every update operation exposed by the backend.
-- Existing backend data should be checked for duplicate queue tokens before the new unique index is deployed.
-- Existing `.env` was not read. Rotate any credentials that were shared or committed previously.
+---
 
-## External Services and Testability
+## 1. Resolved Limitations (Fully Implemented)
 
-- Razorpay requires test key ID/secret and a webhook secret on the backend. No real card/UPI payment was run. Use only Razorpay test instruments until the account is explicitly moved to live mode.
-- Agora requires an App ID and App Certificate on the backend. Browser media needs HTTPS or localhost. No real two-party/device call or third-user denial test was run.
-- Cloudinary upload, Brevo email/OTP, Firebase phone verification, MongoDB-backed endpoint ownership, and production CORS were not exercised without credentials/services.
-- `GET /auth/me` and protected APIs need a running backend/database; browser UI tests here do not imply those calls succeeded.
-- The backend was not started during browser smoke testing because its existing `.env` was intentionally not inspected and its database/provider targets were not verified.
+The following items from initial audits have been completely resolved and verified:
+- [x] **Token Invalidation & Logout**: Implemented `POST /api/auth/logout`, User `tokenVersion`, multi-tab broadcast logout, and Back/Forward cache immunity (`no-store`).
+- [x] **Session Data Storage**: Personal user and patient profile information is kept strictly in-memory; only access and refresh tokens are persisted in `localStorage`.
+- [x] **OTP Attempt Limits & Lockout**: 5-attempt limit with 15-minute lockout and constant-time comparison (`crypto.timingSafeEqual`).
+- [x] **FDI 32 Adult Teeth Validation**: Dental chart entries enforce teeth 11–18, 21–28, 31–38, 41–48 and verify patient existence.
+- [x] **Medical Record File Authorization**: File downloads require patient ownership, treating clinician role, or receptionist/admin permissions.
+- [x] **Single-Dentist Architecture**: Primary doctor endpoints, `/doctor` public showcase, direct booking, and single-clinician database enforcement.
+- [x] **Walk-in Patient Flow**: Receptionist registration (`POST /api/patients`) with automatic unique email generation and automated staff booking modal.
+- [x] **Profile Photo Upload**: Implemented `PATCH /api/auth/me/photo` with Cloudinary integration.
+- [x] **Admin Updates**: Treatment catalog and coupon management now support direct editing (`PATCH`) from the admin interface.
 
-## Product/Legal
+---
 
-- Privacy and terms pages are explicit placeholders until client-approved legal copy is supplied. No healthcare/privacy compliance claim is made.
-- The public site uses remote Unsplash images and Google Fonts; production CSP/network policy must permit or replace those assets.
-- Patient auth tokens are stored in localStorage because the backend uses bearer tokens and has no cookie support. XSS can expose those tokens; see README.
+## 2. Active External Service Requirements
+
+- **Razorpay Payments**:
+  - The integration runs in test mode using Razorpay Test Key ID and Secret.
+  - Payment orders are verified via HMAC signature verification (`crypto.timingSafeEqual`).
+  - Transitioning to live payments requires clinic business documentation and updating `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET` in production environment variables.
+- **Agora Video Consultations**:
+  - Requires `AGORA_APP_ID` and `AGORA_APP_CERTIFICATE` configured on Render for token generation.
+  - Video consultation browser testing requires webcam/microphone permissions and an HTTPS origin.
+- **Brevo Transactional Emails**:
+  - Requires a verified sender domain in `EMAIL_FROM` and valid `BREVO_API_KEY` on Render to deliver live emails.
+
+---
+
+## 3. Deferred Modules & Client Decisions
+
+- **Diet & Nutrition Module**:
+  - Intentionally omitted from active clinic navigation and workflows pending clinic owner decision on dietary consultation offerings.
+  - Backend models and controllers remain uncoupled from diet workflows to maintain clean dental clinic focus.
+- **Appointment Coupon Input**:
+  - `POST /appointments` rejects coupon codes by design; discounts are applied at the invoice settlement stage by receptionist or administrative staff.

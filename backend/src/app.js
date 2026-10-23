@@ -10,6 +10,7 @@ const notFound = require('./middleware/notFound.middleware');
 const { apiLimiter } = require('./middleware/rateLimit.middleware');
 const { razorpayWebhook } = require('./controllers/payment.controller');
 const getCorsOrigins = require('./utils/corsOrigins');
+const noStore = require('./middleware/noStore.middleware');
 
 const app = express();
 const corsOrigins = getCorsOrigins();
@@ -39,6 +40,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(sanitizeInput);
 
 app.use('/api', apiLimiter);
+app.use('/api', noStore);
 
 // --- Health check ---
 app.get('/api/health', (req, res) => res.status(200).json({ success: true, message: 'API is running' }));

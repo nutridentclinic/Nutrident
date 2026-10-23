@@ -10,10 +10,15 @@ import {
   FileText,
   Plus,
   Search,
+  UserPlus,
   Users,
   Wallet,
+  X,
 } from "lucide-react";
 import { api, downloadPdf } from "../api/domains.js";
+import { usePrimaryDentist } from "../hooks/usePrimaryDentist.js";
+import { fetchPrimarySlotsWithFallback } from "../api/capabilities.js";
+import { clinicDate, isPastSlot } from "../utils/booking.js";
 import { PatientDirectory } from "./TeamPages.jsx";
 import {
   AsyncView,
@@ -140,6 +145,33 @@ export function AppointmentLookup() {
   const queryClient = useQueryClient();
   const notify = useToast();
   const { confirm, dialog } = useConfirm();
+
+  const primary = usePrimaryDentist();
+
+  // Walk-in modal state
+  const [showWalkInModal, setShowWalkInModal] = useState(false);
+  const [walkInBusy, setWalkInBusy] = useState(false);
+  const [walkInForm, setWalkInForm] = useState({
+    name: "",
+    phone: "",
+    email: "",
+    gender: "other",
+    bloodGroup: "",
+    dateOfBirth: "",
+    address: "",
+  });
+
+  // Staff booking modal state
+  const [showBookingModal, setShowBookingModal] = useState(false);
+  const [bookingBusy, setBookingBusy] = useState(false);
+  const [patientSearchTerm, setPatientSearchTerm] = useState("");
+  const [selectedPatient, setSelectedPatient] = useState(null);
+  const [bookingDate, setBookingDate] = useState(clinicDate());
+  const [bookingSlot, setBookingSlot] = useState("");
+  const [bookingMode, setBookingMode] = useState("in-clinic");
+  const [bookingReason, setBookingReason] = useState("");
+  const [paymentChoice, setPaymentChoice] = useState("pay-at-clinic");
+
   const query = useQuery({
     queryKey: ["appointment", "lookup", lookup],
     queryFn: () => api.appointments.detail(lookup),
@@ -156,6 +188,115 @@ export function AppointmentLookup() {
       }
     },
   });
+
+  // Slots for staff booking modal
+  const staffSlotsQuery = useQuery({
+    queryKey: ["staff-booking-slots", bookingDate, primary.dentistId],
+    queryFn: () => fetchPrimarySlotsWithFallback(bookingDate, primary.dentistId),
+    enabled: showBookingModal && !!bookingDate,
+  });
+  const availableSlots = (staffSlotsQuery.data || []).filter(
+    (slot) => !isPastSlot(bookingDate, slot.startTime),
+  );
+
+  // Patient search for staff booking
+  const patientSearchResults = useQuery({
+    queryKey: ["patient-search", patientSearchTerm],
+    queryFn: () => api.patients.list({ search: patientSearchTerm, limit: 8 }),
+    enabled: showBookingModal && patientSearchTerm.length >= 2,
+  });
+
+  const handleRegisterWalkIn = async (e) => {
+    e.preventDefault();
+    if (!walkInForm.name.trim() || !walkInForm.phone.trim()) {
+      notify("Patient name and phone number are required.", "error");
+      return;
+    }
+    setWalkInBusy(true);
+    try {
+      const res = await api.patients.createWalkIn(walkInForm);
+      notify(res.message || "Walk-in patient registered successfully.", "success");
+      const createdPatient = res.data;
+      setShowWalkInModal(false);
+      setWalkInForm({
+        name: "",
+        phone: "",
+        email: "",
+        gender: "other",
+        bloodGroup: "",
+        dateOfBirth: "",
+        address: "",
+      });
+      queryClient.invalidateQueries({ queryKey: ["patients"] });
+      // Optionally preselect for booking immediately
+      if (createdPatient) {
+        setSelectedPatient(createdPatient);
+        setShowBookingModal(true);
+      }
+    } catch (err) {
+      notify(err.message || "Failed to register walk-in patient.", "error");
+    } finally {
+      setWalkInBusy(false);
+    }
+  };
+
+  const handleStaffBooking = async (e) => {
+    e.preventDefault();
+    const patientId = selectedPatient?._id || selectedPatient?.user?._id;
+    if (!patientId) {
+      notify("Select a patient for the appointment.", "error");
+      return;
+    }
+    if (!bookingSlot) {
+      notify("Select an available appointment time slot.", "error");
+      return;
+    }
+    setBookingBusy(true);
+    try {
+      const payload = {
+        patientId,
+        dentistId: primary.dentistId || undefined,
+        date: bookingDate,
+        startTime: bookingSlot,
+        mode: bookingMode,
+        reasonForVisit: bookingReason,
+        paymentChoice,
+      };
+
+      try {
+        const res = await api.appointments.createStaff(payload);
+        notify(res.message || "Appointment booked and confirmed.", "success");
+      } catch (err) {
+        if (err.status === 404) {
+          // Graceful fallback on live backend before redeployment
+          const created = await api.appointments.create({
+            dentistId: primary.dentistId || undefined,
+            date: bookingDate,
+            startTime: bookingSlot,
+            mode: bookingMode,
+            reasonForVisit: bookingReason,
+          });
+          if (created.data?._id) {
+            await api.appointments.confirm(created.data._id, { staffOverride: true });
+          }
+          notify("Appointment booked and confirmed by staff override.", "success");
+        } else {
+          throw err;
+        }
+      }
+      setShowBookingModal(false);
+      setSelectedPatient(null);
+      setBookingSlot("");
+      setBookingReason("");
+      queryClient.invalidateQueries({ queryKey: ["appointments"] });
+      listQuery.refetch();
+    } catch (err) {
+      notify(err.message || "Failed to book staff appointment.", "error");
+    } finally {
+      setBookingBusy(false);
+    }
+  };
+
   const item = query.data?.data;
   const appointments = listQuery.data?.data || [];
   const act = async (name) => {
@@ -196,6 +337,24 @@ export function AppointmentLookup() {
         eyebrow="Appointment support"
         title="Appointment lookup"
         description="Review appointments for a clinic date or open a specific visit by ID."
+        actions={
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            <button
+              type="button"
+              className="button button-outline"
+              onClick={() => setShowWalkInModal(true)}
+            >
+              <UserPlus size={15} /> Register walk-in
+            </button>
+            <button
+              type="button"
+              className="button button-primary"
+              onClick={() => setShowBookingModal(true)}
+            >
+              <Plus size={15} /> New appointment
+            </button>
+          </div>
+        }
       />
       <div className="filter-bar">
         <Field label="Date">
@@ -336,6 +495,257 @@ export function AppointmentLookup() {
           )}
         </AsyncView>
       )}
+
+      {/* Walk-in patient registration modal */}
+      {showWalkInModal && (
+        <div className="modal-backdrop" onClick={() => setShowWalkInModal(false)}>
+          <div className="modal-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "540px", width: "90%" }}>
+            <div className="modal-header">
+              <h2>Register Walk-in Patient</h2>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="Close"
+                onClick={() => setShowWalkInModal(false)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <form onSubmit={handleRegisterWalkIn} className="admin-form-grid" style={{ padding: "1.2rem" }}>
+              <Field label="Full name *">
+                <TextInput
+                  required
+                  value={walkInForm.name}
+                  onChange={(e) => setWalkInForm({ ...walkInForm, name: e.target.value })}
+                  placeholder="e.g. Ramesh Kumar"
+                />
+              </Field>
+              <Field label="Phone number *">
+                <TextInput
+                  required
+                  type="tel"
+                  value={walkInForm.phone}
+                  onChange={(e) => setWalkInForm({ ...walkInForm, phone: e.target.value })}
+                  placeholder="e.g. 9876543210"
+                />
+              </Field>
+              <Field label="Email (optional)">
+                <TextInput
+                  type="email"
+                  value={walkInForm.email}
+                  onChange={(e) => setWalkInForm({ ...walkInForm, email: e.target.value })}
+                  placeholder="name@example.com"
+                />
+              </Field>
+              <Field label="Date of birth">
+                <TextInput
+                  type="date"
+                  value={walkInForm.dateOfBirth}
+                  onChange={(e) => setWalkInForm({ ...walkInForm, dateOfBirth: e.target.value })}
+                />
+              </Field>
+              <Field label="Gender">
+                <TextInput
+                  as="select"
+                  value={walkInForm.gender}
+                  onChange={(e) => setWalkInForm({ ...walkInForm, gender: e.target.value })}
+                >
+                  <option value="male">Male</option>
+                  <option value="female">Female</option>
+                  <option value="other">Other</option>
+                </TextInput>
+              </Field>
+              <Field label="Blood group">
+                <TextInput
+                  as="select"
+                  value={walkInForm.bloodGroup}
+                  onChange={(e) => setWalkInForm({ ...walkInForm, bloodGroup: e.target.value })}
+                >
+                  <option value="">Unknown</option>
+                  <option value="A+">A+</option>
+                  <option value="A-">A-</option>
+                  <option value="B+">B+</option>
+                  <option value="B-">B-</option>
+                  <option value="AB+">AB+</option>
+                  <option value="AB-">AB-</option>
+                  <option value="O+">O+</option>
+                  <option value="O-">O-</option>
+                </TextInput>
+              </Field>
+              <Field label="Address" className="field-wide">
+                <TextInput
+                  value={walkInForm.address}
+                  onChange={(e) => setWalkInForm({ ...walkInForm, address: e.target.value })}
+                  placeholder="Residential address"
+                />
+              </Field>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.5rem", marginTop: "1rem" }} className="field-wide">
+                <button
+                  type="button"
+                  className="button button-quiet"
+                  onClick={() => setShowWalkInModal(false)}
+                  disabled={walkInBusy}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="button button-primary" disabled={walkInBusy}>
+                  {walkInBusy ? "Registering…" : "Register Patient"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Staff appointment booking modal */}
+      {showBookingModal && (
+        <div className="modal-backdrop" onClick={() => setShowBookingModal(false)}>
+          <div className="modal-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "580px", width: "90%" }}>
+            <div className="modal-header">
+              <h2>Book Staff Appointment</h2>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="Close"
+                onClick={() => setShowBookingModal(false)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <form onSubmit={handleStaffBooking} className="admin-form-grid" style={{ padding: "1.2rem" }}>
+              <div className="field-wide">
+                <label className="field-label">Patient *</label>
+                {selectedPatient ? (
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.6rem 0.8rem", background: "#f0f7f5", borderRadius: "6px", border: "1px solid #c2e2dc" }}>
+                    <div>
+                      <strong>{selectedPatient.name || selectedPatient.user?.name}</strong>
+                      <span style={{ fontSize: "0.85rem", color: "#555", marginLeft: "0.5rem" }}>
+                        ({selectedPatient.phone || selectedPatient.user?.phone})
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      className="button button-quiet button-small"
+                      onClick={() => setSelectedPatient(null)}
+                    >
+                      Change
+                    </button>
+                  </div>
+                ) : (
+                  <div>
+                    <TextInput
+                      placeholder="Search patient by name or phone (min 2 characters)"
+                      value={patientSearchTerm}
+                      onChange={(e) => setPatientSearchTerm(e.target.value)}
+                    />
+                    {patientSearchResults.data?.data?.length > 0 && (
+                      <div className="record-list" style={{ maxHeight: "160px", overflowY: "auto", border: "1px solid #dbe5e1", borderRadius: "4px", marginTop: "0.3rem" }}>
+                        {patientSearchResults.data.data.map((p) => (
+                          <div
+                            key={p._id}
+                            style={{ padding: "0.5rem 0.8rem", cursor: "pointer", display: "flex", justifyContent: "space-between", borderBottom: "1px solid #f0f4f2" }}
+                            onClick={() => {
+                              setSelectedPatient(p);
+                              setPatientSearchTerm("");
+                            }}
+                          >
+                            <strong>{p.name || p.user?.name}</strong>
+                            <small>{p.phone || p.user?.phone}</small>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <Field label="Appointment date *">
+                <TextInput
+                  type="date"
+                  min={clinicDate()}
+                  value={bookingDate}
+                  onChange={(e) => {
+                    setBookingDate(e.target.value);
+                    setBookingSlot("");
+                  }}
+                  required
+                />
+              </Field>
+
+              <Field label="Mode">
+                <TextInput
+                  as="select"
+                  value={bookingMode}
+                  onChange={(e) => setBookingMode(e.target.value)}
+                >
+                  <option value="in-clinic">In-clinic visit</option>
+                  <option value="video">Video consultation</option>
+                </TextInput>
+              </Field>
+
+              <div className="field-wide">
+                <label className="field-label">Available time slot *</label>
+                {staffSlotsQuery.isLoading ? (
+                  <p className="muted-copy">Loading available slots…</p>
+                ) : availableSlots.length === 0 ? (
+                  <p className="muted-copy">No available slots for this date. Select another date.</p>
+                ) : (
+                  <div className="slot-grid" style={{ maxHeight: "140px", overflowY: "auto", marginTop: "0.3rem" }}>
+                    {availableSlots.map((slot) => (
+                      <button
+                        type="button"
+                        key={slot.startTime}
+                        className={`slot-button ${bookingSlot === slot.startTime ? "slot-selected" : ""}`}
+                        onClick={() => setBookingSlot(slot.startTime)}
+                      >
+                        {slot.startTime}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <Field label="Payment collection" className="field-wide">
+                <TextInput
+                  as="select"
+                  value={paymentChoice}
+                  onChange={(e) => setPaymentChoice(e.target.value)}
+                >
+                  <option value="pay-at-clinic">Pay at clinic counter (Confirmed, Pending)</option>
+                  <option value="online">Online payment via Razorpay</option>
+                </TextInput>
+              </Field>
+
+              <Field label="Reason for visit" className="field-wide">
+                <TextInput
+                  value={bookingReason}
+                  onChange={(e) => setBookingReason(e.target.value)}
+                  placeholder="e.g. Toothache, routine checkup, filling"
+                />
+              </Field>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.5rem", marginTop: "1rem" }} className="field-wide">
+                <button
+                  type="button"
+                  className="button button-quiet"
+                  onClick={() => setShowBookingModal(false)}
+                  disabled={bookingBusy}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="button button-primary"
+                  disabled={bookingBusy || !selectedPatient || !bookingSlot}
+                >
+                  {bookingBusy ? "Booking…" : "Confirm Appointment"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {dialog}
     </div>
   );
@@ -345,6 +755,7 @@ export function InvoiceCreator() {
   const queryClient = useQueryClient();
   const notify = useToast();
   const { confirm, dialog } = useConfirm();
+  const primary = usePrimaryDentist();
   const [form, setForm] = useState({
     patientId: "",
     dentistId: "",
@@ -378,7 +789,7 @@ export function InvoiceCreator() {
     try {
       const result = await api.invoices.create({
         patientId: form.patientId,
-        dentistId: form.dentistId || undefined,
+        dentistId: form.dentistId || primary.dentistId || undefined,
         appointmentId: form.appointmentId || undefined,
         couponCode: form.couponCode || undefined,
         items: items.map((item) => ({
@@ -461,11 +872,13 @@ export function InvoiceCreator() {
                 }
               />
             </Field>
-            <Field label="Dentist ID (optional)">
+            <Field label="Doctor">
               <TextInput
-                value={form.dentistId}
-                onChange={(event) =>
-                  setForm({ ...form, dentistId: event.target.value })
+                disabled
+                value={
+                  primary.dentist
+                    ? `Dr. ${primary.dentist.user?.name || "Doctor"} (${primary.dentist.specialization || "Dental Care"})`
+                    : "Primary Clinic Doctor"
                 }
               />
             </Field>

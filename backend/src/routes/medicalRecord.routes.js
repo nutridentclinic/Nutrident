@@ -8,6 +8,7 @@ router.use(protect);
 router.post('/', upload('medical-records').single('file'), ctrl.uploadRecord);
 router.get('/me', restrictTo('patient'), ctrl.getMyRecords);
 router.get('/patient/:patientId', restrictTo('dentist', 'receptionist', 'admin'), ctrl.getPatientRecords);
+router.get('/:id/file', ctrl.getRecordFile);
 router.delete('/:id', ctrl.deleteRecord);
 
 module.exports = router;

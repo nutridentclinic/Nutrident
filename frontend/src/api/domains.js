@@ -15,9 +15,12 @@ export const api = {
     forgotPassword: (data) => post('/auth/forgot-password', data),
     resetPassword: (data) => post('/auth/reset-password', data),
     updatePassword: (data) => patch('/auth/update-password', data),
+    updatePhoto: (formData) => request({ method: 'PATCH', url: '/auth/me/photo', data: formData, headers: { 'Content-Type': 'multipart/form-data' } }),
   },
   dentists: {
     list: (params) => get('/dentists', params),
+    primary: () => get('/dentists/primary'),
+    primarySlots: (date) => get('/dentists/primary/slots', { date }),
     adminList: (params) => get('/dentists/admin/all', params),
     myPatients: () => get('/dentists/me/patients'),
     detail: (id) => get(`/dentists/${id}`),
@@ -44,6 +47,7 @@ export const api = {
   settings: { get: () => get('/clinic-settings'), update: (data) => patch('/clinic-settings', data) },
   appointments: {
     create: (data) => post('/appointments', data),
+    createStaff: (data) => post('/appointments/staff', data),
     mine: (params) => get('/appointments/me', params),
     dentistMine: (params) => get('/appointments/dentist/me', params),
     all: (params) => get('/appointments', params),
@@ -68,6 +72,7 @@ export const api = {
     updateBasic: (data) => patch('/patients/me/basic-info', data),
     list: (params) => get('/patients', params),
     detail: (id) => get(`/patients/${id}`),
+    createWalkIn: (data) => post('/patients', data),
     addFamily: (data) => post('/patients/me/family-members', data),
     removeFamily: (id) => remove(`/patients/me/family-members/${id}`),
   },

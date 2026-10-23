@@ -7,6 +7,7 @@ import {
   ArrowRight,
   CalendarDays,
   Check,
+  Download,
   FilePlus2,
   FileText,
   MessageSquareText,
@@ -14,9 +15,10 @@ import {
   Search,
   UserRound,
 } from "lucide-react";
-import { api } from "../api/domains.js";
+import { api, downloadPdf } from "../api/domains.js";
 import { apiBaseUrl } from "../api/client.js";
 import { useAuthStore } from "../store/auth.js";
+import { usePrimaryDentist } from "../hooks/usePrimaryDentist.js";
 import {
   AsyncView,
   Field,
@@ -1073,10 +1075,19 @@ export function ClinicalRecord({ readOnly = false }) {
             {(prescriptions.data?.data || []).map((entry) => (
               <div className="record-row" key={entry._id}>
                 <FileText size={18} />
-                <span>
-                  {entry.diagnosis || "Prescription"} ·{" "}
-                  {fmtDate(entry.createdAt)}
-                </span>
+                <div className="record-row-content">
+                  <strong>{entry.diagnosis || "Prescription"}</strong>
+                  <span>
+                    {fmtDate(entry.createdAt)} · {(entry.medicines || []).length} medicines
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="button button-quiet button-small"
+                  onClick={() => downloadPdf(`/prescriptions/${entry._id}/pdf`, `prescription-${entry._id}.pdf`)}
+                >
+                  Download PDF <Download size={14} />
+                </button>
               </div>
             ))}
           </AsyncView>
@@ -1487,6 +1498,7 @@ export function DentistReviews() {
 export function QueuePage({ role = "dentist" }) {
   const isDentist = role === "dentist";
   const dentistProfile = useDentistProfile();
+  const primaryDoctor = usePrimaryDentist();
   const [selectedDentist, setSelectedDentist] = useState("");
   const [date, setDate] = useState(dateToday());
   const [patientId, setPatientId] = useState("");
@@ -1501,7 +1513,18 @@ export function QueuePage({ role = "dentist" }) {
     queryFn: () => api.dentists.list({ limit: 100 }),
     enabled: !isDentist,
   });
-  const dentistId = isDentist ? dentistProfile.profile?._id : selectedDentist;
+
+  useEffect(() => {
+    if (!isDentist && !selectedDentist) {
+      if (primaryDoctor.dentistId) {
+        setSelectedDentist(primaryDoctor.dentistId);
+      } else if (dentists.data?.data?.[0]?._id) {
+        setSelectedDentist(dentists.data.data[0]._id);
+      }
+    }
+  }, [isDentist, selectedDentist, primaryDoctor.dentistId, dentists.data]);
+
+  const dentistId = isDentist ? dentistProfile.profile?._id : (selectedDentist || primaryDoctor.dentistId);
   const queue = useQuery({
     queryKey: ["queue", dentistId, date],
     queryFn: () => api.queue.get(dentistId, date),

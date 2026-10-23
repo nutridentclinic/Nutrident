@@ -40,6 +40,23 @@ exports.getPatientRecords = catchAsync(async (req, res) => {
   success(res, 200, 'Medical records fetched.', records);
 });
 
+// @route GET /api/medical-records/:id/file
+exports.getRecordFile = catchAsync(async (req, res, next) => {
+  const record = await MedicalRecord.findById(req.params.id);
+  if (!record) return next(new AppError('Record not found.', 404));
+
+  const isPatientOwner = req.user.role === 'patient' && record.patient.equals(req.user._id);
+  const isStaff = ['dentist', 'receptionist', 'admin'].includes(req.user.role);
+  if (!isPatientOwner && !isStaff) {
+    return next(new AppError('You do not have access to this medical record.', 403));
+  }
+
+  if (record.file?.url) {
+    return res.redirect(record.file.url);
+  }
+  return next(new AppError('File URL not found.', 404));
+});
+
 // @route DELETE /api/medical-records/:id
 exports.deleteRecord = catchAsync(async (req, res, next) => {
   const record = await MedicalRecord.findById(req.params.id);

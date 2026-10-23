@@ -20,18 +20,27 @@ exports.checkIn = catchAsync(async (req, res, next) => {
   if (!patientId && !String(walkInName || '').trim()) {
     return next(new AppError('patientId or walkInName is required.', 400));
   }
-  const dentist = await Dentist.findById(dentistId);
-  if (!dentist) return next(new AppError('Dentist not found.', 404));
+
+  const primaryDentist = await Dentist.findOne();
+  if (!primaryDentist) {
+    return next(new AppError('No dentist is configured for this clinic.', 404));
+  }
+  if (dentistId && String(primaryDentist._id) !== String(dentistId)) {
+    return next(new AppError('The specified dentist is not the clinic doctor.', 400));
+  }
+  const resolvedDentistId = primaryDentist._id;
+  const dentist = primaryDentist;
+
   const day = startOfDay(date || new Date());
   const avgConsultMinutes = dentist?.slotDurationMinutes || 15;
-  const waitingCount = await Queue.countDocuments({ dentist: dentistId, date: day, status: 'waiting' });
+  const waitingCount = await Queue.countDocuments({ dentist: resolvedDentistId, date: day, status: 'waiting' });
   let entry;
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const lastEntry = await Queue.findOne({ dentist: dentistId, date: day }).sort('-tokenNumber');
+    const lastEntry = await Queue.findOne({ dentist: resolvedDentistId, date: day }).sort('-tokenNumber');
     const tokenNumber = lastEntry ? lastEntry.tokenNumber + 1 : 1;
     try {
       entry = await Queue.create({
-        dentist: dentistId,
+        dentist: resolvedDentistId,
         patient: patientId || null,
         walkInName: walkInName?.trim() || null,
         appointment: appointmentId || null,
@@ -45,13 +54,13 @@ exports.checkIn = catchAsync(async (req, res, next) => {
     }
   }
 
-  req.app.get('io')?.to(`queue_${dentistId}`).emit('queue:updated', { action: 'check-in', entry });
+  req.app.get('io')?.to(`queue_${resolvedDentistId}`).emit('queue:updated', { action: 'check-in', entry });
 
   if (patientId) {
     await notify({
       userId: patientId,
       title: 'Checked In',
-      message: `You're checked in. Your token number is ${tokenNumber}. Estimated wait: ${entry.estimatedWaitMinutes} min.`,
+      message: `You're checked in. Your token number is ${entry.tokenNumber}. Estimated wait: ${entry.estimatedWaitMinutes} min.`,
       type: 'queue_update',
       relatedId: entry._id,
     });

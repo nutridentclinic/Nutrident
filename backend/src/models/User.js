@@ -36,6 +36,7 @@ const userSchema = new mongoose.Schema(
     isEmailVerified: { type: Boolean, default: false },
     isPhoneVerified: { type: Boolean, default: false },
     active: { type: Boolean, default: true, select: false },
+    tokenVersion: { type: Number, default: 0, select: false },
 
     // FCM token placeholder - populated once push notifications are wired up
     fcmToken: { type: String, default: null },
@@ -44,6 +45,9 @@ const userSchema = new mongoose.Schema(
 
     otpHash: { type: String, select: false },
     otpExpires: { type: Date, select: false },
+    otpAttempts: { type: Number, default: 0, select: false },
+    otpLockUntil: { type: Date, select: false },
+    resendOtpCooldown: { type: Date, select: false },
     notificationPreferences: {
       push: { type: Boolean, default: true },
       email: { type: Boolean, default: true },

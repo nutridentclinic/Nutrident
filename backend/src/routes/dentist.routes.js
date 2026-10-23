@@ -10,6 +10,8 @@ router.get('/', ctrl.getDentists);
 router.get('/nearby', ctrl.getNearbyDentists);
 router.get('/admin/all', protect, restrictTo('admin'), ctrl.getAllDentistsAdmin);
 router.get('/me/patients', protect, restrictTo('dentist'), ctrl.getMyPatients);
+router.get('/primary', ctrl.getPrimaryDentist);
+router.get('/primary/slots', ctrl.getPrimarySlots);
 router.get('/:id', ctrl.getDentistById);
 router.get('/:id/slots', ctrl.getDentistSlots);
 

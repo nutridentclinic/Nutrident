@@ -10,6 +10,13 @@ const escapeRegex = require('../utils/escapeRegex');
 
 // @route POST /api/dentists  (admin only) - onboard a new dentist
 exports.createDentist = catchAsync(async (req, res, next) => {
+  if (process.env.SINGLE_DENTIST_MODE !== 'false') {
+    const count = await Dentist.countDocuments();
+    if (count > 0) {
+      return next(new AppError('This clinic already has its dentist. Edit the existing profile.', 409));
+    }
+  }
+
   const { name, email, phone, password, specialization, qualifications, experienceYears, consultationFee, about, languages, clinicAddress } = req.body;
 
   const existing = await User.findOne({ $or: [{ email }, { phone }] });
@@ -81,6 +88,35 @@ exports.getNearbyDentists = catchAsync(async (req, res, next) => {
   success(res, 200, 'Nearby dentists fetched.', dentists);
 });
 
+// @route GET /api/dentists/primary (public) - single-dentist profile and reviews
+exports.getPrimaryDentist = catchAsync(async (req, res, next) => {
+  const dentist = await Dentist.findOne().populate('user', 'name profilePhoto phone email active');
+  if (!dentist) {
+    return next(new AppError('No dentist has been set up for this clinic yet.', 404));
+  }
+
+  const reviews = await Review.find({ dentist: dentist._id })
+    .populate('patient', 'name profilePhoto')
+    .sort('-createdAt')
+    .limit(20);
+
+  success(res, 200, 'Primary dentist fetched.', { dentist, reviews });
+});
+
+// @route GET /api/dentists/primary/slots?date=YYYY-MM-DD
+exports.getPrimarySlots = catchAsync(async (req, res, next) => {
+  const { date } = req.query;
+  if (!date) return next(new AppError('date query param is required (YYYY-MM-DD).', 400));
+
+  const dentist = await Dentist.findOne();
+  if (!dentist) {
+    return next(new AppError('No dentist has been set up for this clinic yet.', 404));
+  }
+
+  const slots = await getAvailableSlots(dentist._id, date);
+  success(res, 200, 'Available slots fetched.', slots);
+});
+
 // @route GET /api/dentists/:id
 exports.getDentistById = catchAsync(async (req, res, next) => {
   const dentist = await Dentist.findById(req.params.id).populate('user', 'name profilePhoto phone email');
@@ -105,6 +141,29 @@ exports.getDentistSlots = catchAsync(async (req, res, next) => {
 
 // @route PATCH /api/dentists/me  (dentist updates own profile)
 exports.updateMyProfile = catchAsync(async (req, res, next) => {
+  if (req.body.weeklyAvailability !== undefined) {
+    if (!Array.isArray(req.body.weeklyAvailability)) {
+      return next(new AppError('weeklyAvailability must be an array.', 400));
+    }
+    for (const daySchedule of req.body.weeklyAvailability) {
+      if (daySchedule.slots && Array.isArray(daySchedule.slots)) {
+        const sorted = [...daySchedule.slots].sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
+        for (let i = 0; i < sorted.length; i++) {
+          const slot = sorted[i];
+          if (!slot.startTime || !slot.endTime || slot.startTime >= slot.endTime) {
+            return next(new AppError(`Slot start time (${slot.startTime}) must be strictly before end time (${slot.endTime}).`, 400));
+          }
+          if (i > 0) {
+            const prev = sorted[i - 1];
+            if (slot.startTime < prev.endTime) {
+              return next(new AppError(`Overlapping slots detected: ${prev.startTime}-${prev.endTime} and ${slot.startTime}-${slot.endTime}.`, 400));
+            }
+          }
+        }
+      }
+    }
+  }
+
   const allowedFields = [
     'about', 'languages', 'consultationFee', 'clinicAddress',
     'weeklyAvailability', 'slotDurationMinutes', 'qualifications', 'experienceYears',

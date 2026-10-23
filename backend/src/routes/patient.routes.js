@@ -11,6 +11,7 @@ router.post('/me/family-members', protect, restrictTo('patient'), ctrl.addFamily
 router.delete('/me/family-members/:memberId', protect, restrictTo('patient'), ctrl.removeFamilyMember);
 
 router.get('/', protect, restrictTo('admin', 'receptionist'), ctrl.getAllPatients);
+router.post('/', protect, restrictTo('admin', 'receptionist'), ctrl.createPatientByStaff);
 router.get('/:id', protect, restrictTo('admin', 'receptionist', 'dentist'), ctrl.getPatientById);
 
 module.exports = router;
