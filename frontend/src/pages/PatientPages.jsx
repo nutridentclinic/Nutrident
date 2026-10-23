@@ -11,7 +11,6 @@ import {
   Clock3,
   CreditCard,
   Download,
-  FilePlus2,
   FileText,
   HeartPulse,
   LoaderCircle,
@@ -23,11 +22,11 @@ import {
 } from "lucide-react";
 import { api, downloadPdf } from "../api/domains.js";
 import { useAuthStore } from "../store/auth.js";
+import { FileUpload } from "../components/FileUpload.jsx";
 import { clinicDate, isPastSlot } from "../utils/booking.js";
 import { FDI_TEETH as fdiTeeth } from "../utils/teeth.js";
 import {
   AsyncView,
-  EmptyState,
   Field,
   PageTitle,
   SectionPanel,
@@ -1061,31 +1060,21 @@ export function PatientRecords() {
     queryFn: () => api.records.mine(filterType ? { type: filterType } : {}),
     ...queryOptions,
   });
-  const [file, setFile] = useState(null);
   const [title, setTitle] = useState("");
   const [type, setType] = useState("other");
-  const [busy, setBusy] = useState(false);
   const items = query.data?.data || [];
-  const upload = async (event) => {
-    event.preventDefault();
-    if (!file) return notify("Choose a file to upload.", "error");
+
+  const handleUpload = async (file, onProgress) => {
     const data = new FormData();
     data.append("file", file);
     data.append("title", title || file.name);
     data.append("type", type);
-    setBusy(true);
-    try {
-      const result = await api.records.upload(data);
-      notify(result.message);
-      setTitle("");
-      setFile(null);
-      await queryClient.invalidateQueries({ queryKey: ["records"] });
-    } catch (error) {
-      notify(error.message, "error");
-    } finally {
-      setBusy(false);
-    }
+    const result = await api.records.upload(data, { onUploadProgress: onProgress });
+    setTitle("");
+    await queryClient.invalidateQueries({ queryKey: ["records"] });
+    return result;
   };
+
   const remove = async (id) => {
     if (!(await confirm({ title: "Delete this medical record?", description: "The file will be removed from this patient record.", confirmLabel: "Delete record", danger: true }))) return;
     try {
@@ -1107,41 +1096,43 @@ export function PatientRecords() {
         title="Add a record"
         description="Files are uploaded to the clinic’s configured storage provider."
       >
-        <form className="upload-form" onSubmit={upload}>
-          <Field label="Record title">
-            <TextInput
-              required
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-              placeholder="e.g. Panoramic X-ray"
-            />
-          </Field>
-          <Field label="Record type">
-            <TextInput
-              as="select"
-              value={type}
-              onChange={(event) => setType(event.target.value)}
-            >
-              {["xray", "lab-report", "scan", "doctor-note", "other"].map(
-                (value) => (
-                  <option key={value} value={value}>
-                    {value.replace("-", " ")}
-                  </option>
-                ),
-              )}
-            </TextInput>
-          </Field>
-          <Field label="File">
-            <TextInput
-              type="file"
-              accept="image/jpeg,image/png,image/webp,application/pdf"
-              onChange={(event) => setFile(event.target.files?.[0] || null)}
-            />
-          </Field>
-          <button disabled={busy} className="button button-primary">
-            {busy ? "Uploading…" : "Upload record"} <FilePlus2 size={16} />
-          </button>
-        </form>
+        <FileUpload
+          accept="image/jpeg,image/png,image/webp,application/pdf"
+          maxSizeMB={10}
+          onUpload={handleUpload}
+          label="Choose or drop a medical document"
+          hint="JPG, PNG, WEBP or PDF up to 10 MB"
+          submitLabel="Upload record"
+          extraFields={
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+              <Field label="Record title">
+                <TextInput
+                  value={title}
+                  onChange={(event) => setTitle(event.target.value)}
+                  placeholder="e.g. Panoramic X-ray"
+                />
+              </Field>
+              <Field label="Record type">
+                <TextInput
+                  as="select"
+                  value={type}
+                  onChange={(event) => setType(event.target.value)}
+                >
+                  {["xray", "lab-report", "scan", "doctor-note", "other"].map(
+                    (value) => (
+                      <option key={value} value={value}>
+                        {value.replace("-", " ")}
+                      </option>
+                    ),
+                  )}
+                </TextInput>
+              </Field>
+            </div>
+          }
+          onSuccess={(result) => {
+            notify(result?.message || "Record uploaded successfully.");
+          }}
+        />
       </SectionPanel>
       <section className="records-section">
         <div className="section-panel-heading">
@@ -1186,7 +1177,7 @@ export function PatientRecords() {
                     className="button button-quiet button-small"
                     href={item.file?.url}
                     target="_blank"
-                    rel="noreferrer"
+                    rel="noopener noreferrer"
                   >
                     Open file <ArrowRight size={14} />
                   </a>
@@ -1749,55 +1740,34 @@ export function PatientProfilePhoto() {
   const queryClient = useQueryClient();
   const notify = useToast();
   const user = useAuthStore((state) => state.user);
-  const [file, setFile] = useState(null);
-  const [busy, setBusy] = useState(false);
-  const upload = async (event) => {
-    event.preventDefault();
-    if (!file) return notify("Choose a photo first.", "error");
-    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type))
-      return notify("Choose a JPG, PNG, or WEBP image.", "error");
-    if (file.size > 10 * 1024 * 1024)
-      return notify("Profile photos must be 10 MB or smaller.", "error");
+
+  const handleUpload = async (file, onProgress) => {
     const data = new FormData();
     data.append("photo", file);
-    setBusy(true);
-    try {
-      const result = await api.patients.updateBasic(data);
-      const current = useAuthStore.getState();
-      current.setSession({ ...current, user: result.data });
-      setFile(null);
-      await queryClient.invalidateQueries({ queryKey: ["patient-profile"] });
-      notify(result.message);
-    } catch (error) {
-      notify(error.message, "error");
-    } finally {
-      setBusy(false);
-    }
+    const result = await api.patients.updateBasic(data, { onUploadProgress: onProgress });
+    const current = useAuthStore.getState();
+    current.setSession({ ...current, user: result.data });
+    await queryClient.invalidateQueries({ queryKey: ["patient-profile"] });
+    return result;
   };
+
   return (
     <SectionPanel
       title="Profile photo"
       description="JPEG, PNG, or WEBP; maximum 10 MB."
     >
-      <form className="inline-form" onSubmit={upload}>
-        {user?.profilePhoto?.url && (
-          <img
-            className="profile-photo-preview"
-            src={user.profilePhoto.url}
-            alt="Current profile"
-          />
-        )}
-        <Field label="Choose a photo">
-          <TextInput
-            type="file"
-            accept="image/jpeg,image/png,image/webp"
-            onChange={(event) => setFile(event.target.files?.[0] || null)}
-          />
-        </Field>
-        <button className="button button-outline" disabled={busy || !file}>
-          {busy ? "Uploading…" : "Upload photo"} <FilePlus2 size={15} />
-        </button>
-      </form>
+      <FileUpload
+        accept="image/jpeg,image/png,image/webp"
+        maxSizeMB={10}
+        previewUrl={user?.profilePhoto?.url}
+        onUpload={handleUpload}
+        label="Choose or drop a profile photo"
+        hint="JPG, PNG, or WEBP up to 10 MB"
+        submitLabel="Update photo"
+        onSuccess={(result) => {
+          notify(result?.message || "Profile photo updated successfully.");
+        }}
+      />
     </SectionPanel>
   );
 }

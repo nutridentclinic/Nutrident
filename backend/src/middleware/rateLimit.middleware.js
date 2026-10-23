@@ -12,7 +12,7 @@ exports.apiLimiter = rateLimit({
 // Stricter limiter for auth endpoints (login/register/OTP)
 exports.authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 20,
+  max: process.env.NODE_ENV === 'test' ? 5000 : 20,
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, message: 'Too many attempts. Please try again in a while.' },

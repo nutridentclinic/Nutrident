@@ -182,13 +182,21 @@ describe('Workstream B & D Integration Tests', () => {
         phone: '9999992222',
         password: 'Password123!',
         role: 'patient',
+        isEmailVerified: true,
       });
       const patientToken = signAccessToken({ id: patient._id, role: 'patient', tv: 0 });
 
-      // Find next Monday date
+      // Find next Monday date in local/clinic timezone
+      const toLocalDateStr = (dt) => {
+        const y = dt.getFullYear();
+        const m = String(dt.getMonth() + 1).padStart(2, '0');
+        const day = String(dt.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+      };
+
       const d = new Date();
       d.setDate(d.getDate() + ((1 + 7 - d.getDay()) % 7 || 7));
-      const nextMondayStr = d.toISOString().slice(0, 10);
+      const nextMondayStr = toLocalDateStr(d);
 
       // 1. Wrong dentistId -> 400
       const fakeId = new mongoose.Types.ObjectId();
@@ -266,7 +274,10 @@ describe('Workstream B & D Integration Tests', () => {
       // 2. Book appointment via POST /api/appointments/staff
       const d = new Date();
       d.setDate(d.getDate() + ((2 + 7 - d.getDay()) % 7 || 7));
-      const nextTuesdayStr = d.toISOString().slice(0, 10);
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      const nextTuesdayStr = `${y}-${m}-${day}`;
 
       const bookRes = await request(app)
         .post('/api/appointments/staff')
@@ -309,6 +320,7 @@ describe('Workstream B & D Integration Tests', () => {
         phone: '9999996666',
         password: 'Password123!',
         role: 'patient',
+        isEmailVerified: true,
       });
       const patientToken = signAccessToken({ id: patient._id, role: 'patient', tv: 0 });
 
@@ -316,11 +328,14 @@ describe('Workstream B & D Integration Tests', () => {
       process.env.AGORA_APP_ID = 'test-agora-app-id';
       process.env.AGORA_APP_CERTIFICATE = 'test-agora-cert';
 
-      // Create an appointment for right now
+      // Create an appointment for right now in clinic timezone
       const now = new Date();
       const hh = String(now.getHours()).padStart(2, '0');
       const mm = String(now.getMinutes()).padStart(2, '0');
-      const todayStr = now.toISOString().slice(0, 10);
+      const yr = now.getFullYear();
+      const mon = String(now.getMonth() + 1).padStart(2, '0');
+      const dy = String(now.getDate()).padStart(2, '0');
+      const todayStr = `${yr}-${mon}-${dy}`;
 
       const apptAudio = await Appointment.create({
         patient: patient._id,

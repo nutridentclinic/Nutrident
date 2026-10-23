@@ -129,8 +129,23 @@ client.interceptors.response.use(
     const normalized = new Error(body?.message || error.message || 'Unable to reach the clinic service.')
     normalized.status = error.response?.status || 0
     normalized.fieldErrors = Object.fromEntries((body?.errors || []).map(({ field, message }) => [field, message]))
-    normalized.retryAfter = normalized.status === 429 ? 60 : null
+    normalized.code = body?.code || null
+    normalized.email = body?.email || null
+    normalized.retryAfterSeconds = body?.retryAfterSeconds ?? null
+    normalized.resendAvailableAt = body?.resendAvailableAt || null
+    normalized.attemptsLeft = body?.attemptsLeft ?? null
+    normalized.retryAfter = body?.retryAfterSeconds ?? (normalized.status === 429 ? 60 : null)
     normalized.cause = error
+
+    if (error.response?.status === 403 && body?.code === 'EMAIL_NOT_VERIFIED') {
+      if (typeof window !== 'undefined') {
+        if (body.email) {
+          sessionStorage.setItem('pendingVerification', JSON.stringify({ email: body.email }));
+        }
+        window.dispatchEvent(new CustomEvent('clinic:email-not-verified', { detail: { email: body.email } }));
+      }
+    }
+
     return Promise.reject(normalized)
   },
 )

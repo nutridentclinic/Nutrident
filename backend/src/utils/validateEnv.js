@@ -14,6 +14,10 @@ function validateSecurityEnv() {
     if (jwtSecret === jwtRefreshSecret) {
       throw new Error('FATAL: JWT_SECRET and JWT_REFRESH_SECRET must be distinct values in production.');
     }
+    const otpSecret = process.env.OTP_SECRET || '';
+    if (otpSecret && otpSecret.length < 32) {
+      throw new Error('FATAL: OTP_SECRET must be at least 32 characters if set in production.');
+    }
   }
 }
 

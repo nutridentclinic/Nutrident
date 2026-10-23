@@ -16,6 +16,9 @@ The following items from initial audits have been completely resolved and verifi
 - [x] **Walk-in Patient Flow**: Receptionist registration (`POST /api/patients`) with automatic unique email generation and automated staff booking modal.
 - [x] **Profile Photo Upload**: Implemented `PATCH /api/auth/me/photo` with Cloudinary integration.
 - [x] **Admin Updates**: Treatment catalog and coupon management now support direct editing (`PATCH`) from the admin interface.
+- [x] **Mandatory Email OTP Verification**: Patient accounts cannot access the application until their emailed 6-digit OTP is verified; unverified login returns 403 `EMAIL_NOT_VERIFIED` with resend cooldown; staff accounts remain unaffected.
+- [x] **Two-Step Password Reset**: Dedicated 3-step sequence (`/forgot-password` -> `/reset-password/verify` -> `/reset-password/new`) with single-use `resetToken`; single-step password reset is rejected with 400.
+- [x] **Upload Configuration & Cloudinary Normaliser**: Normaliser accepts case-sensitive/uppercase cloud names, strips wrapping quotes and whitespace, logs startup status without printing secrets, returns user-actionable text on 503, and provides admin system status monitoring (`GET /api/admin/system-status`).
 
 ---
 

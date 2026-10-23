@@ -1218,6 +1218,111 @@ function ClinicManagement() {
   );
 }
 
+function SystemStatusCard() {
+  const query = useQuery({
+    queryKey: ["admin-system-status"],
+    queryFn: api.admin.systemStatus,
+    retry: false,
+    staleTime: 30000,
+  });
+
+  if (query.isError && (query.error?.status === 404 || query.error?.cause?.response?.status === 404)) {
+    return null;
+  }
+
+  const status = query.data?.data;
+
+  return (
+    <SectionPanel
+      title="System integration status"
+      description="Live operational readiness for third-party integrations (Cloudinary, Brevo, Razorpay, Agora)."
+    >
+      {query.isLoading ? (
+        <p className="muted-copy">Checking server integrations…</p>
+      ) : query.isError ? (
+        <div className="notice notice-warn">
+          System status check unavailable. (Pending backend deployment)
+        </div>
+      ) : status ? (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "1rem" }}>
+          {/* Uploads (Cloudinary) */}
+          <div style={{ padding: "1rem", borderRadius: "0.5rem", border: "1px solid var(--border, #e2e8f0)", background: "var(--surface, #fff)" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.5rem" }}>
+              <strong>Uploads (Cloudinary)</strong>
+              <span style={{
+                display: "inline-flex", alignItems: "center", gap: "0.25rem",
+                fontSize: "0.8125rem", fontWeight: 600,
+                color: status.uploads ? "#16a34a" : "#dc2626"
+              }}>
+                <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: status.uploads ? "#16a34a" : "#dc2626" }} />
+                {status.uploads ? "Operational" : "Unavailable"}
+              </span>
+            </div>
+            <small style={{ color: "var(--text-muted, #64748b)" }}>
+              Ping: {status.cloudinaryPing || "unknown"}
+              {status.reasonCategory?.uploads && status.reasonCategory.uploads !== "ok" && ` · ${status.reasonCategory.uploads}`}
+            </small>
+          </div>
+
+          {/* Email (Brevo) */}
+          <div style={{ padding: "1rem", borderRadius: "0.5rem", border: "1px solid var(--border, #e2e8f0)", background: "var(--surface, #fff)" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.5rem" }}>
+              <strong>Email (Brevo)</strong>
+              <span style={{
+                display: "inline-flex", alignItems: "center", gap: "0.25rem",
+                fontSize: "0.8125rem", fontWeight: 600,
+                color: status.email ? "#16a34a" : "#dc2626"
+              }}>
+                <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: status.email ? "#16a34a" : "#dc2626" }} />
+                {status.email ? "Operational" : "Not configured"}
+              </span>
+            </div>
+            <small style={{ color: "var(--text-muted, #64748b)" }}>
+              Transactional OTP & notices · {status.reasonCategory?.email || "ok"}
+            </small>
+          </div>
+
+          {/* Payments (Razorpay) */}
+          <div style={{ padding: "1rem", borderRadius: "0.5rem", border: "1px solid var(--border, #e2e8f0)", background: "var(--surface, #fff)" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.5rem" }}>
+              <strong>Payments (Razorpay)</strong>
+              <span style={{
+                display: "inline-flex", alignItems: "center", gap: "0.25rem",
+                fontSize: "0.8125rem", fontWeight: 600,
+                color: status.payments ? "#16a34a" : "#dc2626"
+              }}>
+                <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: status.payments ? "#16a34a" : "#dc2626" }} />
+                {status.payments ? "Operational" : "Not configured"}
+              </span>
+            </div>
+            <small style={{ color: "var(--text-muted, #64748b)" }}>
+              Checkout & refunds · {status.reasonCategory?.payments || "ok"}
+            </small>
+          </div>
+
+          {/* Video (Agora) */}
+          <div style={{ padding: "1rem", borderRadius: "0.5rem", border: "1px solid var(--border, #e2e8f0)", background: "var(--surface, #fff)" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.5rem" }}>
+              <strong>Video (Agora)</strong>
+              <span style={{
+                display: "inline-flex", alignItems: "center", gap: "0.25rem",
+                fontSize: "0.8125rem", fontWeight: 600,
+                color: status.video ? "#16a34a" : "#dc2626"
+              }}>
+                <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: status.video ? "#16a34a" : "#dc2626" }} />
+                {status.video ? "Operational" : "Not configured"}
+              </span>
+            </div>
+            <small style={{ color: "var(--text-muted, #64748b)" }}>
+              Teleconsultations · {status.reasonCategory?.video || "ok"}
+            </small>
+          </div>
+        </div>
+      ) : null}
+    </SectionPanel>
+  );
+}
+
 function ClinicSettingsPage() {
   const queryClient = useQueryClient();
   const notify = useToast();
@@ -1248,12 +1353,13 @@ function ClinicSettingsPage() {
   };
 
   return (
-    <div>
+    <div style={{ display: "grid", gap: "1.5rem" }}>
       <PageTitle
         eyebrow="Clinic configuration"
         title="Clinic settings"
         description="Configure public practice details, booking fees, policies, and clinic contact information."
       />
+      <SystemStatusCard />
       <AsyncView query={query} empty={false}>
         <form onSubmit={save} style={{ display: "grid", gap: "1.5rem" }}>
           <SectionPanel title="General details & contact">

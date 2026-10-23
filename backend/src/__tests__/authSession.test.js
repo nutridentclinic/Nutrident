@@ -53,6 +53,7 @@ describe('Workstream A2 & D: Backend real logout, token revocation, no-store hea
       phone: '9898989898',
       password: 'Password123!',
       role: 'patient',
+      isEmailVerified: true,
     });
 
     // 2. Login
@@ -99,6 +100,7 @@ describe('Workstream A2 & D: Backend real logout, token revocation, no-store hea
       phone: '9797979797',
       password: 'OldPassword123!',
       role: 'patient',
+      isEmailVerified: true,
     });
 
     // 2. Login to get token
@@ -194,7 +196,7 @@ describe('Workstream A2 & D: Backend real logout, token revocation, no-store hea
         otp: '999999',
       });
       expect(res.status).toBe(400);
-      expect(res.body.message).toBe('Invalid OTP.');
+      expect(res.body.message).toMatch(/Invalid (code|OTP)/);
     }
 
     // 5th failed attempt triggers lock

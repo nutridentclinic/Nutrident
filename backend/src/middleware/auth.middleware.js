@@ -23,7 +23,7 @@ exports.protect = catchAsync(async (req, res, next) => {
     return next(new AppError('Invalid or expired token. Please log in again.', 401));
   }
 
-  const currentUser = await User.findById(decoded.id).select('+active +tokenVersion');
+  const currentUser = await User.findById(decoded.id).select('+active +tokenVersion +passwordChangedAt +isEmailVerified');
   if (!currentUser || currentUser.active === false) {
     return next(new AppError('The user belonging to this token no longer exists or has been deactivated.', 401));
   }
@@ -36,6 +36,13 @@ exports.protect = catchAsync(async (req, res, next) => {
 
   if (currentUser.changedPasswordAfter && currentUser.changedPasswordAfter(decoded.iat)) {
     return next(new AppError('User recently changed password. Please log in again.', 401));
+  }
+
+  if (currentUser.role === 'patient' && !currentUser.isEmailVerified) {
+    return next(new AppError('Please verify your email to continue.', 403, {
+      code: 'EMAIL_NOT_VERIFIED',
+      email: currentUser.email,
+    }));
   }
 
   req.user = currentUser;

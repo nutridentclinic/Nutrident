@@ -8,7 +8,6 @@ import {
   CalendarDays,
   Check,
   Download,
-  FilePlus2,
   FileText,
   MessageSquareText,
   Plus,
@@ -19,6 +18,7 @@ import { api, downloadPdf } from "../api/domains.js";
 import { apiBaseUrl } from "../api/client.js";
 import { useAuthStore } from "../store/auth.js";
 import { usePrimaryDentist } from "../hooks/usePrimaryDentist.js";
+import { FileUpload } from "../components/FileUpload.jsx";
 import {
   AsyncView,
   Field,
@@ -1192,43 +1192,24 @@ export function ClinicalRecord({ readOnly = false }) {
 function ClinicalRecordsWorkspace({ patientId, query }) {
   const queryClient = useQueryClient();
   const notify = useToast();
-  const [file, setFile] = useState(null);
   const [title, setTitle] = useState("");
   const [type, setType] = useState("other");
   const [filterType, setFilterType] = useState("");
-  const [busy, setBusy] = useState(false);
   const records = query.data?.data || [];
   const visibleRecords = filterType
     ? records.filter((record) => record.type === filterType)
     : records;
-  const upload = async (event) => {
-    event.preventDefault();
-    if (!file) return notify("Choose a record file first.", "error");
-    if (
-      !["image/jpeg", "image/png", "image/webp", "application/pdf"].includes(
-        file.type,
-      )
-    )
-      return notify("Choose a JPG, PNG, WEBP, or PDF file.", "error");
-    if (file.size > 10 * 1024 * 1024)
-      return notify("Medical records must be 10 MB or smaller.", "error");
+
+  const handleUpload = async (file, onProgress) => {
     const payload = new FormData();
     payload.append("patientId", patientId);
     payload.append("file", file);
     payload.append("title", title || file.name);
     payload.append("type", type);
-    setBusy(true);
-    try {
-      const result = await api.records.upload(payload);
-      notify(result.message);
-      setFile(null);
-      setTitle("");
-      await queryClient.invalidateQueries({ queryKey: ["records", patientId] });
-    } catch (error) {
-      notify(error.message, "error");
-    } finally {
-      setBusy(false);
-    }
+    const result = await api.records.upload(payload, { onUploadProgress: onProgress });
+    setTitle("");
+    await queryClient.invalidateQueries({ queryKey: ["records", patientId] });
+    return result;
   };
   return (
     <div>
@@ -1248,40 +1229,43 @@ function ClinicalRecordsWorkspace({ patientId, query }) {
         title="Upload a record"
         description="The file is sent to the backend's configured storage provider."
       >
-        <form className="upload-form" onSubmit={upload}>
-          <Field label="Record title">
-            <TextInput
-              required
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-            />
-          </Field>
-          <Field label="Type">
-            <TextInput
-              as="select"
-              value={type}
-              onChange={(event) => setType(event.target.value)}
-            >
-              {["xray", "lab-report", "scan", "doctor-note", "other"].map(
-                (value) => (
-                  <option key={value} value={value}>
-                    {value.replace("-", " ")}
-                  </option>
-                ),
-              )}
-            </TextInput>
-          </Field>
-          <Field label="File">
-            <TextInput
-              type="file"
-              accept="image/jpeg,image/png,image/webp,application/pdf"
-              onChange={(event) => setFile(event.target.files?.[0] || null)}
-            />
-          </Field>
-          <button className="button button-primary" disabled={busy}>
-            {busy ? "Uploading…" : "Upload record"} <FilePlus2 size={15} />
-          </button>
-        </form>
+        <FileUpload
+          accept="image/jpeg,image/png,image/webp,application/pdf"
+          maxSizeMB={10}
+          onUpload={handleUpload}
+          label="Choose or drop a medical document"
+          hint="JPG, PNG, WEBP, or PDF file up to 10 MB"
+          submitLabel="Upload record"
+          extraFields={
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+              <Field label="Record title">
+                <TextInput
+                  value={title}
+                  onChange={(event) => setTitle(event.target.value)}
+                  placeholder="e.g. Treatment X-ray"
+                />
+              </Field>
+              <Field label="Type">
+                <TextInput
+                  as="select"
+                  value={type}
+                  onChange={(event) => setType(event.target.value)}
+                >
+                  {["xray", "lab-report", "scan", "doctor-note", "other"].map(
+                    (value) => (
+                      <option key={value} value={value}>
+                        {value.replace("-", " ")}
+                      </option>
+                    ),
+                  )}
+                </TextInput>
+              </Field>
+            </div>
+          }
+          onSuccess={(result) => {
+            notify(result?.message || "Record uploaded successfully.");
+          }}
+        />
       </SectionPanel>
       <SectionPanel title="Records">
         <div className="filter-bar">
@@ -1323,7 +1307,7 @@ function ClinicalRecordsWorkspace({ patientId, query }) {
                   className="button button-quiet button-small"
                   href={record.file?.url}
                   target="_blank"
-                  rel="noreferrer"
+                  rel="noopener noreferrer"
                 >
                   Open file <ArrowRight size={14} />
                 </a>

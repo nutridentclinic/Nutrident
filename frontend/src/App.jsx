@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect } from 'react'
-import { Link, Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
+import { Link, Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { ArrowRight } from 'lucide-react'
 import { api } from './api/domains.js'
@@ -21,13 +21,15 @@ const LoginPage = lazy(() => import('./pages/AuthPages.jsx').then((module) => ({
 const RegisterPage = lazy(() => import('./pages/AuthPages.jsx').then((module) => ({ default: module.RegisterPage })))
 const VerifyOtpPage = lazy(() => import('./pages/AuthPages.jsx').then((module) => ({ default: module.VerifyOtpPage })))
 const ForgotPasswordPage = lazy(() => import('./pages/AuthPages.jsx').then((module) => ({ default: module.ForgotPasswordPage })))
+const ResetPasswordVerifyPage = lazy(() => import('./pages/AuthPages.jsx').then((module) => ({ default: module.ResetPasswordVerifyPage })))
+const ResetPasswordNewPage = lazy(() => import('./pages/AuthPages.jsx').then((module) => ({ default: module.ResetPasswordNewPage })))
 const ResetPasswordPage = lazy(() => import('./pages/AuthPages.jsx').then((module) => ({ default: module.ResetPasswordPage })))
 
 import { logout } from './auth/session.js'
 
 function GuestOnly({ children }) {
   const { accessToken, user } = useAuthStore()
-  if (accessToken && user) {
+  if (accessToken && user && !(user.role === 'patient' && user.isEmailVerified === false)) {
     return <Navigate to={roleHome[user.role] || '/app'} replace />
   }
   return children
@@ -36,6 +38,15 @@ function GuestOnly({ children }) {
 function RequireRole({ roles }) {
   const { accessToken, setUserAndProfile } = useAuthStore()
   const location = useLocation()
+  const navigate = useNavigate()
+
+  useEffect(() => {
+    const handleUnverified = () => {
+      navigate('/verify-otp')
+    }
+    window.addEventListener('clinic:email-not-verified', handleUnverified)
+    return () => window.removeEventListener('clinic:email-not-verified', handleUnverified)
+  }, [navigate])
 
   useEffect(() => {
     if (!accessToken) {
@@ -105,6 +116,13 @@ function RequireRole({ roles }) {
     return <Navigate to="/login?reason=expired" replace />
   }
 
+  if (currentUser.role === 'patient' && currentUser.isEmailVerified === false) {
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem('pendingVerification', JSON.stringify({ email: currentUser.email }))
+    }
+    return <Navigate to="/verify-otp" replace />
+  }
+
   if (!roles.includes(currentUser.role)) {
     return <Navigate to={roleHome[currentUser.role] || '/'} replace />
   }
@@ -153,6 +171,8 @@ export default function App() {
     <Route path="/register" element={<GuestOnly><RegisterPage /></GuestOnly>} />
     <Route path="/verify-otp" element={<GuestOnly><VerifyOtpPage /></GuestOnly>} />
     <Route path="/forgot-password" element={<GuestOnly><ForgotPasswordPage /></GuestOnly>} />
+    <Route path="/reset-password/verify" element={<GuestOnly><ResetPasswordVerifyPage /></GuestOnly>} />
+    <Route path="/reset-password/new" element={<GuestOnly><ResetPasswordNewPage /></GuestOnly>} />
     <Route path="/reset-password" element={<GuestOnly><ResetPasswordPage /></GuestOnly>} />
     <Route element={<RequireRole roles={['patient']} />}>
       <Route path="/app" element={<PortalLayout />}>

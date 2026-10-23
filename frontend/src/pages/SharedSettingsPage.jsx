@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { Camera, Check, KeyRound, Bell, LogOut, ShieldCheck, User } from 'lucide-react'
+import { Check, KeyRound, Bell, LogOut, ShieldCheck, User } from 'lucide-react'
 import { api } from '../api/domains.js'
 import { useAuthStore } from '../store/auth.js'
 import { logout } from '../auth/session.js'
 import { useToast } from '../components/ui.jsx'
+import { FileUpload } from '../components/FileUpload.jsx'
 
 export default function SharedSettingsPage() {
   const { user, setUserAndProfile, setSession } = useAuthStore()
@@ -15,10 +16,6 @@ export default function SharedSettingsPage() {
   const [confirmPassword, setConfirmPassword] = useState('')
   const [passwordBusy, setPasswordBusy] = useState(false)
   const [passwordMessage, setPasswordMessage] = useState('')
-
-  // Profile photo state
-  const [photoBusy, setPhotoBusy] = useState(false)
-  const [photoMessage, setPhotoMessage] = useState('')
 
   // Notification preferences state
   const [emailNotif, setEmailNotif] = useState(user?.notificationPreferences?.email !== false)
@@ -65,25 +62,14 @@ export default function SharedSettingsPage() {
     }
   }
 
-  const handlePhotoUpload = async (e) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-
-    setPhotoBusy(true)
-    setPhotoMessage('')
-    try {
-      const formData = new FormData()
-      formData.append('photo', file)
-      const res = await api.auth.updatePhoto(formData)
-      if (res.data) {
-        setUserAndProfile({ ...user, ...res.data })
-        showToast('Profile photo updated successfully.', 'success')
-      }
-    } catch (err) {
-      setPhotoMessage(err.message || 'Failed to upload photo.')
-    } finally {
-      setPhotoBusy(false)
+  const handleUploadPhoto = async (file, onProgress) => {
+    const formData = new FormData()
+    formData.append('photo', file)
+    const res = await api.auth.updatePhoto(formData, { onUploadProgress: onProgress })
+    if (res.data) {
+      setUserAndProfile({ ...user, ...res.data })
     }
+    return res
   }
 
   const handleToggleNotif = async (type) => {
@@ -123,33 +109,24 @@ export default function SharedSettingsPage() {
             <User size={20} />
             <h2>Profile information</h2>
           </div>
-          <div className="profile-photo-row">
-            <div className="avatar-wrap">
-              {user?.profilePhoto?.url ? (
-                <img src={user.profilePhoto.url} alt={user.name} className="avatar avatar-large" />
-              ) : (
-                <span className="avatar avatar-large">{user?.name?.slice(0, 1)?.toUpperCase() || 'U'}</span>
-              )}
-              <label className="photo-upload-badge" title="Change photo">
-                <Camera size={14} />
-                <input
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp"
-                  onChange={handlePhotoUpload}
-                  disabled={photoBusy}
-                  style={{ display: 'none' }}
-                />
-              </label>
-            </div>
-            <div className="profile-details">
-              <strong>{user?.name}</strong>
-              <span>{user?.email}</span>
-              <span>{user?.phone}</span>
-              <span className="role-tag">{user?.role}</span>
-              {photoBusy && <small className="muted-copy">Uploading photo…</small>}
-              {photoMessage && <small className="error-copy">{photoMessage}</small>}
-            </div>
+          <div className="profile-details" style={{ marginBottom: '1.25rem' }}>
+            <strong>{user?.name}</strong>
+            <span>{user?.email}</span>
+            <span>{user?.phone}</span>
+            <span className="role-tag">{user?.role}</span>
           </div>
+          <FileUpload
+            accept="image/png,image/jpeg,image/webp"
+            maxSizeMB={10}
+            previewUrl={user?.profilePhoto?.url}
+            onUpload={handleUploadPhoto}
+            label="Change profile photo"
+            hint="PNG, JPG, or WEBP up to 10 MB"
+            submitLabel="Update profile photo"
+            onSuccess={() => {
+              showToast('Profile photo updated successfully.', 'success')
+            }}
+          />
         </section>
 
         {/* Change Password Card */}

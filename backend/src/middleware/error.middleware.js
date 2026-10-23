@@ -32,8 +32,24 @@ module.exports = (err, req, res, next) => {
     logger.error(err.stack || err.message);
   }
 
-  res.status(error.statusCode).json({
+  const response = {
     success: false,
     message: error.isOperational ? error.message : 'Something went wrong. Please try again later.',
-  });
+  };
+
+  if (err.code && typeof err.code === 'string') response.code = err.code;
+  else if (error.code && typeof error.code === 'string') response.code = error.code;
+
+  if (err.email || error.email) response.email = err.email || error.email;
+  if (err.retryAfterSeconds !== undefined || error.retryAfterSeconds !== undefined) {
+    response.retryAfterSeconds = err.retryAfterSeconds !== undefined ? err.retryAfterSeconds : error.retryAfterSeconds;
+  }
+  if (err.resendAvailableAt || error.resendAvailableAt) {
+    response.resendAvailableAt = err.resendAvailableAt || error.resendAvailableAt;
+  }
+  if (err.attemptsLeft !== undefined || error.attemptsLeft !== undefined) {
+    response.attemptsLeft = err.attemptsLeft !== undefined ? err.attemptsLeft : error.attemptsLeft;
+  }
+
+  res.status(error.statusCode).json(response);
 };

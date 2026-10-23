@@ -6,19 +6,20 @@ Base URL is `VITE_API_BASE_URL` (default `https://drnutrident-backend-wj1n.onren
 
 ## 1. Authentication & Session Security
 
-- `POST /auth/login`: Authenticate with email and password. Returns `{ user, accessToken, refreshToken }`.
-- `POST /auth/register`: Patient account registration. Returns `{ user, accessToken, refreshToken }`.
-- `POST /auth/verify-otp`: Constant-time comparison (`crypto.timingSafeEqual`) with 5-attempt / 15-minute lockout.
-- `POST /auth/resend-otp`: 60-second cooldown per user.
-- `POST /auth/forgot-password`: Generates reset token & dispatches email.
-- `POST /auth/reset-password`: Resets password, invalidates all sessions by incrementing `tokenVersion`.
-- `POST /auth/refresh-token`: Rotates access and refresh tokens. Verified against active `tokenVersion`.
+- `POST /auth/login`: Authenticate with email and password. For verified accounts, returns `{ user, accessToken, refreshToken }`. For unverified patients, returns HTTP 403 `{ success: false, message, code: 'EMAIL_NOT_VERIFIED', email, resendAvailableAt }` with no tokens; sends a new OTP if >60s cooldown elapsed.
+- `POST /auth/register`: Patient account registration as unverified. Returns `{ email, userId, requiresVerification: true, otpSent, resendAvailableAt }` with 201 Created and no tokens. Overwrites abandoned/squatted unverified accounts for that email.
+- `POST /auth/verify-otp`: Accepts `{ email, otp }` (or `userId`). On success sets `isEmailVerified: true`, clears OTP state, and returns `{ user, accessToken, refreshToken }`. Constant-time comparison (`crypto.timingSafeEqual`), 5-attempt limit resulting in 15-minute lockout (429 with `retryAfterSeconds`).
+- `POST /auth/resend-otp`: Accepts `{ email }`. Neutral response with `resendAvailableAt`. Enforces 60-second cooldown and 5 sends per hour per account.
+- `POST /auth/forgot-password`: Accepts `{ email }`. Issues purpose `'reset'` OTP with neutral response (same shape and timing for unknown emails to prevent enumeration).
+- `POST /auth/verify-reset-otp`: Accepts `{ email, otp }`. Validates reset OTP, single-use, returns `{ resetToken, expiresInSeconds: 600 }`.
+- `POST /auth/reset-password`: Accepts strictly `{ resetToken, password }`. Single-use token, sets `passwordChangedAt = now`, marks `isEmailVerified = true`, increments `tokenVersion`, invalidates earlier sessions, and returns no tokens. Requests in legacy format (`email + otp + password`) fail with 400.
+- `POST /auth/refresh-token`: Rotates access and refresh tokens. Verified against active `tokenVersion` and rejects unverified patients with 403 `EMAIL_NOT_VERIFIED`.
 - `POST /auth/logout`: Server-side token invalidation. Increments `tokenVersion` on the User document, immediately invalidating all outstanding JWTs across all active devices.
 - `GET /auth/me`: Validates active token and `tokenVersion`, returning fresh `{ user, profile }`.
-- `PATCH /auth/update-password`: Updates password and increments `tokenVersion`.
+- `PATCH /auth/update-password`: Updates password, sets `passwordChangedAt = now`, and increments `tokenVersion`.
 - `PATCH /auth/me/photo`: Uploads or updates profile photo using multipart field `photo`.
 
-> **Session Isolation & Token Lifecycle**: Auth store persists strictly `{ accessToken, refreshToken }` in `localStorage['drn-auth']`. User/profile objects are kept strictly in-memory. Cross-tab logout synchronization is maintained via `BroadcastChannel('drn-auth')` and the `storage` event.
+> **Session Isolation & Token Lifecycle**: Auth store persists strictly `{ accessToken, refreshToken }` in `localStorage['drn-auth']`. Unverified patient accounts cannot enter the application portal. Cross-tab logout synchronization is maintained via `BroadcastChannel('drn-auth')` and the `storage` event. All JWTs issued before `passwordChangedAt` are rejected by `protect` and `refreshToken`.
 
 ---
 
@@ -99,3 +100,4 @@ Base URL is `VITE_API_BASE_URL` (default `https://drnutrident-backend-wj1n.onren
 - `GET /coupons`, `POST /coupons`, `PATCH /coupons/:id`: Manage discount coupons.
 - `GET /payments`, `POST /payments/:id/refund`: Financial ledger and refund execution.
 - `GET /clinic-settings`, `PATCH /clinic-settings`: Manage clinic metadata, fees, cancellation windows, operating hours, and legal policies.
+- `GET /admin/system-status`: Admin-only live operational status diagnostics for external services (Cloudinary uploads with live ping, Brevo email, Razorpay payments, Agora video).

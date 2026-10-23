@@ -13,9 +13,10 @@ export const api = {
     verifyOtp: (data) => post('/auth/verify-otp', data),
     resendOtp: (data) => post('/auth/resend-otp', data),
     forgotPassword: (data) => post('/auth/forgot-password', data),
+    verifyResetOtp: (data) => post('/auth/verify-reset-otp', data),
     resetPassword: (data) => post('/auth/reset-password', data),
     updatePassword: (data) => patch('/auth/update-password', data),
-    updatePhoto: (formData) => request({ method: 'PATCH', url: '/auth/me/photo', data: formData, headers: { 'Content-Type': 'multipart/form-data' } }),
+    updatePhoto: (formData, onProgress) => request({ method: 'PATCH', url: '/auth/me/photo', data: formData, onUploadProgress: onProgress }),
   },
   dentists: {
     list: (params) => get('/dentists', params),
@@ -69,7 +70,7 @@ export const api = {
   patients: {
     mine: () => get('/patients/me'),
     update: (data) => patch('/patients/me', data),
-    updateBasic: (data) => patch('/patients/me/basic-info', data),
+    updateBasic: (data, onProgress) => request({ method: 'PATCH', url: '/patients/me/basic-info', data, onUploadProgress: onProgress }),
     list: (params) => get('/patients', params),
     detail: (id) => get(`/patients/${id}`),
     createWalkIn: (data) => post('/patients', data),
@@ -79,7 +80,7 @@ export const api = {
   records: {
     mine: (params) => get('/medical-records/me', params),
     forPatient: (id) => get(`/medical-records/patient/${id}`),
-    upload: (data) => post('/medical-records', data),
+    upload: (data, onProgress) => request({ method: 'POST', url: '/medical-records', data, onUploadProgress: onProgress }),
     remove: (id) => remove(`/medical-records/${id}`),
   },
   prescriptions: { mine: () => get('/prescriptions/me'), forPatient: (id) => get(`/prescriptions/patient/${id}`), create: (data) => post('/prescriptions', data) },
@@ -132,6 +133,9 @@ export const api = {
     specialties: () => get('/dashboard/admin/top-specialties'),
     dentist: () => get('/dashboard/dentist/me'),
     receptionist: () => get('/dashboard/receptionist'),
+  },
+  admin: {
+    systemStatus: () => get('/admin/system-status'),
   },
 }
 

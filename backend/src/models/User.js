@@ -45,9 +45,18 @@ const userSchema = new mongoose.Schema(
 
     otpHash: { type: String, select: false },
     otpExpires: { type: Date, select: false },
+    otpPurpose: { type: String, enum: ['verify', 'reset'], select: false },
     otpAttempts: { type: Number, default: 0, select: false },
-    otpLockUntil: { type: Date, select: false },
-    resendOtpCooldown: { type: Date, select: false },
+    otpLockedUntil: { type: Date, select: false },
+    otpLockUntil: { type: Date, select: false }, // legacy alias
+    otpSentAt: { type: Date, select: false },
+    otpSendCount: { type: Number, default: 0, select: false },
+    otpSendWindowStart: { type: Date, select: false },
+    resendOtpCooldown: { type: Date, select: false }, // legacy alias
+
+    resetTokenHash: { type: String, select: false },
+    resetTokenExpires: { type: Date, select: false },
+
     notificationPreferences: {
       push: { type: Boolean, default: true },
       email: { type: Boolean, default: true },

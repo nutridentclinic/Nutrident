@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const User = require('../models/User');
 const Patient = require('../models/Patient');
 const Dentist = require('../models/Dentist');
@@ -5,7 +6,7 @@ const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/appError');
 const { success } = require('../utils/response');
 const { signAccessToken, signRefreshToken, verifyRefreshToken } = require('../utils/generateToken');
-const { generateOTP, hashOTP, compareOTP } = require('../utils/generateOTP');
+const { generateOTP, compareOTP } = require('../utils/otp');
 const { sendEmail } = require('../config/email');
 const { auth: firebaseAuth, isConfigured } = require('../config/firebase');
 const logger = require('../utils/logger');
@@ -28,9 +29,16 @@ const sanitizeUser = (user) => {
   delete obj.password;
   delete obj.otpHash;
   delete obj.otpExpires;
+  delete obj.otpPurpose;
   delete obj.otpAttempts;
+  delete obj.otpLockedUntil;
   delete obj.otpLockUntil;
+  delete obj.otpSentAt;
+  delete obj.otpSendCount;
+  delete obj.otpSendWindowStart;
   delete obj.resendOtpCooldown;
+  delete obj.resetTokenHash;
+  delete obj.resetTokenExpires;
   return obj;
 };
 
@@ -38,91 +46,88 @@ const sanitizeUser = (user) => {
 exports.register = catchAsync(async (req, res, next) => {
   const { name, email, phone, password } = req.body;
 
-  const existing = await User.findOne({ $or: [{ email }, { phone }] });
-  if (existing) return next(new AppError('An account with this email or phone already exists.', 409));
+  const existingEmailUser = await User.findOne({ email }).select('+password +isEmailVerified');
+  if (existingEmailUser && existingEmailUser.isEmailVerified) {
+    return next(new AppError('An account with this email already exists.', 409));
+  }
 
-  const user = await User.create({ name, email, phone, password, role: 'patient' });
-  await Patient.create({ user: user._id });
+  const existingPhoneUser = await User.findOne({ phone }).select('+isEmailVerified');
+  if (
+    existingPhoneUser &&
+    existingPhoneUser.isEmailVerified &&
+    (!existingEmailUser || existingPhoneUser._id.toString() !== existingEmailUser._id.toString())
+  ) {
+    return next(new AppError('An account with this phone number already exists.', 409));
+  }
 
-  const { otp, hash } = generateOTP();
+  // If unverified account with this phone belongs to someone else, clean it up so unique index won't conflict
+  if (
+    existingPhoneUser &&
+    !existingPhoneUser.isEmailVerified &&
+    (!existingEmailUser || existingPhoneUser._id.toString() !== existingEmailUser._id.toString())
+  ) {
+    await Patient.deleteOne({ user: existingPhoneUser._id });
+    await User.deleteOne({ _id: existingPhoneUser._id });
+  }
+
+  let user;
+  if (existingEmailUser && !existingEmailUser.isEmailVerified) {
+    // Overwrite unverified record
+    existingEmailUser.name = name;
+    existingEmailUser.phone = phone;
+    existingEmailUser.password = password;
+    existingEmailUser.role = 'patient';
+    existingEmailUser.isEmailVerified = false;
+    user = existingEmailUser;
+    await user.save();
+    await Patient.findOneAndUpdate({ user: user._id }, { user: user._id }, { upsert: true, new: true });
+  } else {
+    user = await User.create({ name, email, phone, password, role: 'patient', isEmailVerified: false });
+    await Patient.create({ user: user._id });
+  }
+
+  const { otp, hash } = generateOTP(user._id, 'verify');
   user.otpHash = hash;
-  user.otpExpires = Date.now() + 10 * 60 * 1000;
-  await user.save({ validateBeforeSave: false });
-
-  sendEmail({
-    to: email,
-    subject: 'Verify your account',
-    html: `<p>Hi ${name},</p><p>Your verification OTP is <b>${otp}</b>. It expires in 10 minutes.</p>`,
-  }).catch((err) => logger.error(`Failed to send registration OTP email to ${email}: ${err.message}`));
-
-  const tokens = issueTokens(user);
-  success(res, 201, 'Registered successfully. Please verify your email with the OTP sent.', {
-    user: sanitizeUser(user),
-    ...tokens,
-  });
-});
-
-// @route POST /api/auth/verify-otp
-exports.verifyOTP = catchAsync(async (req, res, next) => {
-  const { userId, otp } = req.body;
-  const user = await User.findById(userId).select('+otpHash +otpExpires +otpAttempts +otpLockUntil');
-  if (!user) return next(new AppError('User not found', 404));
-
-  if (user.otpLockUntil && user.otpLockUntil > Date.now()) {
-    const minutesRemaining = Math.ceil((user.otpLockUntil - Date.now()) / (60 * 1000));
-    return next(new AppError(`Too many failed attempts. Account locked for ${minutesRemaining} minutes.`, 429));
-  }
-
-  if (!user.otpHash || user.otpExpires < Date.now()) {
-    return next(new AppError('OTP has expired. Please request a new one.', 400));
-  }
-
-  if (!compareOTP(otp, user.otpHash)) {
-    user.otpAttempts = (user.otpAttempts || 0) + 1;
-    if (user.otpAttempts >= 5) {
-      user.otpLockUntil = Date.now() + 15 * 60 * 1000;
-    }
-    await user.save({ validateBeforeSave: false });
-    return next(new AppError('Invalid OTP.', 400));
-  }
-
-  user.isEmailVerified = true;
-  user.otpHash = undefined;
-  user.otpExpires = undefined;
+  user.otpPurpose = 'verify';
+  user.otpExpires = new Date(Date.now() + 10 * 60 * 1000);
   user.otpAttempts = 0;
+  user.otpLockedUntil = undefined;
   user.otpLockUntil = undefined;
+  user.otpSentAt = new Date();
+  user.otpSendCount = 1;
+  user.otpSendWindowStart = new Date();
   await user.save({ validateBeforeSave: false });
 
-  success(res, 200, 'Account verified successfully.');
-});
-
-// @route POST /api/auth/resend-otp
-exports.resendOTP = catchAsync(async (req, res, next) => {
-  const { userId } = req.body;
-  if (!userId) return next(new AppError('userId is required.', 400));
-
-  const user = await User.findById(userId).select('+resendOtpCooldown');
-  if (!user) return next(new AppError('User not found', 404));
-
-  if (user.resendOtpCooldown && user.resendOtpCooldown > Date.now()) {
-    const secondsRemaining = Math.ceil((user.resendOtpCooldown - Date.now()) / 1000);
-    return next(new AppError(`Please wait ${secondsRemaining}s before requesting a new OTP.`, 429));
+  let otpSent = false;
+  try {
+    await Promise.race([
+      sendEmail({
+        to: user.email,
+        subject: 'Verify your email',
+        html: `<p>Hi ${user.name},</p><p>Your 6-digit verification code is <b>${otp}</b>.</p><p>It expires in 10 minutes.</p><p>If you did not create this account, ignore this email.</p>`,
+      }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Email timeout')), 10000)),
+    ]);
+    otpSent = true;
+  } catch (err) {
+    logger.error(`Failed to send registration OTP email to ${email}: ${err.message}`);
+    otpSent = false;
   }
 
-  const { otp, hash } = generateOTP();
-  user.otpHash = hash;
-  user.otpExpires = Date.now() + 10 * 60 * 1000;
-  user.otpAttempts = 0;
-  user.resendOtpCooldown = Date.now() + 60 * 1000; // 60s cooldown per user
-  await user.save({ validateBeforeSave: false });
-
-  sendEmail({
-    to: user.email,
-    subject: 'Your new OTP',
-    html: `<p>Your new verification OTP is <b>${otp}</b>. It expires in 10 minutes.</p>`,
-  }).catch((err) => logger.error(`Failed to send resend-OTP email to ${user.email}: ${err.message}`));
-
-  success(res, 200, 'A new OTP has been sent.');
+  const resendAvailableAt = new Date(Date.now() + 60 * 1000).toISOString();
+  return res.status(201).json({
+    success: true,
+    message: otpSent
+      ? 'Registered successfully. Please verify your email with the OTP sent.'
+      : 'We could not send the code. Tap Resend.',
+    data: {
+      email: user.email,
+      userId: user._id,
+      requiresVerification: true,
+      otpSent,
+      resendAvailableAt,
+    },
+  });
 });
 
 // @route POST /api/auth/login
@@ -130,14 +135,202 @@ exports.login = catchAsync(async (req, res, next) => {
   const { email, password } = req.body;
   if (!email || !password) return next(new AppError('Please provide email and password.', 400));
 
-  const user = await User.findOne({ email }).select('+password +active +tokenVersion');
+  const user = await User.findOne({ email }).select(
+    '+password +active +tokenVersion +isEmailVerified +otpSentAt +otpSendCount +otpSendWindowStart'
+  );
   if (!user || !(await user.comparePassword(password))) {
     return next(new AppError('Incorrect email or password.', 401));
   }
   if (!user.active) return next(new AppError('This account has been deactivated.', 403));
 
+  if (user.role === 'patient' && !user.isEmailVerified) {
+    const now = Date.now();
+    let resendAvailableAt = user.otpSentAt
+      ? new Date(user.otpSentAt.getTime() + 60 * 1000).toISOString()
+      : new Date().toISOString();
+
+    if (!user.otpSentAt || now - user.otpSentAt.getTime() >= 60 * 1000) {
+      const { otp, hash } = generateOTP(user._id, 'verify');
+      user.otpHash = hash;
+      user.otpPurpose = 'verify';
+      user.otpExpires = new Date(now + 10 * 60 * 1000);
+      user.otpAttempts = 0;
+      user.otpLockedUntil = undefined;
+      user.otpLockUntil = undefined;
+      user.otpSentAt = new Date(now);
+
+      if (!user.otpSendWindowStart || now - user.otpSendWindowStart.getTime() > 3600000) {
+        user.otpSendWindowStart = new Date(now);
+        user.otpSendCount = 1;
+      } else {
+        user.otpSendCount = (user.otpSendCount || 0) + 1;
+      }
+      await user.save({ validateBeforeSave: false });
+
+      sendEmail({
+        to: user.email,
+        subject: 'Verify your email',
+        html: `<p>Hi ${user.name},</p><p>Your 6-digit verification code is <b>${otp}</b>.</p><p>It expires in 10 minutes.</p><p>If you did not create this account, ignore this email.</p>`,
+      }).catch((err) => logger.error(`Failed to send login verification email to ${user.email}: ${err.message}`));
+
+      resendAvailableAt = new Date(now + 60 * 1000).toISOString();
+    }
+
+    return res.status(403).json({
+      success: false,
+      code: 'EMAIL_NOT_VERIFIED',
+      message: 'Please verify your email to continue.',
+      email: user.email,
+      resendAvailableAt,
+    });
+  }
+
   const tokens = issueTokens(user);
   success(res, 200, 'Logged in successfully.', { user: sanitizeUser(user), ...tokens });
+});
+
+// @route POST /api/auth/verify-otp
+exports.verifyOTP = catchAsync(async (req, res, next) => {
+  const { userId, email, otp } = req.body;
+  let query = null;
+  if (email) query = { email };
+  else if (userId) query = { _id: userId };
+  else return next(new AppError('Please provide an email or userId.', 400));
+
+  const user = await User.findOne(query).select(
+    '+otpHash +otpExpires +otpPurpose +otpAttempts +otpLockedUntil +otpLockUntil +tokenVersion'
+  );
+  if (!user) return next(new AppError('User not found', 404));
+
+  const lockUntil = user.otpLockedUntil || user.otpLockUntil;
+  if (lockUntil && lockUntil.getTime() > Date.now()) {
+    const retryAfterSeconds = Math.ceil((lockUntil.getTime() - Date.now()) / 1000);
+    return res.status(429).json({
+      success: false,
+      code: 'OTP_LOCKED',
+      message: `Account locked due to too many failed attempts. Try again in ${Math.ceil(retryAfterSeconds / 60)} minutes.`,
+      retryAfterSeconds,
+    });
+  }
+
+  if (!user.otpHash || !user.otpExpires || user.otpExpires.getTime() < Date.now()) {
+    return next(new AppError('OTP has expired. Please request a new one.', 400));
+  }
+
+  const isValid = compareOTP({
+    userId: user._id,
+    purpose: 'verify',
+    candidateOtp: otp,
+    storedHash: user.otpHash,
+    storedPurpose: user.otpPurpose,
+  });
+
+  if (!isValid) {
+    user.otpAttempts = (user.otpAttempts || 0) + 1;
+    const attemptsLeft = Math.max(0, 5 - user.otpAttempts);
+    if (user.otpAttempts >= 5) {
+      user.otpLockedUntil = new Date(Date.now() + 15 * 60 * 1000);
+      user.otpLockUntil = user.otpLockedUntil;
+    }
+    await user.save({ validateBeforeSave: false });
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid code.',
+      attemptsLeft,
+    });
+  }
+
+  user.isEmailVerified = true;
+  user.otpHash = undefined;
+  user.otpExpires = undefined;
+  user.otpPurpose = undefined;
+  user.otpAttempts = 0;
+  user.otpLockedUntil = undefined;
+  user.otpLockUntil = undefined;
+  await user.save({ validateBeforeSave: false });
+
+  const tokens = issueTokens(user);
+  success(res, 200, 'Account verified successfully.', {
+    user: sanitizeUser(user),
+    ...tokens,
+  });
+});
+
+// @route POST /api/auth/resend-otp
+exports.resendOTP = catchAsync(async (req, res, next) => {
+  const { userId, email } = req.body;
+  let query = null;
+  if (email) query = { email };
+  else if (userId) query = { _id: userId };
+
+  const neutralResponse = (resendAt) => {
+    return success(res, 200, 'If an unverified account exists, a new code has been sent.', {
+      resendAvailableAt: resendAt || new Date(Date.now() + 60 * 1000).toISOString(),
+    });
+  };
+
+  if (!query) return neutralResponse();
+
+  const user = await User.findOne(query).select(
+    '+otpLockedUntil +otpLockUntil +otpSentAt +otpSendCount +otpSendWindowStart +isEmailVerified +name'
+  );
+  if (!user || user.isEmailVerified) {
+    return neutralResponse();
+  }
+
+  const now = Date.now();
+  const lockUntil = user.otpLockedUntil || user.otpLockUntil;
+  if (lockUntil && lockUntil.getTime() > now) {
+    const retryAfterSeconds = Math.ceil((lockUntil.getTime() - now) / 1000);
+    return res.status(429).json({
+      success: false,
+      code: 'OTP_LOCKED',
+      message: `Account locked. Try again in ${Math.ceil(retryAfterSeconds / 60)} minutes.`,
+      retryAfterSeconds,
+    });
+  }
+
+  if (user.otpSentAt && now - user.otpSentAt.getTime() < 60 * 1000) {
+    const retryAfterSeconds = Math.ceil((60 * 1000 - (now - user.otpSentAt.getTime())) / 1000);
+    return res.status(429).json({
+      success: false,
+      message: `Please wait ${retryAfterSeconds}s before requesting a new OTP.`,
+      retryAfterSeconds,
+      resendAvailableAt: new Date(user.otpSentAt.getTime() + 60 * 1000).toISOString(),
+    });
+  }
+
+  if (user.otpSendWindowStart && now - user.otpSendWindowStart.getTime() <= 3600000 && user.otpSendCount >= 5) {
+    const retryAfterSeconds = Math.ceil((3600000 - (now - user.otpSendWindowStart.getTime())) / 1000);
+    return res.status(429).json({
+      success: false,
+      message: 'Maximum OTP requests reached for this hour. Please try again later.',
+      retryAfterSeconds,
+    });
+  }
+
+  const { otp, hash } = generateOTP(user._id, 'verify');
+  user.otpHash = hash;
+  user.otpPurpose = 'verify';
+  user.otpExpires = new Date(now + 10 * 60 * 1000);
+  user.otpAttempts = 0;
+  user.otpSentAt = new Date(now);
+
+  if (!user.otpSendWindowStart || now - user.otpSendWindowStart.getTime() > 3600000) {
+    user.otpSendWindowStart = new Date(now);
+    user.otpSendCount = 1;
+  } else {
+    user.otpSendCount = (user.otpSendCount || 0) + 1;
+  }
+  await user.save({ validateBeforeSave: false });
+
+  sendEmail({
+    to: user.email,
+    subject: 'Verify your email',
+    html: `<p>Hi ${user.name},</p><p>Your new verification code is <b>${otp}</b>. It expires in 10 minutes.</p><p>If you did not create this account, ignore this email.</p>`,
+  }).catch((err) => logger.error(`Failed to send resend-OTP email to ${user.email}: ${err.message}`));
+
+  return neutralResponse(new Date(now + 60 * 1000).toISOString());
 });
 
 // @route POST /api/auth/refresh-token
@@ -152,7 +345,7 @@ exports.refreshToken = catchAsync(async (req, res, next) => {
     return next(new AppError('Invalid or expired refresh token. Please log in again.', 401));
   }
 
-  const user = await User.findById(decoded.id).select('+active +tokenVersion');
+  const user = await User.findById(decoded.id).select('+active +tokenVersion +isEmailVerified +passwordChangedAt');
   if (!user || user.active === false) {
     return next(new AppError('User no longer exists or account has been deactivated.', 401));
   }
@@ -162,13 +355,25 @@ exports.refreshToken = catchAsync(async (req, res, next) => {
     return next(new AppError('Session has been revoked. Please log in again.', 401));
   }
 
+  if (user.changedPasswordAfter && user.changedPasswordAfter(decoded.iat)) {
+    return next(new AppError('User recently changed password. Please log in again.', 401));
+  }
+
+  if (user.role === 'patient' && !user.isEmailVerified) {
+    return res.status(403).json({
+      success: false,
+      code: 'EMAIL_NOT_VERIFIED',
+      message: 'Please verify your email to continue.',
+      email: user.email,
+    });
+  }
+
   // Rotate refresh token on every refresh (old one is invalidated)
   const tokens = issueTokens(user);
   success(res, 200, 'Token refreshed.', tokens);
 });
 
 // @route POST /api/auth/logout
-// Authenticated or best-effort with valid refresh token; increments tokenVersion
 exports.logout = catchAsync(async (req, res, next) => {
   let userId = req.user?._id;
 
@@ -196,64 +401,168 @@ exports.logout = catchAsync(async (req, res, next) => {
 
 // @route POST /api/auth/forgot-password
 exports.forgotPassword = catchAsync(async (req, res, next) => {
-  const user = await User.findOne({ email: req.body.email }).select('+resendOtpCooldown');
-  if (!user) return success(res, 200, 'If that email exists, an OTP has been sent.');
+  const { email } = req.body;
+  const neutralMessage = 'If an account matches that email, a password reset code has been sent.';
+  const resendAvailableAt = new Date(Date.now() + 60 * 1000).toISOString();
 
-  if (user.resendOtpCooldown && user.resendOtpCooldown > Date.now()) {
-    return success(res, 200, 'If that email exists, an OTP has been sent.');
+  if (!email) {
+    return success(res, 200, neutralMessage, { resendAvailableAt });
   }
 
-  const { otp, hash } = generateOTP();
+  const user = await User.findOne({ email }).select(
+    '+otpLockedUntil +otpLockUntil +otpSentAt +otpSendCount +otpSendWindowStart +name'
+  );
+
+  if (!user) {
+    // Constant-time mitigation
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    return success(res, 200, neutralMessage, { email, resendAvailableAt });
+  }
+
+  const now = Date.now();
+  const lockUntil = user.otpLockedUntil || user.otpLockUntil;
+  if (lockUntil && lockUntil.getTime() > now) {
+    return success(res, 200, neutralMessage, { email, resendAvailableAt });
+  }
+
+  if (user.otpSentAt && now - user.otpSentAt.getTime() < 60 * 1000) {
+    return success(res, 200, neutralMessage, {
+      email,
+      resendAvailableAt: new Date(user.otpSentAt.getTime() + 60 * 1000).toISOString(),
+    });
+  }
+
+  if (user.otpSendWindowStart && now - user.otpSendWindowStart.getTime() <= 3600000 && user.otpSendCount >= 5) {
+    return success(res, 200, neutralMessage, { email, resendAvailableAt });
+  }
+
+  const { otp, hash } = generateOTP(user._id, 'reset');
   user.otpHash = hash;
-  user.otpExpires = Date.now() + 10 * 60 * 1000;
+  user.otpPurpose = 'reset';
+  user.otpExpires = new Date(now + 10 * 60 * 1000);
   user.otpAttempts = 0;
-  user.resendOtpCooldown = Date.now() + 60 * 1000;
+  user.otpSentAt = new Date(now);
+
+  if (!user.otpSendWindowStart || now - user.otpSendWindowStart.getTime() > 3600000) {
+    user.otpSendWindowStart = new Date(now);
+    user.otpSendCount = 1;
+  } else {
+    user.otpSendCount = (user.otpSendCount || 0) + 1;
+  }
   await user.save({ validateBeforeSave: false });
 
   sendEmail({
     to: user.email,
-    subject: 'Password reset OTP',
-    html: `<p>Your password reset OTP is <b>${otp}</b>. It expires in 10 minutes. If you didn't request this, you can safely ignore this email.</p>`,
+    subject: 'Password reset code',
+    html: `<p>Hi ${user.name},</p><p>Your password reset code is <b>${otp}</b>. It expires in 10 minutes. If you did not request this, you can safely ignore this email.</p>`,
   }).catch((err) => logger.error(`Failed to send password-reset OTP email to ${user.email}: ${err.message}`));
 
-  success(res, 200, 'If that email exists, an OTP has been sent.');
+  return success(res, 200, neutralMessage, { email, resendAvailableAt });
+});
+
+// @route POST /api/auth/verify-reset-otp
+exports.verifyResetOtp = catchAsync(async (req, res, next) => {
+  const { email, otp } = req.body;
+  const user = await User.findOne({ email }).select(
+    '+otpHash +otpExpires +otpPurpose +otpAttempts +otpLockedUntil +otpLockUntil'
+  );
+
+  if (!user) {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    return next(new AppError('Invalid or expired code.', 400));
+  }
+
+  const now = Date.now();
+  const lockUntil = user.otpLockedUntil || user.otpLockUntil;
+  if (lockUntil && lockUntil.getTime() > now) {
+    const retryAfterSeconds = Math.ceil((lockUntil.getTime() - now) / 1000);
+    return res.status(429).json({
+      success: false,
+      code: 'OTP_LOCKED',
+      message: `Account locked due to too many failed attempts. Try again in ${Math.ceil(retryAfterSeconds / 60)} minutes.`,
+      retryAfterSeconds,
+    });
+  }
+
+  if (!user.otpHash || !user.otpExpires || user.otpExpires.getTime() < now) {
+    return next(new AppError('Invalid or expired code.', 400));
+  }
+
+  const isValid = compareOTP({
+    userId: user._id,
+    purpose: 'reset',
+    candidateOtp: otp,
+    storedHash: user.otpHash,
+    storedPurpose: user.otpPurpose,
+  });
+
+  if (!isValid) {
+    user.otpAttempts = (user.otpAttempts || 0) + 1;
+    const attemptsLeft = Math.max(0, 5 - user.otpAttempts);
+    if (user.otpAttempts >= 5) {
+      user.otpLockedUntil = new Date(now + 15 * 60 * 1000);
+      user.otpLockUntil = user.otpLockedUntil;
+    }
+    await user.save({ validateBeforeSave: false });
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid or expired code.',
+      attemptsLeft,
+    });
+  }
+
+  // Consume OTP and issue 32-byte reset token
+  const resetToken = crypto.randomBytes(32).toString('base64url');
+  const resetTokenHash = crypto.createHash('sha256').update(resetToken).digest('hex');
+
+  user.otpHash = undefined;
+  user.otpExpires = undefined;
+  user.otpPurpose = undefined;
+  user.otpAttempts = 0;
+  user.resetTokenHash = resetTokenHash;
+  user.resetTokenExpires = new Date(now + 10 * 60 * 1000);
+  await user.save({ validateBeforeSave: false });
+
+  success(res, 200, 'Code verified successfully.', {
+    resetToken,
+    expiresInSeconds: 600,
+  });
 });
 
 // @route POST /api/auth/reset-password
 exports.resetPassword = catchAsync(async (req, res, next) => {
-  const { email, otp, password } = req.body;
-
-  const user = await User.findOne({ email }).select('+otpHash +otpExpires +otpAttempts +otpLockUntil +tokenVersion');
-  if (!user) return next(new AppError('Invalid or expired OTP.', 400));
-
-  if (user.otpLockUntil && user.otpLockUntil > Date.now()) {
-    const minutesRemaining = Math.ceil((user.otpLockUntil - Date.now()) / (60 * 1000));
-    return next(new AppError(`Too many failed attempts. Account locked for ${minutesRemaining} minutes.`, 429));
+  if (req.body?.otp || req.body?.email) {
+    return next(new AppError('Please use the updated password reset flow.', 400));
   }
 
-  if (!user.otpHash || user.otpExpires < Date.now()) {
-    return next(new AppError('OTP has expired. Please request a new one.', 400));
+  const { resetToken, password } = req.body;
+  if (!resetToken) {
+    return next(new AppError('Reset token is required.', 400));
   }
 
-  if (!compareOTP(otp, user.otpHash)) {
-    user.otpAttempts = (user.otpAttempts || 0) + 1;
-    if (user.otpAttempts >= 5) {
-      user.otpLockUntil = Date.now() + 15 * 60 * 1000;
-    }
-    await user.save({ validateBeforeSave: false });
-    return next(new AppError('Invalid OTP.', 400));
+  const tokenHash = crypto.createHash('sha256').update(String(resetToken)).digest('hex');
+  const user = await User.findOne({
+    resetTokenHash: tokenHash,
+    resetTokenExpires: { $gt: new Date() },
+  }).select('+resetTokenHash +resetTokenExpires +tokenVersion +password');
+
+  if (!user) {
+    return next(new AppError('Invalid or expired reset token. Please request a new code.', 400));
   }
 
   user.password = password;
+  user.resetTokenHash = undefined;
+  user.resetTokenExpires = undefined;
   user.otpHash = undefined;
   user.otpExpires = undefined;
+  user.otpPurpose = undefined;
   user.otpAttempts = 0;
-  user.otpLockUntil = undefined;
-  user.tokenVersion = (user.tokenVersion || 0) + 1; // Revoke all previous sessions
+  user.passwordChangedAt = new Date();
+  user.isEmailVerified = true;
+  user.tokenVersion = (user.tokenVersion || 0) + 1; // Invalidate previous sessions
   await user.save();
 
-  const tokens = issueTokens(user);
-  success(res, 200, 'Password reset successfully.', tokens);
+  success(res, 200, 'Password reset successfully. Please sign in with your new password.');
 });
 
 // @route GET /api/auth/me
@@ -305,6 +614,7 @@ exports.updatePassword = catchAsync(async (req, res, next) => {
     return next(new AppError('Current password is incorrect.', 401));
   }
   user.password = req.body.newPassword;
+  user.passwordChangedAt = new Date();
   user.tokenVersion = (user.tokenVersion || 0) + 1; // Invalidate other sessions
   await user.save();
 

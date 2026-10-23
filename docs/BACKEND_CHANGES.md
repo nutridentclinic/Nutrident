@@ -107,52 +107,135 @@ Log in to your Render Dashboard, open the `drnutrident-backend-wj1n` service, na
 | `CLOUDINARY_CLOUD_NAME` | Cloudinary Cloud Name | [ ] |
 | `CLOUDINARY_API_KEY` | Cloudinary API Key | [ ] |
 | `CLOUDINARY_API_SECRET` | Cloudinary API Secret | [ ] |
+### Workstream E: Mandatory Email OTP Verification, Two-Step Password Reset, and Upload Fix
+- **Shared OTP Engine** (`backend/src/utils/otp.js`):
+  - HMAC-SHA256 hashing using dedicated `OTP_SECRET` (falling back to `JWT_SECRET`).
+  - Strict purpose isolation (`verify` vs `reset`). A code issued for one purpose never validates for another.
+  - Constant-time verification (`crypto.timingSafeEqual`).
+  - 10-minute expiry; single use.
+  - 5-attempt limit resulting in a 15-minute lockout (HTTP 429 with `retryAfterSeconds`).
+  - 60-second resend cooldown enforced on the server; maximum 5 sends per hour per account.
+  - Rate limiting applies per email as well as per IP.
+- **User Model Fields** (`backend/src/models/User.js`):
+  - Added `otpPurpose`, `otpAttempts`, `otpLockedUntil`, `otpSentAt`, `otpSendCount`, `otpSendWindowStart`, `resetTokenHash`, `resetTokenExpires` (all `select: false`).
+- **Registration Flow** (`backend/src/controllers/auth.controller.js`):
+  - `POST /auth/register`: creates patient account with `isEmailVerified: false` and issues no tokens.
+  - Awaits transactional email delivery with a 10s timeout (`otpSent: true|false`).
+  - Overwrites abandoned/squatted unverified records with fresh name, phone, password, and fresh OTP.
+  - Verified duplicate email or verified phone returns 409 Conflict.
+- **Login Guarding** (`backend/src/controllers/auth.controller.js`):
+  - `POST /auth/login`: valid credentials for an unverified patient returns HTTP 403 `EMAIL_NOT_VERIFIED` with `{ resendAvailableAt, email }` and no tokens. Sends fresh code if >60s elapsed.
+  - Wrong credentials return standard 401 Unauthorized.
+- **Middleware Enforcement** (`backend/src/middleware/auth.middleware.js`):
+  - `protect`: if `user.role === 'patient' && !user.isEmailVerified`, immediately returns 403 `EMAIL_NOT_VERIFIED`. Non-patient roles (dentist, receptionist, admin) are unaffected.
+  - `protect` and `refreshToken` reject any token issued prior to `passwordChangedAt`.
+- **Two-Step Password Reset** (`backend/src/controllers/auth.controller.js`):
+  - Step 1: `POST /auth/forgot-password` takes `{ email }`, issues purpose `'reset'` OTP, neutral response.
+  - Step 2: `POST /auth/verify-reset-otp` takes `{ email, otp }`, validates code, generates random 32-byte `resetToken` (base64url), stores hash + 10-minute expiry, returns `{ resetToken, expiresInSeconds: 600 }`.
+  - Step 3: `POST /auth/reset-password` accepts strictly `{ resetToken, password }`. Sets password, sets `passwordChangedAt = now`, sets `isEmailVerified = true`, increments `tokenVersion`, invalidates all outstanding sessions, returns no tokens.
+  - Single-step legacy requests (`email + otp + password`) fail with 400 Bad Request.
+- **Cloudinary Normaliser & Upload Hardening** (`backend/src/config/cloudinary.js` & `upload.middleware.js`):
+  - Strips wrapping quotes and whitespace from `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`.
+  - Cloud name regex updated to `/^[A-Za-z0-9_-]+$/` to accept valid uppercase characters.
+  - Logs once at server startup (`Cloudinary: configured` or `Cloudinary: NOT configured`) without printing secrets.
+  - Replaced technical 503 error message with user-actionable text: `"Uploads are temporarily unavailable. Please try again later or contact the clinic."` and logged server-side failure category.
+- **Admin System Status** (`backend/src/controllers/admin.controller.js` & `backend/src/routes/admin.routes.js`):
+  - `GET /api/admin/system-status`: Admin-only live status diagnostics checking uploads (`cloudinary.api.ping()`), email, payments, and video.
+- **One-Off Migration Script** (`backend/scripts/mark-staff-verified.js`):
+  - Supports `--dry-run` (default) and `--apply`. Marks all non-patient accounts as `isEmailVerified = true`.
+
+---
+
+## 2. Automated Test Verification (100% Pass)
+
+### Backend (Jest + mongodb-memory-server)
+Run from `backend/`: `npm test`
+- `src/__tests__/mandatoryOtpAndResetAndUpload.test.js`: 12 tests passed
+- `src/__tests__/singleDentistAndSecurity.test.js`: 8 tests passed
+- `src/__tests__/authSession.test.js`: 4 tests passed
+- `src/utils/__tests__/security.utils.test.js`: 7 tests passed
+- `src/utils/__tests__/appointmentAccess.test.js`: 4 tests passed
+- `src/utils/__tests__/queueAccess.test.js`: 3 tests passed
+- `src/utils/__tests__/pendingExpiry.test.js`: 2 tests passed
+- `src/utils/__tests__/seedAdminConfig.test.js`: 3 tests passed
+**Total: 8 suites, 43 tests passed (0 failures).**
+
+---
+
+## 3. Render Redeployment Checklist
+
+> [!IMPORTANT]
+> **Deployment Order**: Always redeploy the **Backend first**, run the one-off migration script, and then deploy the **Frontend**.
+
+### Step 1: Verify Environment Variables on Render Dashboard
+Log in to your Render Dashboard, open the `drnutrident-backend-wj1n` service, navigate to **Environment**, and verify:
+
+| Variable Name | Required Value / Description | Check |
+|---|---|---|
+| `NODE_ENV` | `production` | [ ] |
+| `PORT` | `10000` (or Render default) | [ ] |
+| `MONGO_URI` | Your production MongoDB connection string | [ ] |
+| `JWT_SECRET` | 64+ random characters (minimum 32 required by `validateEnv`) | [ ] |
+| `JWT_REFRESH_SECRET` | 64+ random characters (must NOT equal `JWT_SECRET`) | [ ] |
+| `OTP_SECRET` | **NEW**: 32+ random characters for HMAC OTP hashing | [ ] |
+| `CLOUDINARY_CLOUD_NAME` | Cloudinary Cloud Name (**no surrounding quotes, no spaces**; uppercase is valid) | [ ] |
+| `CLOUDINARY_API_KEY` | Cloudinary API Key (**no quotes, no spaces**) | [ ] |
+| `CLOUDINARY_API_SECRET` | Cloudinary API Secret (**no quotes, no spaces**) | [ ] |
 | `BREVO_API_KEY` | Brevo API key for transactional email | [ ] |
 | `EMAIL_FROM` | Sender address (e.g. `care@drnutrident.com`) | [ ] |
+| `RAZORPAY_KEY_ID` | Your Razorpay Key ID | [ ] |
+| `RAZORPAY_KEY_SECRET` | Your Razorpay Secret | [ ] |
 | `AGORA_APP_ID` | Agora App ID for video consultations | [ ] |
 | `AGORA_APP_CERTIFICATE` | Agora App Certificate | [ ] |
 
-> [!IMPORTANT]
-> `validateEnv.js` will immediately abort startup if `JWT_SECRET` and `JWT_REFRESH_SECRET` are identical or under 32 characters. Ensure both are unique and cryptographically secure.
+### Step 2: Configure Cloudinary Security Console (One-Time)
+1. Log in to [Cloudinary Console](https://cloudinary.com/console).
+2. Go to **Settings** -> **Security**.
+3. Under **PDF and ZIP files delivery**, ensure PDF delivery is **allowed / enabled**.
+   *(If disabled, uploaded medical PDF files will upload successfully but return 401/404 when opened in the browser).*
 
-### Step 2: Push Code to Git & Trigger Deployment
-```bash
-git add backend/ frontend/ docs/
-git commit -m "feat: complete single-dentist conversion, security hardening, and session revocation"
-git push origin main
-```
+### Step 3: Push Backend & Trigger Deploy
 On Render:
-1. Click **Manual Deploy** -> **Deploy latest commit** (or let auto-deploy run).
-2. Monitor deployment logs for:
+1. Trigger deploy of latest commit.
+2. Check startup logs for:
    - `✓ Environment validation passed.`
+   - `Cloudinary: configured`
    - `✓ Connected to MongoDB.`
-   - `✓ Clinic reminder cron initialized.`
    - `Server running on port ...`
 
-### Step 3: Post-Deployment Smoke Test (Read-Only)
-Run a curl or browser check against the live deployment:
+### Step 4: Run One-Off Migration Script (Production DB)
+To ensure all existing dentists, receptionists, and administrators are marked as verified:
 ```bash
-curl -I https://drnutrident-backend-wj1n.onrender.com/api/clinic-settings
+# In your deployment environment / Render Shell / local with production MONGO_URI:
+# First, preview changes:
+node backend/scripts/mark-staff-verified.js --dry-run
+
+# Once verified, apply:
+node backend/scripts/mark-staff-verified.js --apply
+```
+
+### Step 5: Verify Live System Status (Admin Only)
+Using an admin token or via browser console after logging in as admin:
+```bash
+curl -H "Authorization: Bearer <ADMIN_TOKEN>" https://drnutrident-backend-wj1n.onrender.com/api/admin/system-status
 ```
 Expected response:
-- Status `200 OK`
-- Header: `Cache-Control: no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0`
-- Response body contains `{ "success": true, ... }`
-
-Verify primary doctor endpoint:
-```bash
-curl https://drnutrident-backend-wj1n.onrender.com/api/dentists/primary
+```json
+{
+  "success": true,
+  "data": {
+    "uploads": true,
+    "email": true,
+    "payments": true,
+    "video": true,
+    "cloudinaryPing": "ok"
+  }
+}
 ```
-Expected response:
-- Status `200 OK`
-- Response body contains the chief dental practitioner and their reviews.
 
-### Step 4: Frontend Deployment
-Deploy the frontend build to your hosting provider (Vercel, Netlify, or static host):
+### Step 6: Deploy Frontend
 1. Build command: `npm run build`
 2. Output directory: `dist`
 3. Environment variables:
    - `VITE_API_BASE_URL=https://drnutrident-backend-wj1n.onrender.com/api`
    - `VITE_SOCKET_URL=https://drnutrident-backend-wj1n.onrender.com`
-   - `VITE_CLINIC_TIMEZONE=Asia/Kolkata`
-4. Verify response headers include `Cache-Control: no-store` on HTML routes to ensure session privacy across browser tabs and back buttons.
