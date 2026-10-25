@@ -10,6 +10,8 @@ const treatmentPlanSchema = new mongoose.Schema(
     steps: [
       {
         treatment: { type: mongoose.Schema.Types.ObjectId, ref: 'Treatment' },
+        name: { type: String, default: '' },
+        defaultCost: { type: Number, default: 0 },
         toothNumbers: [{ type: Number }], // FDI notation e.g. 11, 21, 36
         cost: { type: Number, required: true },
         status: {

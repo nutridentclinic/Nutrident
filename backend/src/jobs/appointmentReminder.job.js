@@ -1,5 +1,6 @@
 const cron = require('node-cron');
 const Appointment = require('../models/Appointment');
+const Dentist = require('../models/Dentist');
 const ClinicSettings = require('../models/ClinicSettings');
 const { notify } = require('../services/notification.service');
 const logger = require('../utils/logger');
@@ -59,8 +60,15 @@ const startReminderJob = () => {
       const { filter, update } = getPendingExpiry();
       const result = await Appointment.updateMany(filter, update);
       if (result.modifiedCount) logger.info(`Expired ${result.modifiedCount} unpaid appointment(s).`);
+
+      const now = new Date();
+      const resumed = await Dentist.updateMany(
+        { isActive: false, pausedUntil: { $ne: null, $lte: now } },
+        { $set: { isActive: true, pausedReason: '', pausedUntil: null } }
+      );
+      if (resumed.modifiedCount) logger.info(`Auto-resumed ${resumed.modifiedCount} dentist(s) past pausedUntil.`);
     } catch (err) {
-      logger.error(`Pending appointment expiry job failed: ${err.message}`);
+      logger.error(`Pending appointment expiry or auto-resume job failed: ${err.message}`);
     }
   });
 

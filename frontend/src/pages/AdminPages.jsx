@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
@@ -12,17 +12,29 @@ import {
 } from "recharts";
 import {
   Activity,
+  AlertTriangle,
   ArrowRight,
   BadgeCheck,
   Building2,
+  Calendar,
+  Camera,
   Check,
+  Clock,
   ClipboardList,
+  Edit2,
+  KeyRound,
+  PauseCircle,
+  PlayCircle,
   Plus,
+  RefreshCw,
   Search,
+  ShieldAlert,
   ShieldCheck,
+  UserCheck,
   UserPlus,
   Users,
   Wallet,
+  X,
 } from "lucide-react";
 import { api } from "../api/domains.js";
 import {
@@ -37,24 +49,24 @@ import {
   useToast,
 } from "../components/ui.jsx";
 import { PatientDirectory } from "./TeamPages.jsx";
+import { FileUpload } from "../components/FileUpload.jsx";
+import { BackendPendingNotice } from "../components/BackendPendingNotice.jsx";
+import { formatClinicDate } from "../utils/formatDate.js";
+import { clinicDate } from "../utils/booking.js";
+import { fetchWeeklyAppointmentsWithFallback } from "../api/capabilities.js";
 
 const rupees = (amount) => `₹${Number(amount || 0).toLocaleString("en-IN")}`;
-const fmtDate = (date) =>
-  date
-    ? new Date(date).toLocaleDateString("en-IN", {
-        dateStyle: "medium",
-        timeZone: "UTC",
-      })
-    : "Date not set";
+const fmtDate = (date) => (date ? formatClinicDate(date) : "Date not set");
 
-function AdminDashboard() {
+export function AdminDashboard() {
+  const [range, setRange] = useState("week");
   const stats = useQuery({
     queryKey: ["dashboard", "admin"],
     queryFn: api.dashboard.admin,
   });
   const weekly = useQuery({
-    queryKey: ["dashboard", "weekly"],
-    queryFn: api.dashboard.weekly,
+    queryKey: ["dashboard", "appointments-weekly", range],
+    queryFn: () => fetchWeeklyAppointmentsWithFallback({ range, startsOn: "mon" }),
   });
   const revenue = useQuery({
     queryKey: ["dashboard", "revenue"],
@@ -64,26 +76,39 @@ function AdminDashboard() {
     queryKey: ["dashboard", "specialties"],
     queryFn: api.dashboard.specialties,
   });
-  const [today] = useState(() => new Date());
-  const week = Array.from({ length: 7 }, (_, offset) => {
-    const date = new Date(today);
-    date.setDate(today.getDate() - 6 + offset);
-    const key = date.toISOString().slice(0, 10);
-    return {
-      day: date.toLocaleDateString("en-IN", {
-        weekday: "short",
-        timeZone: "UTC",
-      }),
-      count:
-        (Array.isArray(weekly.data?.data) ? weekly.data.data : []).find((entry) => entry._id === key)?.count ||
-        0,
-    };
-  });
+
+  const chartSeries = useMemo(() => {
+    if (weekly.data?.series && Array.isArray(weekly.data.series)) {
+      return weekly.data.series;
+    }
+    // Fallback: 7 zero-filled days
+    return Array.from({ length: 7 }, (_, offset) => {
+      const d = new Date();
+      d.setUTCDate(d.getUTCDate() - 6 + offset);
+      const dateStr = d.toISOString().slice(0, 10);
+      return {
+        date: dateStr,
+        label: formatClinicDate(dateStr, { weekday: "short" }),
+        total: 0,
+        confirmed: 0,
+        completed: 0,
+        cancelled: 0,
+        noShow: 0,
+      };
+    });
+  }, [weekly.data]);
+
+  const totalAppointments = useMemo(
+    () => chartSeries.reduce((acc, cur) => acc + (cur.total || 0), 0),
+    [chartSeries],
+  );
+
   const monthData = (Array.isArray(revenue.data?.data) ? revenue.data.data : []).map((entry) => ({
     month: entry._id,
     total: entry.total,
   }));
   const numbers = stats.data?.data || {};
+
   return (
     <div>
       <PageTitle
@@ -134,28 +159,57 @@ function AdminDashboard() {
           </div>
         )}
       </AsyncView>
+
       <div className="chart-grid">
         <SectionPanel
-          title="Appointments this week"
-          description="Zero-filled from the weekly endpoint."
+          title={`Appointments (${totalAppointments} total)`}
+          description="Clinic-time weekly volume categorized by appointment status."
+          actions={
+            <div style={{ display: "flex", gap: "0.3rem" }}>
+              <button
+                type="button"
+                className={`button button-small ${range === "week" ? "button-primary" : "button-quiet"}`}
+                onClick={() => setRange("week")}
+              >
+                This week
+              </button>
+              <button
+                type="button"
+                className={`button button-small ${range === "7d" ? "button-primary" : "button-quiet"}`}
+                onClick={() => setRange("7d")}
+              >
+                Last 7 days
+              </button>
+            </div>
+          }
         >
           <div className="chart-wrap">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={week}>
+              <BarChart data={chartSeries}>
                 <CartesianGrid vertical={false} stroke="#e7eeeb" />
-                <XAxis dataKey="day" axisLine={false} tickLine={false} />
+                <XAxis dataKey="label" axisLine={false} tickLine={false} />
                 <YAxis
                   allowDecimals={false}
                   axisLine={false}
                   tickLine={false}
                   width={28}
                 />
-                <Tooltip />
-                <Bar dataKey="count" fill="#16847c" radius={[4, 4, 0, 0]} />
+                <Tooltip
+                  formatter={(value, name) => [value, name]}
+                  labelFormatter={(label, items) => {
+                    const entry = items?.[0]?.payload;
+                    return entry ? `${entry.label} (${entry.date}) · Total: ${entry.total}` : label;
+                  }}
+                />
+                <Bar dataKey="confirmed" name="Confirmed" stackId="a" fill="#137a76" radius={[0, 0, 0, 0]} />
+                <Bar dataKey="completed" name="Completed" stackId="a" fill="#2a9d8f" radius={[0, 0, 0, 0]} />
+                <Bar dataKey="noShow" name="No-show" stackId="a" fill="#e76f51" radius={[0, 0, 0, 0]} />
+                <Bar dataKey="cancelled" name="Cancelled" stackId="a" fill="#e63946" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
         </SectionPanel>
+
         <SectionPanel
           title="Revenue by month"
           description="Paid payments, reported in INR."
@@ -177,9 +231,11 @@ function AdminDashboard() {
   );
 }
 
-function DentistManagement() {
+export function DentistManagement() {
   const queryClient = useQueryClient();
   const notify = useToast();
+  const { confirm, dialog } = useConfirm();
+
   const [form, setForm] = useState({
     name: "",
     email: "",
@@ -192,6 +248,15 @@ function DentistManagement() {
     about: "",
   });
   const [busy, setBusy] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editForm, setEditForm] = useState(null);
+  const [showPauseModal, setShowPauseModal] = useState(false);
+  const [pauseReason, setPauseReason] = useState("");
+  const [pauseUntil, setPauseUntil] = useState("");
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [tempPassword, setTempPassword] = useState("");
+  const [endpointPending, setEndpointPending] = useState(false);
+
   const query = useQuery({
     queryKey: ["dentists", "admin"],
     queryFn: async () => {
@@ -204,8 +269,31 @@ function DentistManagement() {
       }
     },
   });
+
   const dentists = query.data?.data || [];
   const doctor = dentists[0] || null;
+
+  // Bookable checklist calculation
+  const checklist = useMemo(() => {
+    if (!doctor) return null;
+    const reasons = [];
+    if (!doctor.isVerified) reasons.push("Credentials unverified");
+    if (doctor.isAcceptingAppointments === false) reasons.push("Appointments are paused");
+    const hasHours = (doctor.weeklyAvailability || []).some((d) => (d.slots || []).length > 0);
+    if (!hasHours) reasons.push("Weekly schedule hours not configured");
+    if (!doctor.slotDuration) reasons.push("Consultation slot duration not set");
+    if (!doctor.consultationFee || doctor.consultationFee <= 0) reasons.push("Consultation fee is not set");
+
+    return {
+      isBookable: reasons.length === 0,
+      reasons,
+      verified: !!doctor.isVerified,
+      accepting: doctor.isAcceptingAppointments !== false,
+      weeklyHours: hasHours,
+      slotLength: !!doctor.slotDuration,
+      fee: (doctor.consultationFee || 0) > 0,
+    };
+  }, [doctor]);
 
   const createDentist = async (event) => {
     event.preventDefault();
@@ -251,19 +339,74 @@ function DentistManagement() {
     }
   };
 
-  const toggleAccepting = async () => {
+  const handlePauseResume = async (e) => {
+    e.preventDefault();
     if (!doctor) return;
-    const nextState = doctor.isAcceptingAppointments === false;
+    setBusy(true);
+    const nextActive = doctor.isAcceptingAppointments === false;
     try {
-      const result = await api.dentists.update(doctor._id, {
-        isAcceptingAppointments: nextState,
+      const result = await api.dentists.toggleActive({
+        isActive: nextActive,
+        reason: pauseReason || undefined,
+        pausedUntil: pauseUntil || undefined,
       });
-      notify(result.message || (nextState ? "Doctor is now accepting appointments." : "Appointment bookings paused."));
+      notify(result.message || (nextActive ? "Doctor resumed appointments." : "Doctor appointments paused."));
+      setShowPauseModal(false);
+      setPauseReason("");
+      setPauseUntil("");
       queryClient.invalidateQueries({ queryKey: ["dentists"] });
       queryClient.invalidateQueries({ queryKey: ["primary-dentist"] });
     } catch (error) {
+      if (error.status === 404) setEndpointPending(true);
       notify(error.message, "error");
+    } finally {
+      setBusy(false);
     }
+  };
+
+  const handleUpdateDoctor = async (e) => {
+    e.preventDefault();
+    if (!doctor || !editForm) return;
+    setBusy(true);
+    try {
+      const result = await api.dentists.updateDoctor(doctor._id, editForm);
+      notify(result.message || "Doctor profile updated.");
+      setShowEditModal(false);
+      queryClient.invalidateQueries({ queryKey: ["dentists"] });
+      queryClient.invalidateQueries({ queryKey: ["primary-dentist"] });
+    } catch (error) {
+      if (error.status === 404) setEndpointPending(true);
+      notify(error.message, "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleResetPassword = async (e) => {
+    e.preventDefault();
+    if (!doctor || !tempPassword) return;
+    setBusy(true);
+    try {
+      const result = await api.dentists.resetDoctorPassword(doctor._id, { tempPassword });
+      notify(result.message || "Temporary password set. Doctor must change password on next sign-in.");
+      setShowPasswordModal(false);
+      setTempPassword("");
+    } catch (error) {
+      if (error.status === 404) setEndpointPending(true);
+      notify(error.message, "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handlePhotoUpload = async (file, onProgress) => {
+    if (!doctor) return;
+    const formData = new FormData();
+    formData.append("photo", file);
+    const result = await api.dentists.updateDoctorPhoto(doctor._id, formData, onProgress);
+    queryClient.invalidateQueries({ queryKey: ["dentists"] });
+    queryClient.invalidateQueries({ queryKey: ["primary-dentist"] });
+    return result;
   };
 
   return (
@@ -271,45 +414,119 @@ function DentistManagement() {
       <PageTitle
         eyebrow="Clinical lead"
         title="Doctor profile & account"
-        description="DrNutrident operates with a dedicated chief dental clinician."
+        description="Comprehensive management of the clinic's dedicated chief dental clinician."
       />
 
-      {query.data?.limited && (
-        <div className="notice notice-warn">
-          Using public directory fallback for doctor credentials view.
-        </div>
+      {endpointPending && (
+        <BackendPendingNotice feature="Doctor Profile Management (PATCH /dentists/:id, password reset, photo upload)" />
       )}
 
       {doctor ? (
-        <div className="doctor-management-workspace">
+        <div style={{ display: "grid", gap: "1.5rem" }}>
+          {/* Header Card with Photo and Bookable Status */}
           <SectionPanel
             title={`Dr. ${doctor.user?.name || "Doctor Profile"}`}
-            description={`${doctor.specialization || "Dental Surgeon"} · ${doctor.experienceYears || 0} years experience`}
+            description={`${doctor.specialization || "Dental Surgeon"} · ${doctor.experienceYears || 0} years experience · Fee: ${rupees(doctor.consultationFee)}`}
+            actions={
+              <div style={{ display: "flex", gap: "0.5rem" }}>
+                <button
+                  type="button"
+                  className="button button-outline button-small"
+                  onClick={() => {
+                    setEditForm({
+                      name: doctor.user?.name || "",
+                      email: doctor.user?.email || "",
+                      phone: doctor.user?.phone || "",
+                      specialization: doctor.specialization || "",
+                      qualifications: (doctor.qualifications || []).join(", "),
+                      experienceYears: doctor.experienceYears || 0,
+                      consultationFee: doctor.consultationFee || 0,
+                      about: doctor.about || "",
+                      languages: (doctor.languages || []).join(", "),
+                      clinicAddress: doctor.clinicAddress || "",
+                      slotDuration: doctor.slotDuration || 30,
+                    });
+                    setShowEditModal(true);
+                  }}
+                >
+                  <Edit2 size={14} /> Edit profile
+                </button>
+                <button
+                  type="button"
+                  className="button button-outline button-small"
+                  onClick={() => setShowPasswordModal(true)}
+                >
+                  <KeyRound size={14} /> Reset password
+                </button>
+              </div>
+            }
           >
-            <div className="record-row-content" style={{ display: "grid", gap: "0.8rem", marginBottom: "1.2rem" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: "1.5rem", alignItems: "start" }}>
               <div>
-                <strong>Email:</strong> {doctor.user?.email} · <strong>Phone:</strong> {doctor.user?.phone}
-              </div>
-              <div>
-                <strong>Qualifications:</strong> {doctor.qualifications?.join(", ") || "BDS"}
-              </div>
-              <div>
-                <strong>Consultation fee:</strong> {rupees(doctor.consultationFee)}
-              </div>
-              <div>
-                <strong>Languages:</strong> {doctor.languages?.join(", ") || "English, Hindi"}
-              </div>
-              {doctor.about && (
-                <div>
-                  <strong>Profile summary:</strong>
-                  <p style={{ marginTop: "0.2rem" }}>{doctor.about}</p>
+                <img
+                  src={doctor.user?.photo?.url || "/placeholder-doctor.jpg"}
+                  alt={doctor.user?.name || "Doctor"}
+                  style={{ width: "110px", height: "110px", borderRadius: "50%", objectFit: "cover", border: "3px solid #137a76" }}
+                  onError={(e) => { e.currentTarget.src = "https://images.unsplash.com/photo-1622253692010-333f2da6031d?auto=format&fit=crop&w=300&q=80"; }}
+                />
+                <div style={{ marginTop: "0.5rem" }}>
+                  <FileUpload
+                    accept="image/jpeg,image/png,image/webp"
+                    maxSizeMB={5}
+                    label="Change photo"
+                    onUpload={handlePhotoUpload}
+                    onSuccess={() => notify("Doctor photo updated.")}
+                  />
                 </div>
-              )}
+              </div>
+
+              <div style={{ display: "grid", gap: "0.5rem" }}>
+                <div><strong>Email:</strong> {doctor.user?.email} · <strong>Phone:</strong> {doctor.user?.phone}</div>
+                <div><strong>Qualifications:</strong> {doctor.qualifications?.join(", ") || "BDS"}</div>
+                <div><strong>Languages:</strong> {doctor.languages?.join(", ") || "English, Hindi"}</div>
+                <div><strong>Slot duration:</strong> {doctor.slotDuration || 30} minutes</div>
+                {doctor.clinicAddress && <div><strong>Clinic address:</strong> {doctor.clinicAddress}</div>}
+                <div><strong>Rating:</strong> {doctor.rating || 5} ★ ({doctor.reviewCount || 0} reviews)</div>
+                {doctor.about && (
+                  <p style={{ marginTop: "0.4rem", color: "#495a55", fontSize: "0.9rem" }}>{doctor.about}</p>
+                )}
+              </div>
             </div>
 
-            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "0.8rem", paddingTop: "1rem", borderTop: "1px solid #e7eeeb" }}>
+            {/* Bookable Checklist Section */}
+            {checklist && (
+              <div style={{ marginTop: "1.2rem", paddingTop: "1.2rem", borderTop: "1px solid #e7eeeb" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.8rem" }}>
+                  <span style={{ fontWeight: 600 }}>Bookable Status</span>
+                  <span
+                    className={`status-badge ${checklist.isBookable ? "status-active" : "status-inactive"}`}
+                    style={{ fontSize: "0.85rem", padding: "4px 8px" }}
+                  >
+                    {checklist.isBookable ? "Bookable: YES" : "Bookable: NO"}
+                  </span>
+                </div>
+                {!checklist.isBookable && (
+                  <div className="notice notice-warn" style={{ marginBottom: "0.8rem" }}>
+                    <strong>Patients cannot book online for the following reasons:</strong>
+                    <ul style={{ margin: "0.3rem 0 0 1.2rem", padding: 0 }}>
+                      {checklist.reasons.map((r, i) => <li key={i}>{r}</li>)}
+                    </ul>
+                  </div>
+                )}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "0.5rem", fontSize: "0.85rem" }}>
+                  <div>{checklist.verified ? "✓" : "✗"} Verified credentials</div>
+                  <div>{checklist.accepting ? "✓" : "✗"} Accepting visits</div>
+                  <div>{checklist.weeklyHours ? "✓" : "✗"} Weekly schedule set</div>
+                  <div>{checklist.slotLength ? "✓" : "✗"} Slot length set ({doctor.slotDuration || 0}m)</div>
+                  <div>{checklist.fee ? "✓" : "✗"} Consultation fee set ({rupees(doctor.consultationFee)})</div>
+                </div>
+              </div>
+            )}
+
+            {/* Status badges and Quick action buttons */}
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "0.8rem", marginTop: "1.2rem", paddingTop: "1rem", borderTop: "1px solid #e7eeeb" }}>
               <StatusBadge value={doctor.isVerified ? "verified" : "pending"} />
-              <StatusBadge value={doctor.isActive !== false ? "active" : "inactive"} />
+              <StatusBadge value={doctor.isAcceptingAppointments !== false ? "active" : "inactive"} />
               <span className={`status-badge ${doctor.isAcceptingAppointments !== false ? "status-active" : "status-inactive"}`}>
                 {doctor.isAcceptingAppointments !== false ? "Accepting visits" : "Visits paused"}
               </span>
@@ -326,16 +543,207 @@ function DentistManagement() {
                 )}
                 <button
                   type="button"
-                  className="button button-primary button-small"
-                  onClick={toggleAccepting}
+                  className={`button button-small ${doctor.isAcceptingAppointments !== false ? "button-quiet" : "button-primary"}`}
+                  onClick={() => setShowPauseModal(true)}
                 >
-                  {doctor.isAcceptingAppointments !== false ? "Pause appointments" : "Accept appointments"}
+                  {doctor.isAcceptingAppointments !== false ? "Pause appointments" : "Resume appointments"}
                 </button>
               </div>
             </div>
           </SectionPanel>
 
-          <p className="muted-copy" style={{ marginTop: "1rem" }}>
+          {/* Edit Profile Modal */}
+          {showEditModal && editForm && (
+            <div className="modal-backdrop" onClick={() => setShowEditModal(false)}>
+              <div className="modal-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "600px", width: "90%" }}>
+                <div className="modal-header">
+                  <h2>Edit Doctor Profile</h2>
+                  <button type="button" className="icon-button" onClick={() => setShowEditModal(false)}>
+                    <X size={18} />
+                  </button>
+                </div>
+                <form onSubmit={handleUpdateDoctor} className="admin-form-grid" style={{ padding: "1.2rem" }}>
+                  <Field label="Full name">
+                    <TextInput
+                      required
+                      value={editForm.name}
+                      onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                    />
+                  </Field>
+                  <Field label="Email">
+                    <TextInput
+                      type="email"
+                      required
+                      value={editForm.email}
+                      onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
+                    />
+                  </Field>
+                  <Field label="Phone">
+                    <TextInput
+                      type="tel"
+                      required
+                      value={editForm.phone}
+                      onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
+                    />
+                  </Field>
+                  <Field label="Specialization">
+                    <TextInput
+                      required
+                      value={editForm.specialization}
+                      onChange={(e) => setEditForm({ ...editForm, specialization: e.target.value })}
+                    />
+                  </Field>
+                  <Field label="Qualifications (comma-separated)">
+                    <TextInput
+                      value={editForm.qualifications}
+                      onChange={(e) => setEditForm({ ...editForm, qualifications: e.target.value })}
+                    />
+                  </Field>
+                  <Field label="Years of experience">
+                    <TextInput
+                      type="number"
+                      min="0"
+                      value={editForm.experienceYears}
+                      onChange={(e) => setEditForm({ ...editForm, experienceYears: Number(e.target.value) })}
+                    />
+                  </Field>
+                  <Field label="Consultation fee (INR)">
+                    <TextInput
+                      type="number"
+                      min="0"
+                      value={editForm.consultationFee}
+                      onChange={(e) => setEditForm({ ...editForm, consultationFee: Number(e.target.value) })}
+                    />
+                  </Field>
+                  <Field label="Slot duration (minutes)">
+                    <TextInput
+                      type="number"
+                      min="10"
+                      step="5"
+                      value={editForm.slotDuration}
+                      onChange={(e) => setEditForm({ ...editForm, slotDuration: Number(e.target.value) })}
+                    />
+                  </Field>
+                  <Field label="Languages (comma-separated)">
+                    <TextInput
+                      value={editForm.languages}
+                      onChange={(e) => setEditForm({ ...editForm, languages: e.target.value })}
+                    />
+                  </Field>
+                  <Field label="Clinic address" className="field-wide">
+                    <TextInput
+                      value={editForm.clinicAddress}
+                      onChange={(e) => setEditForm({ ...editForm, clinicAddress: e.target.value })}
+                    />
+                  </Field>
+                  <Field label="About summary" className="field-wide">
+                    <TextInput
+                      as="textarea"
+                      rows={3}
+                      value={editForm.about}
+                      onChange={(e) => setEditForm({ ...editForm, about: e.target.value })}
+                    />
+                  </Field>
+                  <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.5rem", marginTop: "1rem" }} className="field-wide">
+                    <button type="button" className="button button-quiet" onClick={() => setShowEditModal(false)}>
+                      Cancel
+                    </button>
+                    <button type="submit" className="button button-primary" disabled={busy}>
+                      {busy ? "Saving…" : "Save Doctor Profile"}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* Pause / Resume Modal */}
+          {showPauseModal && (
+            <div className="modal-backdrop" onClick={() => setShowPauseModal(false)}>
+              <div className="modal-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "480px", width: "90%" }}>
+                <div className="modal-header">
+                  <h2>{doctor.isAcceptingAppointments !== false ? "Pause Doctor Appointments" : "Resume Doctor Appointments"}</h2>
+                  <button type="button" className="icon-button" onClick={() => setShowPauseModal(false)}>
+                    <X size={18} />
+                  </button>
+                </div>
+                <form onSubmit={handlePauseResume} className="stack-form" style={{ padding: "1.2rem" }}>
+                  {doctor.isAcceptingAppointments !== false ? (
+                    <>
+                      <p style={{ color: "#495a55", fontSize: "0.9rem" }}>
+                        Pausing will prevent new patient bookings online while allowing existing appointments to proceed.
+                      </p>
+                      <Field label="Reason (shown to patients)">
+                        <TextInput
+                          placeholder="e.g. Attending dental conference / Medical leave"
+                          value={pauseReason}
+                          onChange={(e) => setPauseReason(e.target.value)}
+                        />
+                      </Field>
+                      <Field label="Resume date (optional auto-resume)">
+                        <TextInput
+                          type="date"
+                          min={clinicDate()}
+                          value={pauseUntil}
+                          onChange={(e) => setPauseUntil(e.target.value)}
+                        />
+                      </Field>
+                    </>
+                  ) : (
+                    <p style={{ color: "#495a55", fontSize: "0.9rem" }}>
+                      Resuming will re-enable online booking for Dr. {doctor.user?.name || "the doctor"} immediately based on weekly availability hours.
+                    </p>
+                  )}
+                  <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.5rem", marginTop: "1rem" }}>
+                    <button type="button" className="button button-quiet" onClick={() => setShowPauseModal(false)}>
+                      Cancel
+                    </button>
+                    <button type="submit" className="button button-primary" disabled={busy}>
+                      {busy ? "Updating…" : doctor.isAcceptingAppointments !== false ? "Confirm Pause" : "Confirm Resume"}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* Reset Password Modal */}
+          {showPasswordModal && (
+            <div className="modal-backdrop" onClick={() => setShowPasswordModal(false)}>
+              <div className="modal-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "440px", width: "90%" }}>
+                <div className="modal-header">
+                  <h2>Reset Doctor Password</h2>
+                  <button type="button" className="icon-button" onClick={() => setShowPasswordModal(false)}>
+                    <X size={18} />
+                  </button>
+                </div>
+                <form onSubmit={handleResetPassword} className="stack-form" style={{ padding: "1.2rem" }}>
+                  <p style={{ color: "#495a55", fontSize: "0.9rem" }}>
+                    Set a temporary initial password for Dr. {doctor.user?.name}. The doctor will be prompted to change it upon signing in.
+                  </p>
+                  <Field label="Temporary password" hint="Minimum 6 characters">
+                    <TextInput
+                      type="password"
+                      required
+                      minLength={6}
+                      value={tempPassword}
+                      onChange={(e) => setTempPassword(e.target.value)}
+                    />
+                  </Field>
+                  <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.5rem", marginTop: "1rem" }}>
+                    <button type="button" className="button button-quiet" onClick={() => setShowPasswordModal(false)}>
+                      Cancel
+                    </button>
+                    <button type="submit" className="button button-primary" disabled={busy || tempPassword.length < 6}>
+                      {busy ? "Resetting…" : "Reset Password"}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          <p className="muted-copy">
             Single-Dentist Mode is active. Additional dentist accounts cannot be created while a primary clinician is registered.
           </p>
         </div>
@@ -397,6 +805,7 @@ function DentistManagement() {
           </form>
         </SectionPanel>
       )}
+      {dialog}
     </div>
   );
 }
@@ -1319,6 +1728,18 @@ function SystemStatusCard() {
           </div>
         </div>
       ) : null}
+
+      {status && !status.uploads && (
+        <div className="notice notice-warn" style={{ marginTop: "1.2rem" }}>
+          <strong>Cloudinary Upload Service Configuration Required:</strong>
+          <ol style={{ margin: "0.4rem 0 0 1.2rem", padding: 0 }}>
+            <li>Verify Render environment variables: <code>CLOUDINARY_CLOUD_NAME</code>, <code>CLOUDINARY_API_KEY</code>, <code>CLOUDINARY_API_SECRET</code> without surrounding quotes or spaces.</li>
+            <li>In Cloudinary Console → Settings → Security, ensure <em>Allow delivery of PDF files</em> is checked.</li>
+            <li>Trigger a manual redeploy of the backend on Render to apply environment updates.</li>
+            <li>Confirm that this card shows Uploads (Cloudinary) as <strong>Operational</strong>.</li>
+          </ol>
+        </div>
+      )}
     </SectionPanel>
   );
 }
@@ -1341,6 +1762,7 @@ function ClinicSettingsPage() {
       taxPercentage: Number(data.taxPercentage || 0),
       reminderHoursBefore: Number(data.reminderHoursBefore || 24),
       cancellationFullRefundHours: Number(data.cancellationFullRefundHours || 24),
+      allowPayAtClinic: data.allowPayAtClinic !== false,
     };
     try {
       const result = await api.settings.update(payload);
@@ -1350,6 +1772,17 @@ function ClinicSettingsPage() {
     } catch (error) {
       notify(error.message, "error");
     }
+  };
+
+  const handleLogoUpload = async (file, onProgress) => {
+    const fd = new FormData();
+    fd.append("photo", file);
+    const result = await api.auth.updatePhoto(fd, onProgress);
+    const newUrl = result.data?.url || result.data?.user?.photo?.url;
+    if (newUrl) {
+      setForm({ ...data, logoUrl: newUrl });
+    }
+    return result;
   };
 
   return (
@@ -1393,7 +1826,7 @@ function ClinicSettingsPage() {
               </Field>
               <Field label="Opening hours">
                 <TextInput
-                  placeholder="e.g. Mon - Sat: 9:00 AM - 7:00 PM"
+                  placeholder="e.g. Mon - Sat: 9:00 AM - 7:00 PM (Closed Sundays)"
                   value={data.openingHours ?? ""}
                   onChange={(e) => setForm({ ...data, openingHours: e.target.value })}
                 />
@@ -1405,6 +1838,32 @@ function ClinicSettingsPage() {
                   onChange={(e) => setForm({ ...data, logoUrl: e.target.value })}
                 />
               </Field>
+
+              <div className="field-wide" style={{ marginTop: "0.5rem" }}>
+                <label className="field-label" style={{ display: "block", marginBottom: "0.4rem" }}>
+                  Upload Clinic Logo (PNG/WEBP/JPG up to 5 MB)
+                </label>
+                <div style={{ display: "flex", alignItems: "center", gap: "1.5rem" }}>
+                  {data.logoUrl && (
+                    <img
+                      src={data.logoUrl}
+                      alt="Clinic Logo Preview"
+                      style={{ height: "48px", maxWidth: "160px", objectFit: "contain", border: "1px solid #dbe5e1", borderRadius: "4px", padding: "4px" }}
+                      onError={(e) => { e.currentTarget.style.display = "none"; }}
+                    />
+                  )}
+                  <div style={{ flex: 1 }}>
+                    <FileUpload
+                      accept="image/jpeg,image/png,image/webp"
+                      maxSizeMB={5}
+                      label="Upload new clinic logo"
+                      onUpload={handleLogoUpload}
+                      onSuccess={() => notify("Logo uploaded. Click Save All Settings below.")}
+                    />
+                  </div>
+                </div>
+              </div>
+
               <Field label="Google Maps link" className="field-wide">
                 <TextInput
                   placeholder="https://maps.google.com/…"
@@ -1456,6 +1915,19 @@ function ClinicSettingsPage() {
                   onChange={(e) => setForm({ ...data, cancellationFullRefundHours: e.target.value })}
                 />
               </Field>
+              <div className="field-wide" style={{ marginTop: "0.5rem" }}>
+                <label style={{ display: "flex", alignItems: "center", gap: "0.6rem", cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={data.allowPayAtClinic !== false}
+                    onChange={(e) => setForm({ ...data, allowPayAtClinic: e.target.checked })}
+                    style={{ width: "18px", height: "18px" }}
+                  />
+                  <span>
+                    <strong>Allow 'Pay at clinic' bookings:</strong> Patients can confirm bookings online and settle fees at reception upon arrival.
+                  </span>
+                </label>
+              </div>
             </div>
           </SectionPanel>
 

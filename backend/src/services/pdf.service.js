@@ -1,19 +1,29 @@
+const path = require('path');
+const fs = require('fs');
 const PDFDocument = require('pdfkit');
 const ClinicSettings = require('../models/ClinicSettings');
 
-const CURRENCY_SYMBOL = { INR: 'Rs.' }; // pdfkit's default font can't render '₹' - use text fallback
+const BUNDLED_FONT = path.join(__dirname, '../assets/fonts/AppFont.ttf');
+const hasBundledFont = fs.existsSync(BUNDLED_FONT);
+
+const getFont = (bold = false) => {
+  if (hasBundledFont) return BUNDLED_FONT;
+  return bold ? 'Helvetica-Bold' : 'Helvetica';
+};
+
+const CURRENCY_SYMBOL = { INR: hasBundledFont ? '₹ ' : 'Rs. ' };
 
 const money = (amount, currency = 'INR') => `${CURRENCY_SYMBOL[currency] || currency + ' '}${Number(amount || 0).toFixed(2)}`;
 
 const drawHeader = (doc, clinic, title) => {
-  doc.fontSize(18).font('Helvetica-Bold').text(clinic.clinicName || 'Dental Clinic', { align: 'left' });
-  doc.fontSize(9).font('Helvetica').fillColor('#555');
+  doc.fontSize(18).font(getFont(true)).text(clinic.clinicName || 'Dental Clinic', { align: 'left' });
+  doc.fontSize(9).font(getFont(false)).fillColor('#555');
   if (clinic.address) doc.text(clinic.address);
   const contactLine = [clinic.contactPhone, clinic.contactEmail].filter(Boolean).join('  |  ');
   if (contactLine) doc.text(contactLine);
   doc.fillColor('#000');
   doc.moveDown(0.5);
-  doc.fontSize(14).font('Helvetica-Bold').text(title, { align: 'right' });
+  doc.fontSize(14).font(getFont(true)).text(title, { align: 'right' });
   doc.moveTo(50, doc.y + 8).lineTo(doc.page.width - 50, doc.y + 8).strokeColor('#ddd').stroke();
   doc.moveDown(1.2);
   doc.fillColor('#000');
@@ -21,7 +31,7 @@ const drawHeader = (doc, clinic, title) => {
 
 const drawFooter = (doc) => {
   const bottom = doc.page.height - 60;
-  doc.fontSize(8).fillColor('#888').text('This is a system-generated document.', 50, bottom, {
+  doc.fontSize(8).font(getFont(false)).fillColor('#888').text('This is a system-generated document.', 50, bottom, {
     align: 'center',
     width: doc.page.width - 100,
   });
@@ -39,13 +49,13 @@ const generateInvoicePDF = async (invoice, stream) => {
 
   drawHeader(doc, clinic, 'INVOICE');
 
-  doc.fontSize(10).font('Helvetica-Bold').text(`Invoice #: `, { continued: true }).font('Helvetica').text(invoice.invoiceNumber);
-  doc.font('Helvetica-Bold').text('Date: ', { continued: true }).font('Helvetica').text(new Date(invoice.createdAt).toDateString());
+  doc.fontSize(10).font(getFont(true)).text(`Invoice #: `, { continued: true }).font(getFont(false)).text(invoice.invoiceNumber);
+  doc.font(getFont(true)).text('Date: ', { continued: true }).font(getFont(false)).text(new Date(invoice.createdAt).toDateString());
   doc.moveDown(0.5);
 
   if (invoice.patient) {
-    doc.font('Helvetica-Bold').text('Billed To:');
-    doc.font('Helvetica').text(invoice.patient.name || '');
+    doc.font(getFont(true)).text('Billed To:');
+    doc.font(getFont(false)).text(invoice.patient.name || '');
     if (invoice.patient.phone) doc.text(invoice.patient.phone);
     if (invoice.patient.email) doc.text(invoice.patient.email);
   }
@@ -54,7 +64,7 @@ const generateInvoicePDF = async (invoice, stream) => {
   // Table header
   const tableTop = doc.y;
   const col = { desc: 50, qty: 300, unit: 360, amount: 460 };
-  doc.font('Helvetica-Bold').fontSize(10);
+  doc.font(getFont(true)).fontSize(10);
   doc.text('Description', col.desc, tableTop);
   doc.text('Qty', col.qty, tableTop);
   doc.text('Unit Price', col.unit, tableTop);
@@ -62,7 +72,7 @@ const generateInvoicePDF = async (invoice, stream) => {
   doc.moveTo(50, tableTop + 15).lineTo(doc.page.width - 50, tableTop + 15).strokeColor('#ddd').stroke();
 
   let y = tableTop + 22;
-  doc.font('Helvetica').fontSize(10);
+  doc.font(getFont(false)).fontSize(10);
   invoice.items.forEach((item) => {
     doc.text(item.description, col.desc, y, { width: 240 });
     doc.text(String(item.quantity || 1), col.qty, y);
@@ -75,7 +85,7 @@ const generateInvoicePDF = async (invoice, stream) => {
   y += 14;
 
   const totalsLine = (label, value, bold = false) => {
-    doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(10);
+    doc.font(getFont(bold)).fontSize(10);
     doc.text(label, 360, y);
     doc.text(value, col.amount, y);
     y += 18;
@@ -90,7 +100,7 @@ const generateInvoicePDF = async (invoice, stream) => {
   totalsLine('Total', money(invoice.totalAmount), true);
 
   doc.y = y + 20;
-  doc.font('Helvetica-Bold').fontSize(10).text('Status: ', { continued: true }).font('Helvetica').text(invoice.status.toUpperCase());
+  doc.font(getFont(true)).fontSize(10).text('Status: ', { continued: true }).font(getFont(false)).text(invoice.status.toUpperCase());
 
   drawFooter(doc);
   doc.end();

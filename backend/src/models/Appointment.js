@@ -37,6 +37,7 @@ const appointmentSchema = new mongoose.Schema(
       enum: ['pending', 'paid', 'failed', 'refunded'],
       default: 'pending',
     },
+    payAtClinic: { type: Boolean, default: false },
     payment: { type: mongoose.Schema.Types.ObjectId, ref: 'Payment', default: null },
 
     videoCall: {

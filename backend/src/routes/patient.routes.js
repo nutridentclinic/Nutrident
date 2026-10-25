@@ -10,8 +10,10 @@ router.patch('/me/basic-info', protect, restrictTo('patient'), upload('profile-p
 router.post('/me/family-members', protect, restrictTo('patient'), ctrl.addFamilyMember);
 router.delete('/me/family-members/:memberId', protect, restrictTo('patient'), ctrl.removeFamilyMember);
 
-router.get('/', protect, restrictTo('admin', 'receptionist'), ctrl.getAllPatients);
+router.get('/', protect, restrictTo('admin', 'receptionist', 'dentist'), ctrl.getAllPatients);
 router.post('/', protect, restrictTo('admin', 'receptionist'), ctrl.createPatientByStaff);
+router.get('/:id/summary', protect, restrictTo('admin', 'receptionist', 'dentist'), ctrl.getPatientSummary);
+router.get('/:id/appointments', protect, restrictTo('admin', 'receptionist', 'dentist'), ctrl.getPatientAppointments);
 router.get('/:id', protect, restrictTo('admin', 'receptionist', 'dentist'), ctrl.getPatientById);
 
 module.exports = router;

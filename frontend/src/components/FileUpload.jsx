@@ -1,6 +1,76 @@
 import { useEffect, useRef, useState } from 'react'
 import { AlertCircle, CheckCircle2, FileText, Image as ImageIcon, RotateCcw, Upload, X } from 'lucide-react'
 
+export async function resizeImage(file, maxDimension = 1600) {
+  if (!file || !file.type || !file.type.startsWith('image/') || typeof Image === 'undefined') {
+    return file
+  }
+  return new Promise((resolve) => {
+    let resolved = false
+    let url = ''
+    const safeResolve = (res) => {
+      if (!resolved) {
+        resolved = true
+        clearTimeout(timer)
+        if (url) {
+          try { URL.revokeObjectURL(url) } catch {}
+        }
+        resolve(res)
+      }
+    }
+    const timer = setTimeout(() => {
+      safeResolve(file)
+    }, 100)
+
+    try {
+      const img = new Image()
+      url = URL.createObjectURL(file)
+      img.onload = () => {
+        try {
+          let { width, height } = img
+          if (!width || !height || (width <= maxDimension && height <= maxDimension)) {
+            return safeResolve(file)
+          }
+          if (width > height) {
+            height = Math.round((height * maxDimension) / width)
+            width = maxDimension
+          } else {
+            width = Math.round((width * maxDimension) / height)
+            height = maxDimension
+          }
+          const canvas = document.createElement('canvas')
+          canvas.width = width
+          canvas.height = height
+          const ctx = canvas.getContext ? canvas.getContext('2d') : null
+          if (!ctx) return safeResolve(file)
+          ctx.drawImage(img, 0, 0, width, height)
+          if (!canvas.toBlob) return safeResolve(file)
+          canvas.toBlob(
+            (blob) => {
+              if (!blob) return safeResolve(file)
+              const resized = new File([blob], file.name, {
+                type: file.type || 'image/jpeg',
+                lastModified: Date.now(),
+              })
+              safeResolve(resized)
+            },
+            file.type || 'image/jpeg',
+            0.9
+          )
+        } catch {
+          safeResolve(file)
+        }
+      }
+      img.onerror = () => {
+        safeResolve(file)
+      }
+      img.src = url
+    } catch {
+      safeResolve(file)
+    }
+  })
+}
+
 export function FileUpload({
   accept = 'image/jpeg,image/png,image/webp,application/pdf',
   maxSizeMB = 10,
@@ -111,7 +181,16 @@ export function FileUpload({
         }
       }
 
-      const result = await onUpload(file, handleProgress)
+      let fileToUpload = file
+      if (file.type && file.type.startsWith('image/')) {
+        try {
+          fileToUpload = await resizeImage(file, 1600)
+        } catch {
+          fileToUpload = file
+        }
+      }
+
+      const result = await onUpload(fileToUpload, handleProgress)
       setSuccessMessage(result?.message || 'File uploaded successfully.')
       setProgress(100)
       setFile(null)
@@ -119,7 +198,10 @@ export function FileUpload({
       if (inputRef.current) inputRef.current.value = ''
       onSuccess?.(result)
     } catch (err) {
-      const message = err.message || 'File upload failed. Please try again.'
+      let message = err.message || 'File upload failed. Please try again.'
+      if (err.status === 503 || err.response?.status === 503 || String(message).includes('503')) {
+        message = 'Uploads are temporarily unavailable. Please try again later or contact the clinic.'
+      }
       setError(message)
       setProgress(null)
     } finally {

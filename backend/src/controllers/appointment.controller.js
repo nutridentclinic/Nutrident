@@ -8,7 +8,9 @@ const AppError = require('../utils/appError');
 const logger = require('../utils/logger');
 const { success } = require('../utils/response');
 const { assertSlotIsFree, getAvailableSlots } = require('../services/availability.service');
-const { notify } = require('../services/notification.service');
+const { notify, notifyUser, notifyRoles } = require('../services/notification.service');
+const { createInvoiceForAppointment } = require('../services/invoice.service');
+const { parseDateOnly, dayRange, todayInClinic } = require('../utils/clinicDate');
 const { processRefund } = require('../services/payment.service');
 const { generateAgoraToken, mongoIdToAgoraUid, isConfigured } = require('../config/agora');
 const { isAppointmentParticipant, isWithinVideoWindow } = require('../utils/appointmentAccess');
@@ -41,10 +43,10 @@ const resolvePrimaryDentist = async (requestedDentistId) => {
 
 // @route POST /api/appointments  (patient books an appointment)
 exports.createAppointment = catchAsync(async (req, res, next) => {
-  const { dentistId, date, startTime, mode, reasonForVisit, familyMemberName } = req.body;
+  const { dentistId, date, startTime, mode, reasonForVisit, familyMemberName, payAtClinic, paymentOption } = req.body;
 
   const dentist = await resolvePrimaryDentist(dentistId);
-  if (!dentist.isActive || !dentist.isVerified) {
+  if (!dentist.isActive || !dentist.isVerified || (dentist.pausedUntil && new Date(dentist.pausedUntil) > new Date())) {
     return next(new AppError('This doctor is currently not accepting appointments.', 400));
   }
 
@@ -62,9 +64,14 @@ exports.createAppointment = catchAsync(async (req, res, next) => {
   const endMinutes = h * 60 + m + duration;
   const endTime = `${String(Math.floor(endMinutes / 60)).padStart(2, '0')}:${String(endMinutes % 60).padStart(2, '0')}`;
 
-  const settings = (await ClinicSettings.findById('default')) || { platformFee: 0 };
+  const settings = (await ClinicSettings.findById('default')) || { platformFee: 0, allowPayAtClinic: true };
   const consultationFee = dentist.consultationFee;
   const platformFee = settings.platformFee || 0;
+
+  const isPayAtClinic = Boolean(payAtClinic || paymentOption === 'clinic');
+  if (isPayAtClinic && settings.allowPayAtClinic === false) {
+    return next(new AppError('Pay at clinic is not currently available.', 400));
+  }
 
   const appointment = await createAppointmentSafe({
     patient: req.user._id,
@@ -81,23 +88,54 @@ exports.createAppointment = catchAsync(async (req, res, next) => {
       platformFee,
       totalAmount: consultationFee + platformFee,
     },
+    status: isPayAtClinic ? 'confirmed' : 'pending',
+    paymentStatus: 'pending',
+    payAtClinic: Boolean(isPayAtClinic),
   });
 
-  await notify({
-    userId: req.user._id,
+  const doctorName = dentist.user?.name ? `Dr. ${dentist.user.name}` : 'the doctor';
+
+  if (isPayAtClinic) {
+    await notifyUser(req.user._id, {
+      title: 'Appointment Confirmed',
+      message: `Your appointment with ${doctorName} on ${date} at ${startTime} has been confirmed. Please settle payment at the clinic reception desk upon arrival.`,
+      type: 'appointment_confirmed',
+      relatedId: appointment._id,
+    });
+
+    if (dentist.user) {
+      const dentistUserId = dentist.user._id || dentist.user;
+      await notifyUser(dentistUserId, {
+        title: 'New Appointment Booking',
+        message: `A new appointment has been booked for ${date} at ${startTime} (Pay at clinic).`,
+        type: 'new_booking',
+        relatedId: appointment._id,
+      });
+    }
+
+    await notifyRoles(['receptionist'], {
+      title: 'New Booking (Pay at clinic)',
+      message: `New appointment on ${date} at ${startTime} booked by patient. Payment pending at clinic desk.`,
+      type: 'new_booking',
+      relatedId: appointment._id,
+    });
+
+    return success(res, 201, 'Appointment confirmed with pay-at-clinic.', appointment);
+  }
+
+  await notifyUser(req.user._id, {
     title: 'Appointment Requested',
-    message: `Your appointment with Dr. ${dentist.user?.name || dentist.specialization} on ${date} at ${startTime} is pending payment/confirmation.`,
+    message: `Your appointment with ${doctorName} on ${date} at ${startTime} is pending payment/confirmation.`,
     type: 'appointment_confirmed',
     relatedId: appointment._id,
   });
 
   if (dentist.user) {
     const dentistUserId = dentist.user._id || dentist.user;
-    await notify({
-      userId: dentistUserId,
+    await notifyUser(dentistUserId, {
       title: 'New Appointment Booking',
       message: `A new appointment has been booked for ${date} at ${startTime}.`,
-      type: 'appointment_confirmed',
+      type: 'new_booking',
       relatedId: appointment._id,
     });
   }
@@ -178,16 +216,27 @@ exports.createStaffAppointment = catchAsync(async (req, res, next) => {
 
 // @route GET /api/appointments/me  (patient's own appointments)
 exports.getMyAppointments = catchAsync(async (req, res) => {
-  const { status, upcoming } = req.query;
+  const { status, upcoming, page = 1, limit = 20 } = req.query;
   const filter = { patient: req.user._id };
   if (status) filter.status = status;
-  if (upcoming === 'true') filter.date = { $gte: new Date() };
+  if (upcoming === 'true') {
+    const todayStr = todayInClinic();
+    filter.date = { $gte: parseDateOnly(todayStr) };
+  }
 
-  const appointments = await Appointment.find(filter)
-    .populate({ path: 'dentist', populate: { path: 'user', select: 'name profilePhoto' } })
-    .sort('-date');
+  const currentPage = Math.max(1, Number(page) || 1);
+  const pageSize = Math.min(100, Math.max(1, Number(limit) || 20));
 
-  success(res, 200, 'Appointments fetched.', appointments);
+  const [appointments, total] = await Promise.all([
+    Appointment.find(filter)
+      .populate({ path: 'dentist', populate: { path: 'user', select: 'name profilePhoto' } })
+      .sort('-date startTime')
+      .skip((currentPage - 1) * pageSize)
+      .limit(pageSize),
+    Appointment.countDocuments(filter),
+  ]);
+
+  success(res, 200, 'Appointments fetched.', appointments, { total, page: currentPage, limit: pageSize });
 });
 
 // @route GET /api/appointments/dentist/me  (dentist's own schedule)
@@ -199,11 +248,8 @@ exports.getDentistAppointments = catchAsync(async (req, res, next) => {
   const filter = { dentist: dentist._id };
   if (status) filter.status = status;
   if (date) {
-    const d = new Date(date);
-    d.setHours(0, 0, 0, 0);
-    const nextDay = new Date(d);
-    nextDay.setDate(nextDay.getDate() + 1);
-    filter.date = { $gte: d, $lt: nextDay };
+    const { start, end } = dayRange(date);
+    filter.date = { $gte: start, $lt: end };
   }
 
   const appointments = await Appointment.find(filter)
@@ -422,15 +468,21 @@ exports.completeAppointment = catchAsync(async (req, res, next) => {
   appointment.status = 'completed';
   await appointment.save();
 
-  await notify({
-    userId: appointment.patient,
+  let invoice = null;
+  try {
+    invoice = await createInvoiceForAppointment(appointment);
+  } catch (err) {
+    logger.error(`Auto-invoice creation error for appointment ${appointment._id}: ${err.message}`);
+  }
+
+  await notifyUser(appointment.patient, {
     title: 'Visit Completed',
     message: 'Your appointment has been marked as completed. You can now leave a review.',
     type: 'appointment_completed',
     relatedId: appointment._id,
   });
 
-  success(res, 200, 'Appointment marked as completed.', appointment);
+  success(res, 200, 'Appointment marked as completed.', { appointment, invoice });
 });
 
 // @route PATCH /api/appointments/:id/no-show

@@ -2,7 +2,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { usePrimaryDentist } from "../hooks/usePrimaryDentist.js";
-import { fetchPrimarySlotsWithFallback } from "../api/capabilities.js";
+import { fetchPrimarySlotsWithFallback, fetchAvailabilityRangeWithFallback } from "../api/capabilities.js";
 import {
   Activity,
   ArrowRight,
@@ -35,16 +35,11 @@ import {
   useConfirm,
   useToast,
 } from "../components/ui.jsx";
+import { formatClinicDate } from "../utils/formatDate.js";
 
-const fmtDate = (date) =>
-  date
-    ? new Date(date).toLocaleDateString("en-IN", {
-        dateStyle: "medium",
-        timeZone: "UTC",
-      })
-    : "Date not set";
+const fmtDate = (date) => (date ? formatClinicDate(date) : "Date not set");
 const rupees = (amount) => `₹${Number(amount || 0).toLocaleString("en-IN")}`;
-const queryOptions = { staleTime: 15000, retry: 1 };
+const queryOptions = { staleTime: 15000 };
 function useAction() {
   const queryClient = useQueryClient();
   const notify = useToast();
@@ -157,18 +152,12 @@ export function PatientDashboard() {
               <span className="visit-date">
                 <strong>
                   {nextVisit
-                    ? new Date(nextVisit.date).toLocaleDateString("en-IN", {
-                        day: "2-digit",
-                        timeZone: "UTC",
-                      })
+                    ? formatClinicDate(nextVisit.date, { day: "2-digit" })
                     : "--"}
                 </strong>
                 <small>
                   {nextVisit
-                    ? new Date(nextVisit.date).toLocaleDateString("en-IN", {
-                        month: "short",
-                        timeZone: "UTC",
-                      })
+                    ? formatClinicDate(nextVisit.date, { month: "short" })
                     : "—"}
                 </small>
               </span>
@@ -336,12 +325,12 @@ export function PatientAppointments() {
                     Reschedule
                   </button>
                 )}
-                {item.mode === "video" && item.status === "confirmed" && (
+                {["video", "audio"].includes(item.mode) && item.status === "confirmed" && (
                   <Link
                     to={`/consultation/${item._id}/lobby`}
                     className="button button-primary button-small"
                   >
-                    Join video
+                    {item.mode === "audio" ? "Join audio" : "Join video"}
                   </Link>
                 )}
               </div>
@@ -529,12 +518,12 @@ export function AppointmentDetail() {
                 Cancellation refunds follow the clinic policy shown at the time
                 of booking.
               </p>
-              {item.mode === "video" && item.status === "confirmed" && (
+              {["video", "audio"].includes(item.mode) && item.status === "confirmed" && (
                 <Link
                   className="button button-primary button-wide"
                   to={`/consultation/${id}/lobby`}
                 >
-                  Join video consultation <ArrowRight size={16} />
+                  {item.mode === "audio" ? "Join audio consultation" : "Join video consultation"} <ArrowRight size={16} />
                 </Link>
               )}
             </SectionPanel>
@@ -646,23 +635,65 @@ export function AppointmentBooking() {
     ...queryOptions,
   });
   const settings = settingsQuery.data?.data;
+  const allowPayAtClinic = settings?.allowPayAtClinic !== false;
+
   const [date, setDate] = useState(clinicDate());
   const [selectedSlot, setSelectedSlot] = useState("");
   const [mode, setMode] = useState("in-clinic");
   const [reason, setReason] = useState("");
   const [familyMemberName, setFamilyMemberName] = useState("");
+  const [paymentChoice, setPaymentChoice] = useState("online");
   const [busy, setBusy] = useState(false);
   const [stage, setStage] = useState("idle");
   const [message, setMessage] = useState("");
   const [appointmentId, setAppointmentId] = useState("");
   const [serverFees, setServerFees] = useState(null);
+
+  // 14-day availability range calculation
+  const fromDate = useMemo(() => clinicDate(), []);
+  const toDate = useMemo(() => {
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() + 13);
+    return d.toISOString().slice(0, 10);
+  }, []);
+
+  const rangeQuery = useQuery({
+    queryKey: ["availability-range", effectiveDentistId, fromDate, toDate],
+    queryFn: () => fetchAvailabilityRangeWithFallback(fromDate, toDate, effectiveDentistId),
+    enabled: !!effectiveDentistId,
+    staleTime: 60000,
+  });
+
+  const calendarDays = useMemo(() => {
+    if (Array.isArray(rangeQuery.data) && rangeQuery.data.length > 0) {
+      return rangeQuery.data;
+    }
+    // Fallback: generate 14 calendar days
+    return Array.from({ length: 14 }, (_, idx) => {
+      const d = new Date();
+      d.setUTCDate(d.getUTCDate() + idx);
+      const dateStr = d.toISOString().slice(0, 10);
+      const weekday = d.getUTCDay();
+      return {
+        date: dateStr,
+        weekday,
+        status: weekday === 0 ? "closed" : "open",
+        reason: weekday === 0 ? "Clinic closed on Sundays" : "",
+        slots: [],
+      };
+    });
+  }, [rangeQuery.data]);
+
+  const selectedDayInfo = calendarDays.find((d) => d.date === date);
+
   const slotsQuery = useQuery({
     queryKey: ["slots", effectiveDentistId, date],
     queryFn: () => fetchPrimarySlotsWithFallback(date, effectiveDentistId),
-    enabled: !!date,
+    enabled: !!date && selectedDayInfo?.status !== "closed" && selectedDayInfo?.status !== "leave" && selectedDayInfo?.status !== "paused",
     refetchInterval: 30000,
     ...queryOptions,
   });
+
   const rawSlots = Array.isArray(slotsQuery.data)
     ? slotsQuery.data
     : (slotsQuery.data?.data || []);
@@ -670,6 +701,7 @@ export function AppointmentBooking() {
     (slot) => !isPastSlot(date, slot.startTime),
   );
   const availableDatesMin = clinicDate();
+
   const resultLabel = useMemo(
     () =>
       ({
@@ -695,7 +727,7 @@ export function AppointmentBooking() {
       } else {
         setStage("not-confirmed");
         setMessage(
-          "Payment is not completed. You can retry checkout; no charge is considered successful until the clinic confirms it.",
+          "Payment is not completed. You can retry checkout; your slot is held for 15 minutes.",
         );
       }
     });
@@ -756,7 +788,7 @@ export function AppointmentBooking() {
 
   const book = async (event) => {
     event.preventDefault();
-    if (appointmentId) return;
+    if (appointmentId && stage === "confirmed") return;
     if (!settingsQuery.isSuccess) {
       setMessage(
         settingsQuery.error?.message || "Loading clinic fee information…",
@@ -771,6 +803,7 @@ export function AppointmentBooking() {
     setStage("creating-appointment");
     setMessage("");
     try {
+      const isPayAtClinic = paymentChoice === "at-clinic";
       const result = await api.appointments.create({
         dentistId: effectiveDentistId || undefined,
         date,
@@ -778,11 +811,19 @@ export function AppointmentBooking() {
         mode,
         reasonForVisit: reason,
         familyMemberName: familyMemberName || undefined,
+        payAtClinic: isPayAtClinic,
       });
       const appointment = result.data;
       setAppointmentId(appointment._id);
       setServerFees(appointment.fees);
-      await payForAppointment(appointment._id);
+
+      if (isPayAtClinic) {
+        setStage("confirmed");
+        setMessage("Your appointment is confirmed! Consultation fee will be settled at the front desk when you arrive.");
+        setBusy(false);
+      } else {
+        await payForAppointment(appointment._id);
+      }
     } catch (error) {
       setStage("failed");
       setMessage(error.message);
@@ -797,6 +838,7 @@ export function AppointmentBooking() {
     serverFees?.platformFee ?? settingsQuery.data?.data?.platformFee ?? 0;
   const totalFee =
     serverFees?.totalAmount ?? Number(consultationFee) + Number(platformFee);
+
   return (
     <div>
       <PageTitle
@@ -808,25 +850,108 @@ export function AppointmentBooking() {
             : "Select an appointment date and available time slot."
         }
         actions={
-          <Link to="/doctor" className="button button-quiet">
-            ← Doctor profile
-          </Link>
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            <Link to="/doctor" className="button button-quiet">
+              ← Doctor profile
+            </Link>
+            <Link to="/app/appointments" className="button button-outline">
+              My appointments
+            </Link>
+          </div>
         }
       />
+
       {!primary.isLoading && (!dentist || !isAcceptingAppointments) && (
-        <div className="notice notice-warn">
-          The doctor is currently not accepting new appointments online. Please call the clinic directly at{" "}
-          {settings?.contactPhone || "the front desk"} or check back soon.
+        <div className="notice notice-warn" style={{ marginBottom: "1.5rem" }}>
+          <strong>
+            Dr. {dentist?.user?.name || "The doctor"} is not taking new appointments
+            {dentist?.pausedUntil ? ` until ${formatClinicDate(dentist.pausedUntil)}` : " online at this time"}.
+          </strong>
+          {dentist?.pausedReason && (
+            <p style={{ marginTop: "0.4rem" }}>Reason: {dentist.pausedReason}</p>
+          )}
+          <p style={{ marginTop: "0.4rem" }}>
+            Please call the clinic directly at {settings?.contactPhone || "the front desk"} or check back soon. Existing appointments can still be viewed in My Appointments.
+          </p>
         </div>
       )}
+
       {dentist && isAcceptingAppointments && (
         <form className="booking-layout" onSubmit={book}>
           <section className="booking-main">
             <SectionPanel
-              title="1. Select a date"
+              title="1. Select a date & time"
               description={`Availability is shown in ${import.meta.env.VITE_CLINIC_TIMEZONE || "Asia/Kolkata"} clinic time.`}
             >
-              <Field label="Appointment date">
+              {/* 14-day visual date strip */}
+              <div style={{ marginBottom: "1rem" }}>
+                <span className="field-label" style={{ display: "block", marginBottom: "0.5rem" }}>
+                  14-Day Calendar Strip
+                </span>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fill, minmax(68px, 1fr))",
+                    gap: "0.5rem",
+                    overflowX: "auto",
+                    paddingBottom: "0.3rem",
+                  }}
+                  role="region"
+                  aria-label="14-day appointment calendar"
+                >
+                  {calendarDays.map((d) => {
+                    const isSelected = date === d.date;
+                    const isOpen = d.status === "open";
+                    const weekdayName = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.weekday];
+                    const dayNum = d.date.slice(8);
+                    return (
+                      <button
+                        type="button"
+                        key={d.date}
+                        disabled={!isOpen}
+                        onClick={() => {
+                          setDate(d.date);
+                          setSelectedSlot("");
+                        }}
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "center",
+                          padding: "0.5rem 0.2rem",
+                          borderRadius: "8px",
+                          border: isSelected ? "2px solid #137a76" : "1px solid #dbe5e1",
+                          background: isSelected ? "#e6f4f1" : isOpen ? "#fff" : "#f5f7f6",
+                          color: isOpen ? "#1c2b28" : "#8c9b96",
+                          cursor: isOpen ? "pointer" : "not-allowed",
+                          opacity: isOpen ? 1 : 0.65,
+                          transition: "all 0.15s ease",
+                        }}
+                        aria-pressed={isSelected}
+                        title={d.reason || (isOpen ? "Open for booking" : d.status)}
+                      >
+                        <span style={{ fontSize: "0.75rem", textTransform: "uppercase", fontWeight: 600 }}>
+                          {weekdayName}
+                        </span>
+                        <strong style={{ fontSize: "1.1rem", margin: "0.2rem 0" }}>{dayNum}</strong>
+                        <span
+                          style={{
+                            fontSize: "0.65rem",
+                            padding: "2px 4px",
+                            borderRadius: "4px",
+                            background: isOpen ? "#cbf0e4" : "#e0e7e4",
+                            color: isOpen ? "#0b5853" : "#5d6e69",
+                            textTransform: "capitalize",
+                          }}
+                        >
+                          {d.status === "open" ? "Open" : d.status}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <Field label="Or choose exact date">
                 <TextInput
                   type="date"
                   min={availableDatesMin}
@@ -837,30 +962,41 @@ export function AppointmentBooking() {
                   }}
                 />
               </Field>
-              <AsyncView
-                query={slotsQuery}
-                empty={
-                  !slotsQuery.isLoading &&
-                  !slotsQuery.isError &&
-                  slots.length === 0
-                }
-                emptyTitle="No available times. Try another date."
-              >
-                <div className="slot-grid">
-                  {slots.map((slot) => (
-                    <button
-                      type="button"
-                      key={slot.startTime}
-                      aria-pressed={selectedSlot === slot.startTime}
-                      className={`slot-button ${selectedSlot === slot.startTime ? "slot-selected" : ""}`}
-                      onClick={() => setSelectedSlot(slot.startTime)}
-                    >
-                      {slot.startTime}
-                    </button>
-                  ))}
+
+              {selectedDayInfo && selectedDayInfo.status !== "open" ? (
+                <div className="notice notice-info" style={{ marginTop: "1rem" }}>
+                  <strong>Clinic status on this date: {selectedDayInfo.status.toUpperCase()}</strong>
+                  <p style={{ marginTop: "0.2rem" }}>
+                    {selectedDayInfo.reason || (selectedDayInfo.weekday === 0 ? "The clinic is closed on Sundays." : "No slots available on this date.")}
+                  </p>
                 </div>
-              </AsyncView>
+              ) : (
+                <AsyncView
+                  query={slotsQuery}
+                  empty={
+                    !slotsQuery.isLoading &&
+                    !slotsQuery.isError &&
+                    slots.length === 0
+                  }
+                  emptyTitle="No available times for this date. Try another day."
+                >
+                  <div className="slot-grid">
+                    {slots.map((slot) => (
+                      <button
+                        type="button"
+                        key={slot.startTime}
+                        aria-pressed={selectedSlot === slot.startTime}
+                        className={`slot-button ${selectedSlot === slot.startTime ? "slot-selected" : ""}`}
+                        onClick={() => setSelectedSlot(slot.startTime)}
+                      >
+                        {slot.startTime}
+                      </button>
+                    ))}
+                  </div>
+                </AsyncView>
+              )}
             </SectionPanel>
+
             <SectionPanel title="2. Tell us a little more">
               <div className="two-col-fields">
                 <Field label="Visit type">
@@ -903,8 +1039,74 @@ export function AppointmentBooking() {
                   onChange={(event) => setReason(event.target.value)}
                 />
               </Field>
+
+              {allowPayAtClinic && (
+                <div style={{ marginTop: "1rem", paddingTop: "1rem", borderTop: "1px solid #e7eeeb" }}>
+                  <label className="field-label" style={{ display: "block", marginBottom: "0.5rem" }}>
+                    Payment method
+                  </label>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.8rem" }}>
+                    <label
+                      style={{
+                        display: "flex",
+                        alignItems: "flex-start",
+                        gap: "0.6rem",
+                        padding: "0.8rem",
+                        borderRadius: "8px",
+                        border: paymentChoice === "online" ? "2px solid #137a76" : "1px solid #dbe5e1",
+                        background: paymentChoice === "online" ? "#f0f8f6" : "#fff",
+                        cursor: "pointer",
+                      }}
+                    >
+                      <input
+                        type="radio"
+                        name="paymentChoice"
+                        value="online"
+                        checked={paymentChoice === "online"}
+                        onChange={() => setPaymentChoice("online")}
+                        style={{ marginTop: "3px" }}
+                      />
+                      <div>
+                        <strong>Pay online now</strong>
+                        <p style={{ margin: "0.2rem 0 0", fontSize: "0.85rem", color: "#5d6e69" }}>
+                          Instant confirmation via Razorpay (UPI, card, netbanking).
+                        </p>
+                      </div>
+                    </label>
+
+                    <label
+                      style={{
+                        display: "flex",
+                        alignItems: "flex-start",
+                        gap: "0.6rem",
+                        padding: "0.8rem",
+                        borderRadius: "8px",
+                        border: paymentChoice === "at-clinic" ? "2px solid #137a76" : "1px solid #dbe5e1",
+                        background: paymentChoice === "at-clinic" ? "#f0f8f6" : "#fff",
+                        cursor: "pointer",
+                      }}
+                    >
+                      <input
+                        type="radio"
+                        name="paymentChoice"
+                        value="at-clinic"
+                        checked={paymentChoice === "at-clinic"}
+                        onChange={() => setPaymentChoice("at-clinic")}
+                        style={{ marginTop: "3px" }}
+                      />
+                      <div>
+                        <strong>Pay at clinic</strong>
+                        <p style={{ margin: "0.2rem 0 0", fontSize: "0.85rem", color: "#5d6e69" }}>
+                          Confirmed immediately; settle at reception upon arrival.
+                        </p>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+              )}
             </SectionPanel>
           </section>
+
           <aside className="booking-summary">
             <span className="eyebrow">Appointment summary</span>
             <h2>Dr. {dentist.user?.name}</h2>
@@ -928,11 +1130,18 @@ export function AppointmentBooking() {
               <span>Total due</span>
               <strong>{rupees(totalFee)}</strong>
             </div>
-            <p className="summary-note">
-              The server-set appointment fees are used for payment; the order
-              amount comes directly from Razorpay configuration. Appointment
-              coupons are not available for this booking.
-            </p>
+
+            {paymentChoice === "online" && (
+              <p className="summary-note">
+                Your slot is held for 15 minutes while completing online payment. Cancellation refunds follow clinic policy.
+              </p>
+            )}
+            {paymentChoice === "at-clinic" && (
+              <p className="summary-note">
+                Your appointment will be confirmed immediately. Payment of {rupees(totalFee)} is collected at the front desk before consultation.
+              </p>
+            )}
+
             {message && (
               <div
                 className={`notice ${stage === "confirmed" ? "notice-success" : stage === "failed" || stage === "not-confirmed" ? "notice-error" : "notice-warn"}`}
@@ -966,7 +1175,9 @@ export function AppointmentBooking() {
               >
                 {busy
                   ? resultLabel || "Working…"
-                  : "Continue to secure payment"}{" "}
+                  : paymentChoice === "at-clinic"
+                    ? "Confirm booking (Pay at clinic)"
+                    : "Continue to secure payment"}{" "}
                 <ArrowRight size={16} />
               </button>
             )}
@@ -1199,13 +1410,157 @@ export function PatientRecords() {
   );
 }
 
-export function PatientCare() {
+export function PatientTreatmentPlans() {
   const user = useAuthStore((state) => state.user);
   const plans = useQuery({
-    queryKey: ["plans"],
+    queryKey: ["patient-plans", user?._id],
     queryFn: api.plans.mine,
     ...queryOptions,
   });
+  const planItems = plans.data?.data || [];
+
+  return (
+    <div>
+      <PageTitle
+        eyebrow="Clinical care plan"
+        title="Treatment plans"
+        description="Review planned dental procedures, completed steps, and estimated visit costs."
+        actions={
+          <Link to="/app/dental-chart" className="button button-outline">
+            View dental chart <ArrowRight size={15} />
+          </Link>
+        }
+      />
+
+      {plans.isError && (
+        <div className="notice notice-error" role="alert" style={{ marginBottom: "1.5rem" }}>
+          <strong>Could not load treatment plans.</strong>
+          <p style={{ marginTop: "0.3rem" }}>{plans.error?.message || "An unexpected error occurred while communicating with the clinic server."}</p>
+          <button
+            type="button"
+            className="button button-outline button-small"
+            style={{ marginTop: "0.6rem" }}
+            onClick={() => plans.refetch()}
+          >
+            Retry loading plans
+          </button>
+        </div>
+      )}
+
+      <AsyncView
+        query={plans}
+        empty={!plans.isLoading && !plans.isError && !planItems.length}
+        emptyTitle="No treatment plans on record"
+      >
+        <div className="plan-list">
+          {planItems.map((plan) => {
+            const steps = plan.steps || [];
+            const totalSteps = steps.length;
+            const completedSteps = steps.filter((s) => s.status === "completed").length;
+            const progressPct = totalSteps > 0 ? Math.round((completedSteps / totalSteps) * 100) : 0;
+            const completedCost = steps
+              .filter((s) => s.status === "completed")
+              .reduce((sum, s) => sum + Number(s.cost || 0), 0);
+            const totalCost = plan.totalEstimatedCost ?? steps.reduce((sum, s) => sum + Number(s.cost || 0), 0);
+
+            return (
+              <article className="plan-card" key={plan._id} style={{ marginBottom: "1.5rem" }}>
+                <div className="section-panel-heading">
+                  <div>
+                    <h3>{plan.title || "Dental Treatment Plan"}</h3>
+                    <p>
+                      Dr. {plan.dentist?.user?.name || plan.dentist?.name || "Attending Dentist"} ·{" "}
+                      {fmtDate(plan.createdAt)}
+                    </p>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                    {plan.requiresFollowUp && (
+                      <span className="status-badge status-warn" style={{ fontSize: "0.8rem" }}>
+                        Follow-up: {plan.followUpDate ? fmtDate(plan.followUpDate) : "Required"}
+                      </span>
+                    )}
+                    <StatusBadge value={plan.status} />
+                  </div>
+                </div>
+
+                {/* Progress bar and cost summary */}
+                <div style={{ margin: "1rem 0", padding: "0.8rem", background: "#f8faf9", borderRadius: "8px", border: "1px solid #e7eeeb" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.85rem", marginBottom: "0.4rem" }}>
+                    <span>
+                      Progress: <strong>{completedSteps} of {totalSteps} steps completed</strong> ({progressPct}%)
+                    </span>
+                    <span>
+                      Cost: <strong>{rupees(completedCost)}</strong> of {rupees(totalCost)}
+                    </span>
+                  </div>
+                  <div style={{ width: "100%", height: "8px", background: "#dbe5e1", borderRadius: "4px", overflow: "hidden" }}>
+                    <div
+                      style={{
+                        width: `${progressPct}%`,
+                        height: "100%",
+                        background: progressPct === 100 ? "#2a9d8f" : "#137a76",
+                        transition: "width 0.3s ease",
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {plan.notes && (
+                  <p style={{ margin: "0.8rem 0", color: "#495a55", fontSize: "0.9rem" }}>
+                    <strong>Clinical notes:</strong> {plan.notes}
+                  </p>
+                )}
+
+                <div className="plan-steps" style={{ marginTop: "1rem" }}>
+                  <h4 style={{ fontSize: "0.95rem", marginBottom: "0.5rem" }}>Treatment Steps</h4>
+                  {steps.map((step, idx) => (
+                    <div className="plan-step" key={step._id || idx} style={{ display: "flex", alignItems: "center", gap: "0.8rem", padding: "0.6rem 0", borderBottom: "1px solid #f0f4f2" }}>
+                      <span className="step-check">
+                        {step.status === "completed" ? (
+                          <Check size={16} color="#2a9d8f" />
+                        ) : (
+                          <Clock3 size={16} color="#8c9b96" />
+                        )}
+                      </span>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                          <strong>
+                            {step.treatment?.name || step.name || "Treatment Procedure"}
+                          </strong>
+                          <StatusBadge value={step.status} />
+                        </div>
+                        <small style={{ color: "#6b7d78" }}>
+                          {step.teeth?.length ? `Teeth: ${step.teeth.join(", ")}` : "Teeth: General"} · {rupees(step.cost)}
+                        </small>
+                      </div>
+
+                      {step.appointment && (
+                        <Link
+                          to={`/app/appointments/${step.appointment?._id || step.appointment}`}
+                          className="button button-quiet button-small"
+                        >
+                          Linked visit <ArrowRight size={13} />
+                        </Link>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                <div className="plan-total" style={{ marginTop: "1rem", paddingTop: "0.8rem", borderTop: "1px solid #e7eeeb", display: "flex", justifyContent: "space-between" }}>
+                  <span>Total Estimated Plan Cost</span>
+                  <strong>{rupees(totalCost)}</strong>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      </AsyncView>
+    </div>
+  );
+}
+
+export function PatientDentalChart() {
+  const user = useAuthStore((state) => state.user);
   const chart = useQuery({
     queryKey: ["chart", user?._id],
     queryFn: () => api.charts.get(user._id),
@@ -1214,17 +1569,22 @@ export function PatientCare() {
   });
   const teeth = chart.data?.data?.teeth || [];
   const toothMap = new Map(teeth.map((tooth) => [tooth.toothNumber, tooth]));
-  const planItems = plans.data?.data || [];
+
   return (
     <div>
       <PageTitle
-        eyebrow="Your clinical overview"
-        title="Care & dental chart"
-        description="Review treatment plans and see the current chart shared by your dentist."
+        eyebrow="Clinical chart"
+        title="32-Tooth dental chart"
+        description="Interactive adult FDI notation dental record shared by your dentist."
+        actions={
+          <Link to="/app/treatment-plans" className="button button-outline">
+            ← Treatment plans
+          </Link>
+        }
       />
       <SectionPanel
-        title="Dental chart"
-        description="A healthy state is shown where no condition has been recorded."
+        title="Tooth-by-tooth record"
+        description="A healthy status is shown where no clinical findings have been logged."
       >
         <div className="tooth-chart" aria-label="32-tooth dental chart">
           {[0, 1].map((row) => (
@@ -1249,66 +1609,17 @@ export function PatientCare() {
             </div>
           ))}
         </div>
-        <p className="chart-legend">
-          <span /> Recorded finding <span className="legend-healthy" /> No
-          finding recorded
+        <p className="chart-legend" style={{ marginTop: "1rem" }}>
+          <span style={{ display: "inline-block", width: "12px", height: "12px", background: "#f27d52", borderRadius: "2px", marginRight: "4px" }} /> Recorded finding{" "}
+          <span className="legend-healthy" style={{ display: "inline-block", width: "12px", height: "12px", background: "#dbe5e1", borderRadius: "2px", margin: "0 4px 0 16px" }} /> Healthy / no finding
         </p>
       </SectionPanel>
-      <section className="records-section">
-        <h2>Treatment plans</h2>
-        <AsyncView
-          query={plans}
-          empty={!plans.isLoading && !plans.isError && !planItems.length}
-          emptyTitle="No treatment plans yet"
-        >
-          <div className="plan-list">
-            {planItems.map((plan) => (
-              <article className="plan-card" key={plan._id}>
-                <div className="section-panel-heading">
-                  <div>
-                    <h3>{plan.title}</h3>
-                    <p>
-                      Dr. {plan.dentist?.user?.name || "Your dentist"} ·{" "}
-                      {fmtDate(plan.createdAt)}
-                    </p>
-                  </div>
-                  <StatusBadge value={plan.status} />
-                </div>
-                {plan.notes && <p>{plan.notes}</p>}
-                <div className="plan-steps">
-                  {(plan.steps || []).map((step) => (
-                    <div className="plan-step" key={step._id}>
-                      <span className="step-check">
-                        {step.status === "completed" ? (
-                          <Check size={14} />
-                        ) : (
-                          <Clock3 size={14} />
-                        )}
-                      </span>
-                      <span>
-                        <strong>
-                          {step.treatment?.name ||
-                            step.name ||
-                            "Treatment step"}
-                        </strong>
-                        <small>
-                          {step.status} · {rupees(step.cost)}
-                        </small>
-                      </span>
-                    </div>
-                  ))}
-                </div>
-                <div className="plan-total">
-                  Estimated plan cost{" "}
-                  <strong>{rupees(plan.totalEstimatedCost)}</strong>
-                </div>
-              </article>
-            ))}
-          </div>
-        </AsyncView>
-      </section>
     </div>
   );
+}
+
+export function PatientCare() {
+  return <Navigate to="/app/treatment-plans" replace />;
 }
 
 export function PatientBilling() {

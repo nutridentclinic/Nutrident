@@ -5,7 +5,7 @@ const invoiceSchema = new mongoose.Schema(
     invoiceNumber: { type: String, required: true, unique: true },
     patient: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     dentist: { type: mongoose.Schema.Types.ObjectId, ref: 'Dentist', default: null },
-    appointment: { type: mongoose.Schema.Types.ObjectId, ref: 'Appointment', default: null },
+    appointment: { type: mongoose.Schema.Types.ObjectId, ref: 'Appointment', default: null, index: { unique: true, sparse: true } },
 
     items: [
       {

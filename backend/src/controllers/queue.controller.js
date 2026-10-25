@@ -1,27 +1,49 @@
 const Queue = require('../models/Queue');
 const Dentist = require('../models/Dentist');
+const Appointment = require('../models/Appointment');
+const User = require('../models/User');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/appError');
 const { success } = require('../utils/response');
-const { notify } = require('../services/notification.service');
+const { notify, notifyUser, notifyRoles } = require('../services/notification.service');
 const canAccessDentistQueue = require('../utils/queueAccess');
-const { getClinicDateTime } = require('../utils/appointmentAccess');
+const { todayInClinic, parseDateOnly } = require('../utils/clinicDate');
 
 const startOfDay = (date) => {
-  const dateKey = typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)
-    ? date
-    : getClinicDateTime(date || new Date()).date;
-  return new Date(`${dateKey}T00:00:00.000Z`);
+  if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return parseDateOnly(date);
+  }
+  return parseDateOnly(todayInClinic());
 };
 
-// @route POST /api/queue/check-in  (receptionist checks in a walk-in or arriving patient)
+// @route POST /api/queue/check-in  (receptionist checks in an arriving registered patient)
 exports.checkIn = catchAsync(async (req, res, next) => {
   const { dentistId, patientId, walkInName, appointmentId, date } = req.body;
-  if (!patientId && !String(walkInName || '').trim()) {
-    return next(new AppError('patientId or walkInName is required.', 400));
+
+  if (walkInName !== undefined && String(walkInName).trim() !== '') {
+    return next(new AppError('Walk-in registration is disabled. Check-in works only for registered patients.', 400));
   }
 
-  const primaryDentist = await Dentist.findOne();
+  let resolvedPatientId = patientId;
+  let resolvedAppointmentId = appointmentId || null;
+
+  if (!resolvedPatientId && appointmentId) {
+    const appt = await Appointment.findById(appointmentId);
+    if (!appt) return next(new AppError('Appointment not found.', 404));
+    resolvedPatientId = appt.patient;
+    resolvedAppointmentId = appt._id;
+  }
+
+  if (!resolvedPatientId) {
+    return next(new AppError('patientId or appointmentId is required for check-in.', 400));
+  }
+
+  const patientUser = await User.findById(resolvedPatientId);
+  if (!patientUser) {
+    return next(new AppError('Patient account not found.', 404));
+  }
+
+  const primaryDentist = await Dentist.findOne().populate('user');
   if (!primaryDentist) {
     return next(new AppError('No dentist is configured for this clinic.', 404));
   }
@@ -31,7 +53,7 @@ exports.checkIn = catchAsync(async (req, res, next) => {
   const resolvedDentistId = primaryDentist._id;
   const dentist = primaryDentist;
 
-  const day = startOfDay(date || new Date());
+  const day = startOfDay(date);
   const avgConsultMinutes = dentist?.slotDurationMinutes || 15;
   const waitingCount = await Queue.countDocuments({ dentist: resolvedDentistId, date: day, status: 'waiting' });
   let entry;
@@ -41,9 +63,9 @@ exports.checkIn = catchAsync(async (req, res, next) => {
     try {
       entry = await Queue.create({
         dentist: resolvedDentistId,
-        patient: patientId || null,
-        walkInName: walkInName?.trim() || null,
-        appointment: appointmentId || null,
+        patient: resolvedPatientId,
+        walkInName: null,
+        appointment: resolvedAppointmentId,
         tokenNumber,
         date: day,
         estimatedWaitMinutes: waitingCount * avgConsultMinutes,
@@ -56,15 +78,29 @@ exports.checkIn = catchAsync(async (req, res, next) => {
 
   req.app.get('io')?.to(`queue_${resolvedDentistId}`).emit('queue:updated', { action: 'check-in', entry });
 
-  if (patientId) {
-    await notify({
-      userId: patientId,
-      title: 'Checked In',
-      message: `You're checked in. Your token number is ${entry.tokenNumber}. Estimated wait: ${entry.estimatedWaitMinutes} min.`,
-      type: 'queue_update',
+  await notifyUser(resolvedPatientId, {
+    title: 'Checked In',
+    message: `You're checked in. Your token number is ${entry.tokenNumber}. Estimated wait: ${entry.estimatedWaitMinutes} min.`,
+    type: 'queue_update',
+    relatedId: entry._id,
+  });
+
+  if (dentist?.user) {
+    const dentistUserId = dentist.user._id || dentist.user;
+    await notifyUser(dentistUserId, {
+      title: 'Patient Checked In',
+      message: `${patientUser.name || 'Patient'} has checked in (Token ${entry.tokenNumber}).`,
+      type: 'patient_checked_in',
       relatedId: entry._id,
     });
   }
+
+  await notifyRoles(['receptionist'], {
+    title: 'Patient Checked In',
+    message: `${patientUser.name || 'Patient'} checked in (Token ${entry.tokenNumber}).`,
+    type: 'patient_checked_in',
+    relatedId: entry._id,
+  });
 
   success(res, 201, 'Checked in successfully.', entry);
 });

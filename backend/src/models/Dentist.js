@@ -23,6 +23,8 @@ const dentistSchema = new mongoose.Schema(
     clinic: { type: mongoose.Schema.Types.ObjectId, ref: 'Clinic', default: null },
     isVerified: { type: Boolean, default: false }, // admin approves credentials
     isActive: { type: Boolean, default: true }, // can toggle "accepting appointments"
+    pausedReason: { type: String, default: '' },
+    pausedUntil: { type: Date, default: null },
     ratingAverage: { type: Number, default: 0, min: 0, max: 5 },
     ratingCount: { type: Number, default: 0 },
 

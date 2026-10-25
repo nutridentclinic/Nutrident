@@ -12,6 +12,7 @@ const { notify } = require('../services/notification.service');
 const logger = require('../utils/logger');
 const { processRefund } = require('../services/payment.service');
 const safeCompareHex = require('../utils/safeCompareHex');
+const { dayRange, parseDateOnly } = require('../utils/clinicDate');
 
 // @route POST /api/payments/create-order
 // Body: { appointmentId }  -> creates a Razorpay order for that appointment's total amount
@@ -329,11 +330,20 @@ exports.getAllPayments = catchAsync(async (req, res) => {
   if (patientId) filter.patient = patientId;
   if (from || to) {
     filter.createdAt = {};
-    if (from) filter.createdAt.$gte = new Date(from);
+    if (from) {
+      try {
+        filter.createdAt.$gte = parseDateOnly(from);
+      } catch {
+        filter.createdAt.$gte = new Date(from);
+      }
+    }
     if (to) {
-      const end = new Date(to);
-      end.setDate(end.getDate() + 1);
-      filter.createdAt.$lt = end;
+      try {
+        filter.createdAt.$lt = dayRange(to).end;
+      } catch {
+        const end = new Date(to);
+        filter.createdAt.$lt = new Date(end.getTime() + 24 * 60 * 60 * 1000);
+      }
     }
   }
 

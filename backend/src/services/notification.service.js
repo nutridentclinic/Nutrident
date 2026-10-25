@@ -73,4 +73,16 @@ const notify = async ({ userId, title, message, type, relatedId = null }) => {
   return inApp;
 };
 
-module.exports = { notify, sendPush };
+const notifyUser = async (userId, payload) => {
+  return notify({ userId, ...payload });
+};
+
+const notifyRoles = async (roles, payload) => {
+  const roleList = Array.isArray(roles) ? roles : [roles];
+  const users = await User.find({ role: { $in: roleList } }).select('_id');
+  return Promise.all(
+    users.map((u) => notify({ userId: u._id, ...payload }))
+  );
+};
+
+module.exports = { notify, sendPush, notifyUser, notifyRoles };

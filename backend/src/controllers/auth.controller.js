@@ -615,6 +615,7 @@ exports.updatePassword = catchAsync(async (req, res, next) => {
   }
   user.password = req.body.newPassword;
   user.passwordChangedAt = new Date();
+  user.mustChangePassword = false;
   user.tokenVersion = (user.tokenVersion || 0) + 1; // Invalidate other sessions
   await user.save();
 

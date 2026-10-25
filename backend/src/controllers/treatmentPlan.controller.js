@@ -1,4 +1,5 @@
 const TreatmentPlan = require('../models/TreatmentPlan');
+const Treatment = require('../models/Treatment');
 const Dentist = require('../models/Dentist');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/appError');
@@ -13,12 +14,25 @@ exports.createPlan = catchAsync(async (req, res, next) => {
   const { patientId, title, notes, steps, followUpRequired, followUpDate } = req.body;
   const totalEstimatedCost = (steps || []).reduce((sum, s) => sum + (s.cost || 0), 0);
 
+  const treatmentIds = (steps || []).map((s) => s.treatment).filter(Boolean);
+  const treatments = treatmentIds.length > 0 ? await Treatment.find({ _id: { $in: treatmentIds } }) : [];
+  const treatmentMap = new Map(treatments.map((t) => [String(t._id), t]));
+
+  const enrichedSteps = (steps || []).map((s) => {
+    const t = s.treatment ? treatmentMap.get(String(s.treatment)) : null;
+    return {
+      ...s,
+      name: s.name || t?.name || 'Dental Procedure',
+      defaultCost: s.defaultCost !== undefined ? s.defaultCost : (t?.defaultCost || s.cost || 0),
+    };
+  });
+
   const plan = await TreatmentPlan.create({
     patient: patientId,
     dentist: dentist._id,
     title,
     notes,
-    steps,
+    steps: enrichedSteps,
     totalEstimatedCost,
     followUpRequired,
     followUpDate,
@@ -38,15 +52,18 @@ exports.createPlan = catchAsync(async (req, res, next) => {
 // @route GET /api/treatment-plans/me  (patient)
 exports.getMyPlans = catchAsync(async (req, res) => {
   const plans = await TreatmentPlan.find({ patient: req.user._id })
-    .populate({ path: 'dentist', populate: { path: 'user', select: 'name' } })
-    .populate('steps.treatment')
+    .populate({ path: 'dentist', populate: { path: 'user', select: 'name profilePhoto' }, options: { strictPopulate: false } })
+    .populate({ path: 'steps.treatment', options: { strictPopulate: false } })
     .sort('-createdAt');
   success(res, 200, 'Treatment plans fetched.', plans);
 });
 
 // @route GET /api/treatment-plans/patient/:patientId  (dentist/receptionist)
 exports.getPatientPlans = catchAsync(async (req, res) => {
-  const plans = await TreatmentPlan.find({ patient: req.params.patientId }).populate('steps.treatment').sort('-createdAt');
+  const plans = await TreatmentPlan.find({ patient: req.params.patientId })
+    .populate({ path: 'dentist', populate: { path: 'user', select: 'name profilePhoto' }, options: { strictPopulate: false } })
+    .populate({ path: 'steps.treatment', options: { strictPopulate: false } })
+    .sort('-createdAt');
   success(res, 200, 'Treatment plans fetched.', plans);
 });
 

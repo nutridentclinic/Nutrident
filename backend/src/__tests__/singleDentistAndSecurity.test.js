@@ -259,7 +259,7 @@ describe('Workstream B & D Integration Tests', () => {
       });
       const staffToken = signAccessToken({ id: receptionist._id, role: 'receptionist', tv: 0 });
 
-      // 1. Register walk-in patient (POST /api/patients)
+      // 1. Staff walk-in registration (POST /api/patients) is disabled per S1
       const regRes = await request(app)
         .post('/api/patients')
         .set('Authorization', `Bearer ${staffToken}`)
@@ -268,8 +268,18 @@ describe('Workstream B & D Integration Tests', () => {
           phone: '9876543210',
           gender: 'female',
         });
-      expect(regRes.status).toBe(201);
-      const walkInUserId = regRes.body.data.user._id;
+      expect(regRes.status).toBe(400);
+
+      // Create a registered patient account
+      const registeredPatient = await User.create({
+        name: 'Registered Patient',
+        phone: '9876543210',
+        email: 'regpatient@clinic.test',
+        password: 'Password123!',
+        role: 'patient',
+        isEmailVerified: true,
+      });
+      const walkInUserId = registeredPatient._id;
 
       // 2. Book appointment via POST /api/appointments/staff
       const d = new Date();

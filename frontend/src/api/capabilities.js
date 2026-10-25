@@ -83,4 +83,41 @@ export const detectStaffBookingCapability = async () => {
   }
 }
 
+export const fetchAvailabilityRangeWithFallback = async (from, to, dentistId) => {
+  try {
+    const res = await client.get('/dentists/primary/availability', { params: { from, to } })
+    return res.data?.data || []
+  } catch (err) {
+    if (err.status === 404 || err.status === 400) {
+      // If deployed backend doesn't have the range endpoint yet, fall back to individual daily slot queries
+      return null
+    }
+    throw err
+  }
+}
+
+export const fetchWeeklyAppointmentsWithFallback = async (params = {}) => {
+  try {
+    const res = await client.get('/dashboard/admin/appointments-weekly', { params })
+    return res.data?.data || null
+  } catch (err) {
+    if (err.status === 404) {
+      return null
+    }
+    throw err
+  }
+}
+
+export const fetchPatientSummaryWithFallback = async (id) => {
+  try {
+    const res = await client.get(`/patients/${id}/summary`)
+    return res.data?.data || null
+  } catch (err) {
+    if (err.status === 404) {
+      return null
+    }
+    throw err
+  }
+}
+
 export default capabilities

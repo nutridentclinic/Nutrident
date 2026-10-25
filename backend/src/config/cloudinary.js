@@ -29,10 +29,10 @@ function isPlaceholder(val) {
   return EXACT_PLACEHOLDERS.has(val.toLowerCase());
 }
 
-function getNormalizedCloudinaryConfig() {
-  const cloud_name = normalizeValue(process.env.CLOUDINARY_CLOUD_NAME);
-  const api_key = normalizeValue(process.env.CLOUDINARY_API_KEY);
-  const api_secret = normalizeValue(process.env.CLOUDINARY_API_SECRET);
+function getNormalizedCloudinaryConfig(env = process.env) {
+  const cloud_name = normalizeValue(env.CLOUDINARY_CLOUD_NAME);
+  const api_key = normalizeValue(env.CLOUDINARY_API_KEY);
+  const api_secret = normalizeValue(env.CLOUDINARY_API_SECRET);
 
   const missing = [];
   if (!cloud_name || isPlaceholder(cloud_name)) {

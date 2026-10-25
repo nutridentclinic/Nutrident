@@ -10,7 +10,6 @@ import {
   FileText,
   Plus,
   Search,
-  UserPlus,
   Users,
   Wallet,
   X,
@@ -31,15 +30,10 @@ import {
   useConfirm,
   useToast,
 } from "../components/ui.jsx";
+import { formatClinicDate } from "../utils/formatDate.js";
 
 const rupees = (amount) => `₹${Number(amount || 0).toLocaleString("en-IN")}`;
-const fmtDate = (date) =>
-  date
-    ? new Date(date).toLocaleDateString("en-IN", {
-        dateStyle: "medium",
-        timeZone: "UTC",
-      })
-    : "Date not set";
+const fmtDate = (date) => (date ? formatClinicDate(date) : "Date not set");
 
 export function ReceptionDashboard() {
   const stats = useQuery({
@@ -148,19 +142,6 @@ export function AppointmentLookup() {
 
   const primary = usePrimaryDentist();
 
-  // Walk-in modal state
-  const [showWalkInModal, setShowWalkInModal] = useState(false);
-  const [walkInBusy, setWalkInBusy] = useState(false);
-  const [walkInForm, setWalkInForm] = useState({
-    name: "",
-    phone: "",
-    email: "",
-    gender: "other",
-    bloodGroup: "",
-    dateOfBirth: "",
-    address: "",
-  });
-
   // Staff booking modal state
   const [showBookingModal, setShowBookingModal] = useState(false);
   const [bookingBusy, setBookingBusy] = useState(false);
@@ -205,40 +186,6 @@ export function AppointmentLookup() {
     queryFn: () => api.patients.list({ search: patientSearchTerm, limit: 8 }),
     enabled: showBookingModal && patientSearchTerm.length >= 2,
   });
-
-  const handleRegisterWalkIn = async (e) => {
-    e.preventDefault();
-    if (!walkInForm.name.trim() || !walkInForm.phone.trim()) {
-      notify("Patient name and phone number are required.", "error");
-      return;
-    }
-    setWalkInBusy(true);
-    try {
-      const res = await api.patients.createWalkIn(walkInForm);
-      notify(res.message || "Walk-in patient registered successfully.", "success");
-      const createdPatient = res.data;
-      setShowWalkInModal(false);
-      setWalkInForm({
-        name: "",
-        phone: "",
-        email: "",
-        gender: "other",
-        bloodGroup: "",
-        dateOfBirth: "",
-        address: "",
-      });
-      queryClient.invalidateQueries({ queryKey: ["patients"] });
-      // Optionally preselect for booking immediately
-      if (createdPatient) {
-        setSelectedPatient(createdPatient);
-        setShowBookingModal(true);
-      }
-    } catch (err) {
-      notify(err.message || "Failed to register walk-in patient.", "error");
-    } finally {
-      setWalkInBusy(false);
-    }
-  };
 
   const handleStaffBooking = async (e) => {
     e.preventDefault();
@@ -338,22 +285,13 @@ export function AppointmentLookup() {
         title="Appointment lookup"
         description="Review appointments for a clinic date or open a specific visit by ID."
         actions={
-          <div style={{ display: "flex", gap: "0.5rem" }}>
-            <button
-              type="button"
-              className="button button-outline"
-              onClick={() => setShowWalkInModal(true)}
-            >
-              <UserPlus size={15} /> Register walk-in
-            </button>
-            <button
-              type="button"
-              className="button button-primary"
-              onClick={() => setShowBookingModal(true)}
-            >
-              <Plus size={15} /> New appointment
-            </button>
-          </div>
+          <button
+            type="button"
+            className="button button-primary"
+            onClick={() => setShowBookingModal(true)}
+          >
+            <Plus size={15} /> New appointment
+          </button>
         }
       />
       <div className="filter-bar">
@@ -496,107 +434,6 @@ export function AppointmentLookup() {
         </AsyncView>
       )}
 
-      {/* Walk-in patient registration modal */}
-      {showWalkInModal && (
-        <div className="modal-backdrop" onClick={() => setShowWalkInModal(false)}>
-          <div className="modal-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "540px", width: "90%" }}>
-            <div className="modal-header">
-              <h2>Register Walk-in Patient</h2>
-              <button
-                type="button"
-                className="icon-button"
-                aria-label="Close"
-                onClick={() => setShowWalkInModal(false)}
-              >
-                <X size={18} />
-              </button>
-            </div>
-            <form onSubmit={handleRegisterWalkIn} className="admin-form-grid" style={{ padding: "1.2rem" }}>
-              <Field label="Full name *">
-                <TextInput
-                  required
-                  value={walkInForm.name}
-                  onChange={(e) => setWalkInForm({ ...walkInForm, name: e.target.value })}
-                  placeholder="e.g. Ramesh Kumar"
-                />
-              </Field>
-              <Field label="Phone number *">
-                <TextInput
-                  required
-                  type="tel"
-                  value={walkInForm.phone}
-                  onChange={(e) => setWalkInForm({ ...walkInForm, phone: e.target.value })}
-                  placeholder="e.g. 9876543210"
-                />
-              </Field>
-              <Field label="Email (optional)">
-                <TextInput
-                  type="email"
-                  value={walkInForm.email}
-                  onChange={(e) => setWalkInForm({ ...walkInForm, email: e.target.value })}
-                  placeholder="name@example.com"
-                />
-              </Field>
-              <Field label="Date of birth">
-                <TextInput
-                  type="date"
-                  value={walkInForm.dateOfBirth}
-                  onChange={(e) => setWalkInForm({ ...walkInForm, dateOfBirth: e.target.value })}
-                />
-              </Field>
-              <Field label="Gender">
-                <TextInput
-                  as="select"
-                  value={walkInForm.gender}
-                  onChange={(e) => setWalkInForm({ ...walkInForm, gender: e.target.value })}
-                >
-                  <option value="male">Male</option>
-                  <option value="female">Female</option>
-                  <option value="other">Other</option>
-                </TextInput>
-              </Field>
-              <Field label="Blood group">
-                <TextInput
-                  as="select"
-                  value={walkInForm.bloodGroup}
-                  onChange={(e) => setWalkInForm({ ...walkInForm, bloodGroup: e.target.value })}
-                >
-                  <option value="">Unknown</option>
-                  <option value="A+">A+</option>
-                  <option value="A-">A-</option>
-                  <option value="B+">B+</option>
-                  <option value="B-">B-</option>
-                  <option value="AB+">AB+</option>
-                  <option value="AB-">AB-</option>
-                  <option value="O+">O+</option>
-                  <option value="O-">O-</option>
-                </TextInput>
-              </Field>
-              <Field label="Address" className="field-wide">
-                <TextInput
-                  value={walkInForm.address}
-                  onChange={(e) => setWalkInForm({ ...walkInForm, address: e.target.value })}
-                  placeholder="Residential address"
-                />
-              </Field>
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.5rem", marginTop: "1rem" }} className="field-wide">
-                <button
-                  type="button"
-                  className="button button-quiet"
-                  onClick={() => setShowWalkInModal(false)}
-                  disabled={walkInBusy}
-                >
-                  Cancel
-                </button>
-                <button type="submit" className="button button-primary" disabled={walkInBusy}>
-                  {walkInBusy ? "Registering…" : "Register Patient"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
       {/* Staff appointment booking modal */}
       {showBookingModal && (
         <div className="modal-backdrop" onClick={() => setShowBookingModal(false)}>
@@ -653,6 +490,26 @@ export function AppointmentLookup() {
                             <small>{p.phone || p.user?.phone}</small>
                           </div>
                         ))}
+                      </div>
+                    )}
+                    {!patientSearchResults.isLoading && patientSearchTerm.length >= 2 && (!patientSearchResults.data?.data || patientSearchResults.data.data.length === 0) && (
+                      <div className="notice notice-info" style={{ marginTop: "0.5rem" }}>
+                        <p style={{ margin: 0, fontSize: "0.85rem" }}>
+                          <strong>No registered patient found.</strong> Walk-in registration is disabled to ensure verified patient accounts.
+                        </p>
+                        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.4rem" }}>
+                          <span style={{ fontSize: "0.8rem" }}>Ask patient to register at: <code>{typeof window !== "undefined" ? window.location.origin : ""}/register</code></span>
+                          <button
+                            type="button"
+                            className="button button-outline button-small"
+                            onClick={() => {
+                              navigator.clipboard?.writeText(`${window.location.origin}/register`);
+                              notify("Registration link copied to clipboard.");
+                            }}
+                          >
+                            Copy link
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -756,6 +613,24 @@ export function InvoiceCreator() {
   const notify = useToast();
   const { confirm, dialog } = useConfirm();
   const primary = usePrimaryDentist();
+
+  // Filters and table state
+  const [status, setStatus] = useState("unpaid");
+  const [filterDate, setFilterDate] = useState("");
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [paidMethod, setPaidMethod] = useState("cash");
+
+  // Selected invoice modal state
+  const [selectedInvoice, setSelectedInvoice] = useState(null);
+  const [extraItems, setExtraItems] = useState([
+    { description: "", quantity: 1, unitPrice: 0 },
+  ]);
+  const [extraCoupon, setExtraCoupon] = useState("");
+  const [updatingItems, setUpdatingItems] = useState(false);
+
+  // Manual non-visit invoice form state
+  const [showManualInvoice, setShowManualInvoice] = useState(false);
   const [form, setForm] = useState({
     patientId: "",
     dentistId: "",
@@ -769,12 +644,18 @@ export function InvoiceCreator() {
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState(null);
   const [previewBusy, setPreviewBusy] = useState(false);
-  const [status, setStatus] = useState("unpaid");
-  const [page, setPage] = useState(1);
-  const [paidMethod, setPaidMethod] = useState("cash");
+
   const invoices = useQuery({
-    queryKey: ["staff-invoices", status, page],
-    queryFn: () => api.invoices.all({ status, page, limit: 20 }),
+    queryKey: ["staff-invoices", status, filterDate, search, page],
+    queryFn: () =>
+      api.invoices.all({
+        status: status || undefined,
+        from: filterDate || undefined,
+        to: filterDate || undefined,
+        search: search.trim() || undefined,
+        page,
+        limit: 20,
+      }),
   });
   const invoiceRows = invoices.data?.data || [];
   const subtotal = items.reduce(
@@ -782,6 +663,7 @@ export function InvoiceCreator() {
       total + Number(item.quantity || 0) * Number(item.unitPrice || 0),
     0,
   );
+
   const create = async (event) => {
     event.preventDefault();
     setBusy(true);
@@ -834,7 +716,7 @@ export function InvoiceCreator() {
   const markPaid = async (entry) => {
     const accepted = await confirm({
       title: `Mark invoice ${entry.invoiceNumber} as paid?`,
-      description: "Only use this after confirming that payment was collected by the clinic.",
+      description: "Only use this after confirming that payment was collected by the clinic counter.",
       confirmLabel: "Record payment",
     });
     if (!accepted) return;
@@ -842,17 +724,22 @@ export function InvoiceCreator() {
       const result = await api.invoices.markPaid(entry._id, paidMethod);
       notify(result.message);
       queryClient.invalidateQueries({ queryKey: ["staff-invoices"] });
+      if (selectedInvoice && selectedInvoice._id === entry._id) {
+        setSelectedInvoice({ ...selectedInvoice, status: "paid", paymentMethod: paidMethod });
+      }
     } catch (error) {
       notify(error.message, "error");
     }
   };
+
   return (
     <div>
       <PageTitle
         eyebrow="Billing desk"
-        title="Create an invoice"
-        description="Enter the clinic’s charge items; tax, discount and final totals are calculated by the server."
+        title="Invoices & Payments"
+        description="Review auto-generated visit invoices, collect payments at counter, add extra procedure items, or issue manual invoices for non-visit charges."
       />
+
       {invoice && (
         <div className="notice notice-success">
           <Check size={17} /> Invoice {invoice.invoiceNumber} created. Server
@@ -860,159 +747,520 @@ export function InvoiceCreator() {
           <strong>{` ₹${Number(invoice.totalAmount || 0).toLocaleString("en-IN")}`}</strong>
         </div>
       )}
-      <SectionPanel title="Invoice details">
-        <form className="stack-form" onSubmit={create}>
-          <div className="admin-form-grid">
-            <Field label="Patient account ID">
-              <TextInput
-                required
-                value={form.patientId}
-                onChange={(event) =>
-                  setForm({ ...form, patientId: event.target.value })
-                }
-              />
-            </Field>
-            <Field label="Doctor">
-              <TextInput
-                disabled
-                value={
-                  primary.dentist
-                    ? `Dr. ${primary.dentist.user?.name || "Doctor"} (${primary.dentist.specialization || "Dental Care"})`
-                    : "Primary Clinic Doctor"
-                }
-              />
-            </Field>
-            <Field label="Appointment ID (optional)">
-              <TextInput
-                value={form.appointmentId}
-                onChange={(event) =>
-                  setForm({ ...form, appointmentId: event.target.value })
-                }
-              />
-            </Field>
-            <Field label="Coupon code (optional)">
-              <div className="inline-form">
-                <TextInput
-                  value={form.couponCode}
-                  onChange={(event) => {
-                    setPreview(null);
-                    setForm({ ...form, couponCode: event.target.value.toUpperCase() });
-                  }}
-                />
-                <button type="button" className="button button-quiet button-small" onClick={previewCoupon} disabled={previewBusy || !form.couponCode}>
-                  {previewBusy ? "Checking…" : "Preview"}
-                </button>
-              </div>
-            </Field>
+
+      {/* Main invoices list with multi-parameter filter */}
+      <SectionPanel
+        title="Clinic invoices"
+        description="Consultation invoices are auto-created when appointments are completed. Filter by payment status, date, or patient."
+      >
+        <div className="filter-bar">
+          <Field label="Status">
+            <TextInput
+              as="select"
+              value={status}
+              onChange={(event) => {
+                setStatus(event.target.value);
+                setPage(1);
+              }}
+            >
+              <option value="">All statuses</option>
+              <option value="unpaid">Unpaid</option>
+              <option value="paid">Paid</option>
+              <option value="refunded">Refunded</option>
+            </TextInput>
+          </Field>
+          <Field label="Date">
+            <TextInput
+              type="date"
+              value={filterDate}
+              onChange={(event) => {
+                setFilterDate(event.target.value);
+                setPage(1);
+              }}
+            />
+          </Field>
+          <Field label="Patient / Invoice search">
+            <TextInput
+              placeholder="Search by patient name, phone, or invoice #"
+              value={search}
+              onChange={(event) => {
+                setSearch(event.target.value);
+                setPage(1);
+              }}
+            />
+          </Field>
+          <Field label="Counter payment method">
+            <TextInput
+              as="select"
+              value={paidMethod}
+              onChange={(event) => setPaidMethod(event.target.value)}
+            >
+              <option value="cash">Cash</option>
+              <option value="card">Card</option>
+              <option value="upi">UPI</option>
+              <option value="bank-transfer">Bank transfer</option>
+            </TextInput>
+          </Field>
+        </div>
+
+        <AsyncView
+          query={invoices}
+          empty={!invoices.isLoading && !invoices.isError && !invoiceRows.length}
+          emptyTitle="No invoices found for this filter"
+        >
+          <div className="record-list">
+            {invoiceRows.map((entry) => (
+              <article className="record-row" key={entry._id}>
+                <span className="record-type-icon">
+                  <FileText size={17} />
+                </span>
+                <div className="record-row-content">
+                  <strong>
+                    {entry.invoiceNumber} · {entry.patient?.name || "Patient"}
+                  </strong>
+                  <span>
+                    {fmtDate(entry.createdAt)} · {entry.items?.length || 0} items
+                    {entry.patient?.phone ? ` · ${entry.patient.phone}` : ""}
+                  </span>
+                </div>
+                <div className="record-row-actions">
+                  <StatusBadge value={entry.status} />
+                  <strong>{rupees(entry.totalAmount)}</strong>
+                  <button
+                    type="button"
+                    className="button button-quiet button-small"
+                    onClick={() => setSelectedInvoice(entry)}
+                  >
+                    View / Edit
+                  </button>
+                  <button
+                    type="button"
+                    className="button button-quiet button-small"
+                    onClick={() =>
+                      downloadPdf(`/invoices/${entry._id}/pdf`, `${entry.invoiceNumber}.pdf`).catch((error) =>
+                        notify(error.message, "error")
+                      )
+                    }
+                  >
+                    <Download size={14} /> PDF
+                  </button>
+                  {entry.status === "unpaid" && (
+                    <button
+                      type="button"
+                      className="button button-outline button-small"
+                      onClick={() => markPaid(entry)}
+                    >
+                      Collect payment
+                    </button>
+                  )}
+                </div>
+              </article>
+            ))}
           </div>
-          <div className="invoice-items-head">
-            <h3>Line items</h3>
+        </AsyncView>
+
+        {invoices.data?.meta?.total > 20 && (
+          <div className="pagination">
             <button
               type="button"
-              className="button button-quiet button-small"
-              onClick={() =>
-                setItems((all) => [
-                  ...all,
-                  { description: "", quantity: 1, unitPrice: 0 },
-                ])
-              }
+              className="button button-outline button-small"
+              disabled={page <= 1}
+              onClick={() => setPage((value) => value - 1)}
             >
-              <Plus size={14} /> Add item
+              Previous
+            </button>
+            <span>
+              Page {page} of {Math.ceil(invoices.data.meta.total / 20)}
+            </span>
+            <button
+              type="button"
+              className="button button-outline button-small"
+              disabled={page >= Math.ceil(invoices.data.meta.total / 20)}
+              onClick={() => setPage((value) => value + 1)}
+            >
+              Next
             </button>
           </div>
-          {items.map((item, index) => (
-            <div className="invoice-item-row" key={index}>
-              <Field label="Description">
-                <TextInput
-                  required
-                  value={item.description}
-                  onChange={(event) =>
-                    setItems((all) =>
-                      all.map((entry, ix) =>
-                        ix === index
-                          ? { ...entry, description: event.target.value }
-                          : entry,
-                      ),
-                    )
-                  }
-                />
-              </Field>
-              <Field label="Quantity">
-                <TextInput
-                  type="number"
-                  min="1"
-                  required
-                  value={item.quantity}
-                  onChange={(event) =>
-                    setItems((all) =>
-                      all.map((entry, ix) =>
-                        ix === index
-                          ? { ...entry, quantity: event.target.value }
-                          : entry,
-                      ),
-                    )
-                  }
-                />
-              </Field>
-              <Field label="Unit price (INR)">
-                <TextInput
-                  type="number"
-                  min="0"
-                  required
-                  value={item.unitPrice}
-                  onChange={(event) =>
-                    setItems((all) =>
-                      all.map((entry, ix) =>
-                        ix === index
-                          ? { ...entry, unitPrice: event.target.value }
-                          : entry,
-                      ),
-                    )
-                  }
-                />
-              </Field>
-              <strong>
-                {rupees(Number(item.quantity) * Number(item.unitPrice))}
-              </strong>
-              {items.length > 1 && (
+        )}
+      </SectionPanel>
+
+      {/* Invoice Detail / Edit Modal */}
+      {selectedInvoice && (
+        <div className="modal-backdrop" onClick={() => setSelectedInvoice(null)}>
+          <div
+            className="modal-dialog"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: "680px", width: "92%" }}
+          >
+            <div className="modal-header">
+              <div>
+                <h2>Invoice {selectedInvoice.invoiceNumber}</h2>
+                <span style={{ fontSize: "0.85rem", color: "#666" }}>
+                  {fmtDate(selectedInvoice.createdAt)} · Patient: {selectedInvoice.patient?.name || "Patient"} ({selectedInvoice.patient?.phone || "N/A"})
+                </span>
+              </div>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="Close"
+                onClick={() => setSelectedInvoice(null)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div style={{ padding: "1.2rem", display: "grid", gap: "1rem" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <StatusBadge value={selectedInvoice.status} />
                 <button
-                  className="button button-quiet button-small"
                   type="button"
+                  className="button button-outline button-small"
                   onClick={() =>
-                    setItems((all) => all.filter((_, ix) => ix !== index))
+                    downloadPdf(
+                      `/invoices/${selectedInvoice._id}/pdf`,
+                      `${selectedInvoice.invoiceNumber}.pdf`
+                    ).catch((err) => notify(err.message, "error"))
                   }
                 >
-                  Remove
+                  <Download size={14} /> Download PDF
                 </button>
+              </div>
+
+              {/* Line items table */}
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", fontSize: "0.9rem", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ borderBottom: "2px solid #e2ece9", textAlign: "left" }}>
+                      <th style={{ padding: "0.5rem" }}>Description</th>
+                      <th style={{ padding: "0.5rem", textAlign: "center" }}>Qty</th>
+                      <th style={{ padding: "0.5rem", textAlign: "right" }}>Unit Price</th>
+                      <th style={{ padding: "0.5rem", textAlign: "right" }}>Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(selectedInvoice.items || []).map((item, idx) => (
+                      <tr key={idx} style={{ borderBottom: "1px solid #f0f4f2" }}>
+                        <td style={{ padding: "0.5rem" }}>{item.description}</td>
+                        <td style={{ padding: "0.5rem", textAlign: "center" }}>{item.quantity}</td>
+                        <td style={{ padding: "0.5rem", textAlign: "right" }}>{rupees(item.unitPrice)}</td>
+                        <td style={{ padding: "0.5rem", textAlign: "right" }}>
+                          <strong>{rupees(item.amount || item.quantity * item.unitPrice)}</strong>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Totals */}
+              <div style={{ display: "grid", gap: "0.3rem", textAlign: "right", borderTop: "1px solid #e2ece9", paddingTop: "0.8rem" }}>
+                <div>Subtotal: <strong>{rupees(selectedInvoice.subTotal)}</strong></div>
+                {selectedInvoice.discount > 0 && (
+                  <div style={{ color: "#1b7340" }}>
+                    Coupon Discount ({selectedInvoice.couponCode || "Applied"}): <strong>-{rupees(selectedInvoice.discount)}</strong>
+                  </div>
+                )}
+                {selectedInvoice.tax > 0 && <div>Tax: <strong>{rupees(selectedInvoice.tax)}</strong></div>}
+                <div style={{ fontSize: "1.1rem" }}>Total Amount: <strong>{rupees(selectedInvoice.totalAmount)}</strong></div>
+              </div>
+
+              {/* If unpaid, allow payment collection or adding extra items */}
+              {selectedInvoice.status === "unpaid" && (
+                <div style={{ borderTop: "1px solid #e2ece9", paddingTop: "1rem", display: "grid", gap: "1rem" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#f8faf9", padding: "0.8rem", borderRadius: "6px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.8rem" }}>
+                      <label style={{ fontSize: "0.85rem", fontWeight: 600 }}>Collect via:</label>
+                      <TextInput
+                        as="select"
+                        value={paidMethod}
+                        onChange={(e) => setPaidMethod(e.target.value)}
+                        style={{ width: "auto" }}
+                      >
+                        <option value="cash">Cash</option>
+                        <option value="card">Card</option>
+                        <option value="upi">UPI</option>
+                        <option value="bank-transfer">Bank transfer</option>
+                      </TextInput>
+                    </div>
+                    <button
+                      type="button"
+                      className="button button-primary"
+                      onClick={async () => {
+                        await markPaid(selectedInvoice);
+                        setSelectedInvoice(null);
+                      }}
+                    >
+                      Record payment
+                    </button>
+                  </div>
+
+                  <div style={{ background: "#fff", border: "1px solid #dbe5e1", borderRadius: "6px", padding: "0.8rem" }}>
+                    <strong style={{ display: "block", marginBottom: "0.5rem" }}>
+                      Add extra procedure line items or coupon (PATCH /invoices/:id/items)
+                    </strong>
+                    {extraItems.map((item, idx) => (
+                      <div key={idx} style={{ display: "grid", gridTemplateColumns: "3fr 1fr 1fr auto", gap: "0.4rem", marginBottom: "0.4rem" }}>
+                        <TextInput
+                          placeholder="Item description"
+                          value={item.description}
+                          onChange={(e) =>
+                            setExtraItems((all) =>
+                              all.map((it, i) => (i === idx ? { ...it, description: e.target.value } : it))
+                            )
+                          }
+                        />
+                        <TextInput
+                          type="number"
+                          min="1"
+                          placeholder="Qty"
+                          value={item.quantity}
+                          onChange={(e) =>
+                            setExtraItems((all) =>
+                              all.map((it, i) => (i === idx ? { ...it, quantity: Number(e.target.value) } : it))
+                            )
+                          }
+                        />
+                        <TextInput
+                          type="number"
+                          min="0"
+                          placeholder="Unit price"
+                          value={item.unitPrice}
+                          onChange={(e) =>
+                            setExtraItems((all) =>
+                              all.map((it, i) => (i === idx ? { ...it, unitPrice: Number(e.target.value) } : it))
+                            )
+                          }
+                        />
+                        {extraItems.length > 1 && (
+                          <button
+                            type="button"
+                            className="button button-quiet button-small"
+                            onClick={() => setExtraItems((all) => all.filter((_, i) => i !== idx))}
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                    <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.4rem" }}>
+                      <button
+                        type="button"
+                        className="button button-quiet button-small"
+                        onClick={() => setExtraItems((all) => [...all, { description: "", quantity: 1, unitPrice: 0 }])}
+                      >
+                        + Add item line
+                      </button>
+                    </div>
+                    <div style={{ marginTop: "0.6rem", display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                      <TextInput
+                        placeholder="Coupon code (optional)"
+                        value={extraCoupon}
+                        onChange={(e) => setExtraCoupon(e.target.value.toUpperCase())}
+                        style={{ maxWidth: "200px" }}
+                      />
+                      <button
+                        type="button"
+                        className="button button-outline"
+                        disabled={updatingItems || (!extraItems.some((i) => i.description.trim()) && !extraCoupon)}
+                        onClick={async () => {
+                          setUpdatingItems(true);
+                          try {
+                            const payload = {};
+                            const validItems = extraItems.filter((i) => i.description.trim());
+                            if (validItems.length) payload.items = validItems;
+                            if (extraCoupon.trim()) payload.couponCode = extraCoupon.trim();
+                            const res = await api.invoices.updateItems(selectedInvoice._id, payload);
+                            notify("Invoice updated with extra items.", "success");
+                            setSelectedInvoice(res.data);
+                            setExtraItems([{ description: "", quantity: 1, unitPrice: 0 }]);
+                            setExtraCoupon("");
+                            queryClient.invalidateQueries({ queryKey: ["staff-invoices"] });
+                          } catch (err) {
+                            notify(err.message || "Failed to update invoice items.", "error");
+                          } finally {
+                            setUpdatingItems(false);
+                          }
+                        }}
+                      >
+                        {updatingItems ? "Updating…" : "Apply items & recalculate"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
               )}
             </div>
-          ))}
-          <div className="invoice-preview">
-            <span>
-              Line-item estimate <strong>{rupees(subtotal)}</strong>
-            </span>
-            {preview && <span>Coupon estimate <strong>-{rupees(preview.discount)}</strong></span>}
-            <small>
-              Final tax, coupon discount and invoice amount will be calculated
-              by the clinic server.
-            </small>
           </div>
-          <button disabled={busy} className="button button-primary">
-            {busy ? "Creating invoice…" : "Create invoice"}{" "}
-            <FileText size={16} />
-          </button>
-        </form>
-      </SectionPanel>
-      <SectionPanel title="Existing invoices" description="Final totals and payment status are returned by the clinic server.">
-        <div className="filter-bar">
-          <Field label="Status"><TextInput as="select" value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }}><option value="unpaid">Unpaid</option><option value="paid">Paid</option><option value="refunded">Refunded</option></TextInput></Field>
-          <Field label="Record payment by"><TextInput as="select" value={paidMethod} onChange={(event) => setPaidMethod(event.target.value)}><option value="cash">Cash</option><option value="card">Card</option><option value="upi">UPI</option><option value="bank-transfer">Bank transfer</option></TextInput></Field>
         </div>
-        <AsyncView query={invoices} empty={!invoices.isLoading && !invoices.isError && !invoiceRows.length} emptyTitle="No invoices for this status">
-          <div className="record-list">{invoiceRows.map((entry) => <article className="record-row" key={entry._id}><span className="record-type-icon"><FileText size={17} /></span><div className="record-row-content"><strong>{entry.invoiceNumber} · {entry.patient?.name || "Patient"}</strong><span>{fmtDate(entry.createdAt)} · {entry.items?.length || 0} items</span></div><div className="record-row-actions"><StatusBadge value={entry.status} /><strong>{rupees(entry.totalAmount)}</strong><button className="button button-quiet button-small" onClick={() => downloadPdf(`/invoices/${entry._id}/pdf`, `${entry.invoiceNumber}.pdf`).catch((error) => notify(error.message, "error"))}><Download size={14} /> PDF</button>{entry.status === "unpaid" && <button className="button button-outline button-small" onClick={() => markPaid(entry)}>Mark paid</button>}</div></article>)}</div>
-        </AsyncView>
-        {invoices.data?.meta?.total > 20 && <div className="pagination"><button className="button button-outline button-small" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>Previous</button><span>Page {page} of {Math.ceil(invoices.data.meta.total / 20)}</span><button className="button button-outline button-small" disabled={page >= Math.ceil(invoices.data.meta.total / 20)} onClick={() => setPage((value) => value + 1)}>Next</button></div>}
+      )}
+
+      {/* Manual invoice creation for non-visit charges */}
+      <SectionPanel
+        title="Manual invoice for non-visit charges"
+        description="Visit consultations and procedures are automatically invoiced when completed. Use this form only for manual, non-appointment charges such as dental hygiene products or external diagnostic services."
+        actions={
+          <button
+            type="button"
+            className="button button-outline button-small"
+            onClick={() => setShowManualInvoice(!showManualInvoice)}
+          >
+            {showManualInvoice ? "Hide form" : "Create non-visit invoice"}
+          </button>
+        }
+      >
+        {showManualInvoice && (
+          <form className="stack-form" onSubmit={create}>
+            <div className="admin-form-grid">
+              <Field label="Patient account ID">
+                <TextInput
+                  required
+                  value={form.patientId}
+                  onChange={(event) =>
+                    setForm({ ...form, patientId: event.target.value })
+                  }
+                  placeholder="Patient user ID"
+                />
+              </Field>
+              <Field label="Doctor">
+                <TextInput
+                  disabled
+                  value={
+                    primary.dentist
+                      ? `Dr. ${primary.dentist.user?.name || "Doctor"} (${primary.dentist.specialization || "Dental Care"})`
+                      : "Primary Clinic Doctor"
+                  }
+                />
+              </Field>
+              <Field label="Appointment ID (optional)">
+                <TextInput
+                  value={form.appointmentId}
+                  onChange={(event) =>
+                    setForm({ ...form, appointmentId: event.target.value })
+                  }
+                />
+              </Field>
+              <Field label="Coupon code (optional)">
+                <div className="inline-form">
+                  <TextInput
+                    value={form.couponCode}
+                    onChange={(event) => {
+                      setPreview(null);
+                      setForm({ ...form, couponCode: event.target.value.toUpperCase() });
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="button button-quiet button-small"
+                    onClick={previewCoupon}
+                    disabled={previewBusy || !form.couponCode}
+                  >
+                    {previewBusy ? "Checking…" : "Preview"}
+                  </button>
+                </div>
+              </Field>
+            </div>
+            <div className="invoice-items-head">
+              <h3>Line items</h3>
+              <button
+                type="button"
+                className="button button-quiet button-small"
+                onClick={() =>
+                  setItems((all) => [
+                    ...all,
+                    { description: "", quantity: 1, unitPrice: 0 },
+                  ])
+                }
+              >
+                <Plus size={14} /> Add item
+              </button>
+            </div>
+            {items.map((item, index) => (
+              <div className="invoice-item-row" key={index}>
+                <Field label="Description">
+                  <TextInput
+                    required
+                    value={item.description}
+                    onChange={(event) =>
+                      setItems((all) =>
+                        all.map((entry, ix) =>
+                          ix === index
+                            ? { ...entry, description: event.target.value }
+                            : entry,
+                        ),
+                      )
+                    }
+                  />
+                </Field>
+                <Field label="Quantity">
+                  <TextInput
+                    type="number"
+                    min="1"
+                    required
+                    value={item.quantity}
+                    onChange={(event) =>
+                      setItems((all) =>
+                        all.map((entry, ix) =>
+                          ix === index
+                            ? { ...entry, quantity: event.target.value }
+                            : entry,
+                        ),
+                      )
+                    }
+                  />
+                </Field>
+                <Field label="Unit price (INR)">
+                  <TextInput
+                    type="number"
+                    min="0"
+                    required
+                    value={item.unitPrice}
+                    onChange={(event) =>
+                      setItems((all) =>
+                        all.map((entry, ix) =>
+                          ix === index
+                            ? { ...entry, unitPrice: event.target.value }
+                            : entry,
+                        ),
+                      )
+                    }
+                  />
+                </Field>
+                <strong>
+                  {rupees(Number(item.quantity) * Number(item.unitPrice))}
+                </strong>
+                {items.length > 1 && (
+                  <button
+                    className="button button-quiet button-small"
+                    type="button"
+                    onClick={() =>
+                      setItems((all) => all.filter((_, ix) => ix !== index))
+                    }
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+            ))}
+            <div className="invoice-preview">
+              <span>
+                Line-item estimate <strong>{rupees(subtotal)}</strong>
+              </span>
+              {preview && (
+                <span>
+                  Coupon estimate <strong>-{rupees(preview.discount)}</strong>
+                </span>
+              )}
+              <small>
+                Final tax, coupon discount and invoice amount will be calculated
+                by the clinic server.
+              </small>
+            </div>
+            <button disabled={busy} className="button button-primary">
+              {busy ? "Creating invoice…" : "Create invoice"}{" "}
+              <FileText size={16} />
+            </button>
+          </form>
+        )}
       </SectionPanel>
+
       {dialog}
     </div>
   );

@@ -10,6 +10,7 @@ const clinicSettingsSchema = new mongoose.Schema(
     contactPhone: { type: String, default: '' },
     contactEmail: { type: String, default: '' },
     platformFee: { type: Number, default: 20 }, // flat fee added to bookings
+    allowPayAtClinic: { type: Boolean, default: true },
     taxPercentage: { type: Number, default: 0 },
     currency: { type: String, default: 'INR' },
     reminderHoursBefore: { type: Number, default: 24 },

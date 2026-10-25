@@ -30,6 +30,7 @@ import {
   useToast,
 } from "../components/ui.jsx";
 import { FDI_TEETH } from "../utils/teeth.js";
+import { formatClinicDate } from "../utils/formatDate.js";
 
 const dayNames = [
   "Sunday",
@@ -41,13 +42,7 @@ const dayNames = [
   "Saturday",
 ];
 const dateToday = () => new Date().toISOString().slice(0, 10);
-const fmtDate = (date) =>
-  date
-    ? new Date(date).toLocaleDateString("en-IN", {
-        dateStyle: "medium",
-        timeZone: "UTC",
-      })
-    : "Date not set";
+const fmtDate = (date) => (date ? formatClinicDate(date) : "Date not set");
 const rupees = (amount) => `₹${Number(amount || 0).toLocaleString("en-IN")}`;
 
 function useDentistProfile() {
@@ -77,6 +72,8 @@ function useAction() {
 export function DentistDashboard() {
   const user = useAuthStore((state) => state.user);
   const { profile } = useDentistProfile();
+  const queryClient = useQueryClient();
+  const notify = useToast();
   const stats = useQuery({
     queryKey: ["dashboard", "dentist"],
     queryFn: api.dashboard.dentist,
@@ -88,6 +85,8 @@ export function DentistDashboard() {
   const needsAvailability =
     profile &&
     !(profile.weeklyAvailability || []).some((day) => (day.slots || []).length);
+  const isPaused = profile && (!profile.isActive || (profile.pausedUntil && new Date(profile.pausedUntil) > new Date()));
+
   return (
     <div>
       <PageTitle
@@ -100,6 +99,34 @@ export function DentistDashboard() {
           </Link>
         }
       />
+      {isPaused && (
+        <div className="notice notice-error" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', marginBottom: '1.25rem' }}>
+          <div>
+            <strong>Appointments are currently paused.</strong>
+            <p style={{ margin: '0.25rem 0 0', fontSize: '0.875rem' }}>
+              Patients cannot book new appointments{profile.pausedReason ? ` (Reason: ${profile.pausedReason})` : ''}{profile.pausedUntil ? ` until ${formatClinicDate(profile.pausedUntil)}` : ''}.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="button button-primary button-small"
+            style={{ flexShrink: 0 }}
+            onClick={async () => {
+              try {
+                await api.dentists.toggleActive({ isActive: true });
+                notify('Resumed accepting appointments.');
+                queryClient.invalidateQueries({ queryKey: ['auth-profile'] });
+                queryClient.invalidateQueries({ queryKey: ['dentist-profile'] });
+                queryClient.invalidateQueries({ queryKey: ['primary-dentist'] });
+              } catch (err) {
+                notify(err.message, 'error');
+              }
+            }}
+          >
+            Resume appointments
+          </button>
+        </div>
+      )}
       {needsAvailability && (
         <div className="notice notice-warn availability-alert">
           <span>
@@ -612,15 +639,50 @@ export function DentistProfilePage() {
       notify(error.message, "error");
     }
   };
-  const toggle = async () => {
-    try {
-      const result = await api.dentists.toggleActive();
-      notify(result.message);
-      queryClient.invalidateQueries({ queryKey: ["auth-profile"] });
-    } catch (error) {
-      notify(error.message, "error");
+  const [showPauseModal, setShowPauseModal] = useState(false);
+  const [pauseReason, setPauseReason] = useState("");
+  const [pauseUntil, setPauseUntil] = useState("");
+  const [pausingBusy, setPausingBusy] = useState(false);
+
+  const handleToggle = async () => {
+    if (profile?.isActive) {
+      setPauseReason("");
+      setPauseUntil("");
+      setShowPauseModal(true);
+    } else {
+      try {
+        const result = await api.dentists.toggleActive({ isActive: true });
+        notify(result.message || "Resumed accepting appointments.");
+        queryClient.invalidateQueries({ queryKey: ["auth-profile"] });
+        queryClient.invalidateQueries({ queryKey: ["dentist-profile"] });
+        queryClient.invalidateQueries({ queryKey: ["primary-dentist"] });
+      } catch (error) {
+        notify(error.message, "error");
+      }
     }
   };
+
+  const confirmPause = async (e) => {
+    if (e) e.preventDefault();
+    setPausingBusy(true);
+    try {
+      const result = await api.dentists.toggleActive({
+        isActive: false,
+        reason: pauseReason || undefined,
+        pausedUntil: pauseUntil || undefined,
+      });
+      notify(result.message || "Appointments paused.");
+      setShowPauseModal(false);
+      queryClient.invalidateQueries({ queryKey: ["auth-profile"] });
+      queryClient.invalidateQueries({ queryKey: ["dentist-profile"] });
+      queryClient.invalidateQueries({ queryKey: ["primary-dentist"] });
+    } catch (error) {
+      notify(error.message, "error");
+    } finally {
+      setPausingBusy(false);
+    }
+  };
+
   if (!profile && query.isLoading)
     return <div className="state-view">Loading your dentist profile…</div>;
   return (
@@ -630,13 +692,57 @@ export function DentistProfilePage() {
         title="Dentist profile"
         description="These details are shown to patients in public dentist discovery."
         actions={
-          <button className="button button-outline" onClick={toggle}>
+          <button className="button button-outline" onClick={handleToggle}>
             {profile?.isActive
               ? "Pause new appointments"
               : "Accept appointments"}{" "}
           </button>
         }
       />
+      {showPauseModal && (
+        <div className="modal-backdrop">
+          <div className="modal-card">
+            <div className="modal-head">
+              <h3>Pause new patient appointments</h3>
+              <p>Patients will not be able to book new appointments while paused. Existing bookings remain unaffected.</p>
+            </div>
+            <form onSubmit={confirmPause}>
+              <Field label="Reason for pausing (optional)" hint="E.g., Conference, personal leave, or clinic maintenance">
+                <TextInput
+                  value={pauseReason}
+                  onChange={(e) => setPauseReason(e.target.value)}
+                  placeholder="e.g. Attending dental conference"
+                />
+              </Field>
+              <Field label="Auto-resume date (optional)" hint="Appointments will automatically resume on this date">
+                <TextInput
+                  type="date"
+                  min={dateToday()}
+                  value={pauseUntil}
+                  onChange={(e) => setPauseUntil(e.target.value)}
+                />
+              </Field>
+              <div className="modal-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.25rem' }}>
+                <button
+                  type="button"
+                  className="button button-quiet"
+                  disabled={pausingBusy}
+                  onClick={() => setShowPauseModal(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="button button-danger"
+                  disabled={pausingBusy}
+                >
+                  {pausingBusy ? "Pausing…" : "Confirm Pause"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
       <SectionPanel title="Professional details">
         <form className="admin-form-grid" onSubmit={save}>
           <Field label="Specialization">
@@ -1118,7 +1224,7 @@ export function ClinicalRecord({ readOnly = false }) {
                     className="button button-quiet button-small"
                     href={entry.file?.url}
                     target="_blank"
-                    rel="noreferrer"
+                    rel="noopener noreferrer"
                   >
                     Open file <ArrowRight size={14} />
                   </a>
@@ -1483,38 +1589,36 @@ export function QueuePage({ role = "dentist" }) {
   const isDentist = role === "dentist";
   const dentistProfile = useDentistProfile();
   const primaryDoctor = usePrimaryDentist();
-  const [selectedDentist, setSelectedDentist] = useState("");
   const [date, setDate] = useState(dateToday());
-  const [patientId, setPatientId] = useState("");
-  const [walkInName, setWalkInName] = useState("");
+  const [patientSearch, setPatientSearch] = useState("");
+  const [selectedPatient, setSelectedPatient] = useState(null);
   const [appointmentId, setAppointmentId] = useState("");
   const [socketConnected, setSocketConnected] = useState(false);
   const queryClient = useQueryClient();
   const notify = useToast();
   const user = useAuthStore((state) => state.user);
-  const dentists = useQuery({
-    queryKey: ["dentists", "queue"],
-    queryFn: () => api.dentists.list({ limit: 100 }),
-    enabled: !isDentist,
-  });
 
-  useEffect(() => {
-    if (!isDentist && !selectedDentist) {
-      if (primaryDoctor.dentistId) {
-        setSelectedDentist(primaryDoctor.dentistId);
-      } else if (dentists.data?.data?.[0]?._id) {
-        setSelectedDentist(dentists.data.data[0]._id);
-      }
-    }
-  }, [isDentist, selectedDentist, primaryDoctor.dentistId, dentists.data]);
+  const dentistId = isDentist ? dentistProfile.profile?._id : primaryDoctor.dentistId;
 
-  const dentistId = isDentist ? dentistProfile.profile?._id : (selectedDentist || primaryDoctor.dentistId);
   const queue = useQuery({
     queryKey: ["queue", dentistId, date],
     queryFn: () => api.queue.get(dentistId, date),
     enabled: !!dentistId,
     refetchInterval: socketConnected ? false : 8000,
   });
+
+  const todayAppointments = useQuery({
+    queryKey: ["queue-today-appointments", date],
+    queryFn: () => api.appointments.all({ date, page: 1, limit: 50 }),
+    enabled: !isDentist,
+  });
+
+  const patientSearchResults = useQuery({
+    queryKey: ["patient-search-queue", patientSearch],
+    queryFn: () => api.patients.list({ search: patientSearch, limit: 6 }),
+    enabled: !isDentist && patientSearch.length >= 2,
+  });
+
   useEffect(() => {
     if (!dentistId || !user?.role || !useAuthStore.getState().accessToken)
       return undefined;
@@ -1538,33 +1642,41 @@ export function QueuePage({ role = "dentist" }) {
       setSocketConnected(false);
     };
   }, [dentistId, date, user?.role, queryClient]);
-  const addToQueue = async (event) => {
-    event.preventDefault();
-    if (!patientId && !walkInName.trim())
-      return notify("Enter a patient account or a walk-in name.", "error");
+
+  const addToQueue = async (patientToQueue, apptId) => {
+    const targetPatientId = patientToQueue?._id || patientToQueue?.user?._id;
+    if (!targetPatientId && !apptId) {
+      notify("Select a registered patient account or an appointment to check in.", "error");
+      return;
+    }
     try {
       const result = await api.queue.checkIn({
         dentistId,
-        ...(patientId ? { patientId } : { walkInName }),
-        appointmentId: appointmentId || undefined,
+        patientId: targetPatientId || undefined,
+        appointmentId: apptId || undefined,
         date,
       });
       notify(result.message);
-      setPatientId("");
-      setWalkInName("");
+      setSelectedPatient(null);
+      setPatientSearch("");
       setAppointmentId("");
       queue.refetch();
     } catch (error) {
       notify(error.message, "error");
     }
   };
+
   const entries = queue.data?.data || [];
+  const registeredAppts = (todayAppointments.data?.data || []).filter(
+    (a) => ["pending", "confirmed"].includes(a.status) && !entries.some((e) => e.appointment?._id === a._id || e.appointment === a._id)
+  );
+
   return (
     <div>
       <PageTitle
         eyebrow="Today’s flow"
         title="Live queue"
-        description="Queue updates use Socket.IO when connected and refresh every eight seconds otherwise."
+        description="Single-dentist clinic queue. Live socket updates active when connected."
         actions={
           <span
             className={`connection-indicator ${socketConnected ? "connected" : ""}`}
@@ -1582,57 +1694,130 @@ export function QueuePage({ role = "dentist" }) {
             onChange={(event) => setDate(event.target.value)}
           />
         </Field>
-        {!isDentist && (
-          <Field label="Dentist">
-            <TextInput
-              as="select"
-              required
-              value={selectedDentist}
-              onChange={(event) => setSelectedDentist(event.target.value)}
-            >
-              <option value="">Choose dentist</option>
-              {(dentists.data?.data || []).map((item) => (
-                <option value={item._id} key={item._id}>
-                  Dr. {item.user?.name} · {item.specialization}
-                </option>
-              ))}
-            </TextInput>
-          </Field>
-        )}
       </div>
+
       {!isDentist && dentistId && (
         <SectionPanel
-          title="Check in a patient"
-          description="Use a registered patient ID or add a walk-in visitor."
+          title="Check in a registered patient"
+          description="Check in from today’s appointments or search registered patient accounts."
         >
-          <form className="upload-form" onSubmit={addToQueue}>
-            <Field label="Patient account ID">
-              <TextInput
-                value={patientId}
-                onChange={(event) => setPatientId(event.target.value)}
-                placeholder="Optional if walk-in"
-              />
-            </Field>
-            <Field label="Walk-in name">
-              <TextInput
-                value={walkInName}
-                onChange={(event) => setWalkInName(event.target.value)}
-                placeholder="Optional if registered"
-              />
-            </Field>
-            <Field label="Appointment ID">
-              <TextInput
-                value={appointmentId}
-                onChange={(event) => setAppointmentId(event.target.value)}
-                placeholder="Optional"
-              />
-            </Field>
-            <button className="button button-primary">
-              Check in <Plus size={15} />
-            </button>
-          </form>
+          {/* Quick check-in from today's appointments */}
+          {registeredAppts.length > 0 && (
+            <div style={{ marginBottom: "1.2rem" }}>
+              <span className="field-label" style={{ display: "block", marginBottom: "0.5rem" }}>
+                Today's scheduled appointments ready for check-in:
+              </span>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "0.6rem" }}>
+                {registeredAppts.map((appt) => (
+                  <div
+                    key={appt._id}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      padding: "0.6rem 0.8rem",
+                      borderRadius: "6px",
+                      border: "1px solid #dbe5e1",
+                      background: "#fff",
+                    }}
+                  >
+                    <div>
+                      <strong>{appt.patient?.name || "Patient"}</strong>
+                      <div style={{ fontSize: "0.8rem", color: "#6b7d78" }}>
+                        {appt.startTime} · {appt.mode} · payment {appt.paymentStatus}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="button button-primary button-small"
+                      onClick={() => addToQueue(appt.patient, appt._id)}
+                    >
+                      Check in
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Search patient form */}
+          <div style={{ display: "grid", gap: "0.8rem" }}>
+            <span className="field-label">Or search registered patient:</span>
+            {selectedPatient ? (
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.6rem 0.8rem", background: "#f0f7f5", borderRadius: "6px", border: "1px solid #c2e2dc" }}>
+                <div>
+                  <strong>{selectedPatient.name || selectedPatient.user?.name}</strong>
+                  <span style={{ fontSize: "0.85rem", color: "#555", marginLeft: "0.5rem" }}>
+                    ({selectedPatient.phone || selectedPatient.user?.phone || selectedPatient.email})
+                  </span>
+                </div>
+                <div style={{ display: "flex", gap: "0.5rem" }}>
+                  <button
+                    type="button"
+                    className="button button-quiet button-small"
+                    onClick={() => setSelectedPatient(null)}
+                  >
+                    Change
+                  </button>
+                  <button
+                    type="button"
+                    className="button button-primary button-small"
+                    onClick={() => addToQueue(selectedPatient, null)}
+                  >
+                    Check in now <Plus size={14} />
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <TextInput
+                  value={patientSearch}
+                  onChange={(e) => setPatientSearch(e.target.value)}
+                  placeholder="Type patient name, phone, or email to search…"
+                />
+                {patientSearchResults.data?.data?.length > 0 && (
+                  <div className="record-list" style={{ maxHeight: "160px", overflowY: "auto", border: "1px solid #dbe5e1", borderRadius: "4px", marginTop: "0.3rem" }}>
+                    {patientSearchResults.data.data.map((p) => (
+                      <div
+                        key={p._id}
+                        style={{ padding: "0.5rem 0.8rem", cursor: "pointer", display: "flex", justifyContent: "space-between", borderBottom: "1px solid #f0f4f2" }}
+                        onClick={() => {
+                          setSelectedPatient(p);
+                          setPatientSearch("");
+                        }}
+                      >
+                        <strong>{p.name || p.user?.name}</strong>
+                        <small>{p.phone || p.user?.phone}</small>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Prompt to register if patient is not registered */}
+          <div className="notice notice-info" style={{ marginTop: "1.2rem" }}>
+            <p>
+              <strong>Patient does not have an account?</strong> Staff walk-in registration is disabled to ensure proper security and verified patient records.
+            </p>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.8rem", marginTop: "0.4rem" }}>
+              <span>Ask the patient to self-register at: <code>{typeof window !== "undefined" ? window.location.origin : ""}/register</code></span>
+              <button
+                type="button"
+                className="button button-outline button-small"
+                onClick={() => {
+                  navigator.clipboard?.writeText(`${window.location.origin}/register`);
+                  notify("Registration link copied to clipboard.");
+                }}
+              >
+                Copy registration link
+              </button>
+            </div>
+          </div>
         </SectionPanel>
       )}
+
       {dentistId && (
         <SectionPanel
           title="Waiting room"
@@ -1649,9 +1834,7 @@ export function QueuePage({ role = "dentist" }) {
                   <span className="queue-token">{entry.tokenNumber}</span>
                   <span className="queue-person">
                     <strong>
-                      {entry.patient?.name ||
-                        entry.walkInName ||
-                        "Walk-in patient"}
+                      {entry.patient?.name || (entry.walkInName ? "Legacy walk-in" : "Patient")}
                     </strong>
                     <small>
                       {entry.estimatedWaitMinutes

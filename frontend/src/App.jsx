@@ -7,9 +7,10 @@ import { useAuthStore } from './store/auth.js'
 import PortalLayout from './layouts/PortalLayout.jsx'
 import { LoadingState } from './components/ui.jsx'
 import { AboutPage, ContactPage, DentistDirectory, DentistProfile, DoctorProfilePage, LegalPage, PricingPage, PublicHome, PublicLayout, ServicesPage, SimplePublicPage } from './pages/PublicPages.jsx'
-import { PatientAppointments, AppointmentBooking, AppointmentDetail, PatientBilling, PatientCare, PatientDashboard, PatientFamily, PatientPrescriptions, PatientProfile, PatientProfilePhoto, PatientRecords } from './pages/PatientPages.jsx'
+import { PatientAppointments, AppointmentBooking, AppointmentDetail, PatientBilling, PatientCare, PatientDashboard, PatientFamily, PatientPrescriptions, PatientProfile, PatientProfilePhoto, PatientRecords, PatientTreatmentPlans, PatientDentalChart } from './pages/PatientPages.jsx'
 import { ClinicalRecord, DentistAvailability, DentistDashboard, DentistProfilePage, DentistReviews, DentistSchedule, PatientDirectory, QueuePage } from './pages/TeamPages.jsx'
 import { AppointmentLookup, InvoiceCreator, NotificationsPage, ReceptionPage } from './pages/ReceptionPages.jsx'
+import { Patient360 } from './pages/Patient360.jsx'
 import SharedSettingsPage from './pages/SharedSettingsPage.jsx'
 import './App.css'
 
@@ -180,7 +181,10 @@ export default function App() {
         <Route path="book" element={<AppointmentBooking />} />
         <Route path="book/:dentistId" element={<Navigate to="/app/book" replace />} />
         <Route path="prescriptions" element={<PatientPrescriptions />} /><Route path="records" element={<PatientRecords />} />
-        <Route path="care" element={<PatientCare />} /><Route path="billing" element={<PatientBilling />} /><Route path="family" element={<PatientFamily />} />
+        <Route path="treatment-plans" element={<PatientTreatmentPlans />} />
+        <Route path="dental-chart" element={<PatientDentalChart />} />
+        <Route path="care" element={<Navigate to="/app/treatment-plans" replace />} />
+        <Route path="billing" element={<PatientBilling />} /><Route path="family" element={<PatientFamily />} />
         <Route path="profile" element={<PatientProfileWorkspace />} />
         <Route path="settings" element={<SharedSettingsPage />} />
         <Route path="notifications" element={<NotificationsPage />} />
@@ -189,7 +193,7 @@ export default function App() {
     <Route element={<RequireRole roles={['dentist']} />}>
       <Route path="/dentist" element={<PortalLayout />}>
         <Route index element={<DentistDashboard />} /><Route path="appointments" element={<DentistSchedule />} /><Route path="availability" element={<DentistAvailability />} />
-        <Route path="patients" element={<PatientDirectory mode="dentist" />} /><Route path="patients/:patientId" element={<ClinicalRecord />} />
+        <Route path="patients" element={<PatientDirectory mode="dentist" />} /><Route path="patients/:patientId" element={<Patient360 />} />
         <Route path="reviews" element={<DentistReviews />} /><Route path="queue" element={<QueuePage role="dentist" />} /><Route path="profile" element={<DentistProfilePage />} />
         <Route path="settings" element={<SharedSettingsPage />} />
         <Route path="notifications" element={<NotificationsPage />} />
@@ -198,7 +202,7 @@ export default function App() {
     <Route element={<RequireRole roles={['receptionist']} />}>
       <Route path="/reception" element={<PortalLayout />}>
         <Route index element={<ReceptionPage page="dashboard" />} /><Route path="appointments" element={<AppointmentLookup />} /><Route path="patients" element={<PatientDirectory />} />
-        <Route path="patients/:patientId" element={<ClinicalRecord readOnly />} /><Route path="queue" element={<QueuePage role="receptionist" />} /><Route path="invoices" element={<InvoiceCreator />} />
+        <Route path="patients/:patientId" element={<Patient360 readOnly />} /><Route path="queue" element={<QueuePage role="receptionist" />} /><Route path="invoices" element={<InvoiceCreator />} />
         <Route path="settings" element={<SharedSettingsPage />} />
         <Route path="notifications" element={<NotificationsPage />} />
       </Route>
@@ -206,7 +210,7 @@ export default function App() {
     <Route element={<RequireRole roles={['admin']} />}>
       <Route path="/admin" element={<PortalLayout />}>
         <Route index element={<AdminPage page="dashboard" />} /><Route path="dentists" element={<AdminPage page="dentists" />} /><Route path="staff" element={<AdminPage page="staff" />} />
-        <Route path="patients" element={<AdminPage page="patients" />} /><Route path="patients/:patientId" element={<ClinicalRecord readOnly />} />
+        <Route path="patients" element={<AdminPage page="patients" />} /><Route path="patients/:patientId" element={<Patient360 readOnly />} />
         <Route path="treatments" element={<AdminPage page="treatments" />} /><Route path="coupons" element={<AdminPage page="coupons" />} />
         <Route path="payments" element={<AdminPage page="payments" />} /><Route path="settings" element={<AdminPage page="settings" />} />
         <Route path="account" element={<SharedSettingsPage />} />
