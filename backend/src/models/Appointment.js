@@ -20,7 +20,7 @@ const appointmentSchema = new mongoose.Schema(
       enum: ['pending', 'confirmed', 'cancelled', 'rescheduled', 'completed', 'no-show'],
       default: 'pending',
     },
-    cancelledBy: { type: String, enum: ['patient', 'dentist', 'admin', 'system', null], default: null },
+    cancelledBy: { type: String, enum: ['patient', 'dentist', 'admin', 'receptionist', 'system', null], default: null },
     cancellationReason: { type: String, default: '' },
 
     // If rescheduled, link to the new appointment doc

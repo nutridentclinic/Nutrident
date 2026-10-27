@@ -12,6 +12,9 @@ router.delete('/me/family-members/:memberId', protect, restrictTo('patient'), ct
 
 router.get('/', protect, restrictTo('admin', 'receptionist', 'dentist'), ctrl.getAllPatients);
 router.post('/', protect, restrictTo('admin', 'receptionist'), ctrl.createPatientByStaff);
+router.patch('/:id/deactivate', protect, restrictTo('admin'), ctrl.deactivatePatient);
+router.patch('/:id/activate', protect, restrictTo('admin'), ctrl.activatePatient);
+router.patch('/:id', protect, restrictTo('admin', 'receptionist'), ctrl.updatePatientByStaff);
 router.get('/:id/summary', protect, restrictTo('admin', 'receptionist', 'dentist'), ctrl.getPatientSummary);
 router.get('/:id/appointments', protect, restrictTo('admin', 'receptionist', 'dentist'), ctrl.getPatientAppointments);
 router.get('/:id', protect, restrictTo('admin', 'receptionist', 'dentist'), ctrl.getPatientById);

@@ -35,6 +35,26 @@ import { formatClinicDate } from "../utils/formatDate.js";
 const rupees = (amount) => `₹${Number(amount || 0).toLocaleString("en-IN")}`;
 const fmtDate = (date) => (date ? formatClinicDate(date) : "Date not set");
 
+function exportToCsv(filename, headers, rows) {
+  const escapeCsv = (val) => {
+    if (val === null || val === undefined) return '""';
+    const str = String(val).replace(/"/g, '""');
+    return `"${str}"`;
+  };
+  const csvContent = [
+    headers.map(escapeCsv).join(","),
+    ...rows.map((row) => row.map(escapeCsv).join(",")),
+  ].join("\r\n");
+
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 export function ReceptionDashboard() {
   const stats = useQuery({
     queryKey: ["dashboard", "receptionist"],
@@ -153,6 +173,24 @@ export function AppointmentLookup() {
   const [bookingReason, setBookingReason] = useState("");
   const [paymentChoice, setPaymentChoice] = useState("pay-at-clinic");
 
+  // Walk-in patient registration state
+  const [showWalkInModal, setShowWalkInModal] = useState(false);
+  const [walkInBusy, setWalkInBusy] = useState(false);
+  const [walkInDuplicate, setWalkInDuplicate] = useState(null);
+  const [walkInForm, setWalkInForm] = useState({
+    name: "",
+    phone: "",
+    email: "",
+    dateOfBirth: "",
+    gender: "other",
+    address: "",
+    emergencyContactName: "",
+    emergencyContactPhone: "",
+    emergencyContactRelation: "Family",
+    allergies: "",
+    chronicConditions: "",
+  });
+
   const query = useQuery({
     queryKey: ["appointment", "lookup", lookup],
     queryFn: () => api.appointments.detail(lookup),
@@ -186,6 +224,57 @@ export function AppointmentLookup() {
     queryFn: () => api.patients.list({ search: patientSearchTerm, limit: 8 }),
     enabled: showBookingModal && patientSearchTerm.length >= 2,
   });
+
+  const handleRegisterWalkIn = async (e) => {
+    e.preventDefault();
+    setWalkInBusy(true);
+    setWalkInDuplicate(null);
+    try {
+      const payload = {
+        name: walkInForm.name.trim(),
+        phone: walkInForm.phone.trim(),
+        email: walkInForm.email.trim() || undefined,
+        dateOfBirth: walkInForm.dateOfBirth || undefined,
+        gender: walkInForm.gender || "other",
+        address: walkInForm.address.trim() || undefined,
+        emergencyContact: walkInForm.emergencyContactName ? {
+          name: walkInForm.emergencyContactName.trim(),
+          phone: walkInForm.emergencyContactPhone.trim(),
+          relation: walkInForm.emergencyContactRelation.trim(),
+        } : undefined,
+        allergies: walkInForm.allergies ? walkInForm.allergies.split(",").map((s) => s.trim()).filter(Boolean) : [],
+        chronicConditions: walkInForm.chronicConditions ? walkInForm.chronicConditions.split(",").map((s) => s.trim()).filter(Boolean) : [],
+      };
+      const res = await api.patients.createByStaff(payload);
+      notify(res.message || "Walk-in patient registered.");
+      const newPatient = res.data?.patient || res.data;
+      setSelectedPatient(newPatient);
+      setShowWalkInModal(false);
+      setWalkInForm({
+        name: "",
+        phone: "",
+        email: "",
+        dateOfBirth: "",
+        gender: "other",
+        address: "",
+        emergencyContactName: "",
+        emergencyContactPhone: "",
+        emergencyContactRelation: "Family",
+        allergies: "",
+        chronicConditions: "",
+      });
+      queryClient.invalidateQueries({ queryKey: ["patient-search"] });
+      queryClient.invalidateQueries({ queryKey: ["patients"] });
+    } catch (err) {
+      if (err.status === 409 && (err.data?.existingUser || err.data?.existingPatient)) {
+        setWalkInDuplicate(err.data.existingPatient || err.data.existingUser);
+      } else {
+        notify(err.message || "Failed to register walk-in patient.", "error");
+      }
+    } finally {
+      setWalkInBusy(false);
+    }
+  };
 
   const handleStaffBooking = async (e) => {
     e.preventDefault();
@@ -470,11 +559,25 @@ export function AppointmentLookup() {
                   </div>
                 ) : (
                   <div>
-                    <TextInput
-                      placeholder="Search patient by name or phone (min 2 characters)"
-                      value={patientSearchTerm}
-                      onChange={(e) => setPatientSearchTerm(e.target.value)}
-                    />
+                    <div style={{ display: "flex", gap: "0.5rem" }}>
+                      <TextInput
+                        placeholder="Search patient by name or phone (min 2 characters)"
+                        value={patientSearchTerm}
+                        onChange={(e) => setPatientSearchTerm(e.target.value)}
+                      />
+                      <button
+                        type="button"
+                        className="button button-outline button-small"
+                        style={{ whiteSpace: "nowrap" }}
+                        onClick={() => {
+                          setWalkInForm((prev) => ({ ...prev, name: patientSearchTerm }));
+                          setShowWalkInModal(true);
+                          setWalkInDuplicate(null);
+                        }}
+                      >
+                        <Plus size={14} /> Walk-in
+                      </button>
+                    </div>
                     {patientSearchResults.data?.data?.length > 0 && (
                       <div className="record-list" style={{ maxHeight: "160px", overflowY: "auto", border: "1px solid #dbe5e1", borderRadius: "4px", marginTop: "0.3rem" }}>
                         {patientSearchResults.data.data.map((p) => (
@@ -495,21 +598,20 @@ export function AppointmentLookup() {
                     {!patientSearchResults.isLoading && patientSearchTerm.length >= 2 && (!patientSearchResults.data?.data || patientSearchResults.data.data.length === 0) && (
                       <div className="notice notice-info" style={{ marginTop: "0.5rem" }}>
                         <p style={{ margin: 0, fontSize: "0.85rem" }}>
-                          <strong>No registered patient found.</strong> Walk-in registration is disabled to ensure verified patient accounts.
+                          <strong>No registered patient found.</strong> Register this patient directly as a walk-in to create an account and book.
                         </p>
-                        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.4rem" }}>
-                          <span style={{ fontSize: "0.8rem" }}>Ask patient to register at: <code>{typeof window !== "undefined" ? window.location.origin : ""}/register</code></span>
-                          <button
-                            type="button"
-                            className="button button-outline button-small"
-                            onClick={() => {
-                              navigator.clipboard?.writeText(`${window.location.origin}/register`);
-                              notify("Registration link copied to clipboard.");
-                            }}
-                          >
-                            Copy link
-                          </button>
-                        </div>
+                        <button
+                          type="button"
+                          className="button button-primary button-small"
+                          style={{ marginTop: "0.4rem" }}
+                          onClick={() => {
+                            setWalkInForm((prev) => ({ ...prev, name: patientSearchTerm }));
+                            setShowWalkInModal(true);
+                            setWalkInDuplicate(null);
+                          }}
+                        >
+                          <Plus size={13} /> Register "{patientSearchTerm}" as Walk-in
+                        </button>
                       </div>
                     )}
                   </div>
@@ -603,6 +705,146 @@ export function AppointmentLookup() {
         </div>
       )}
 
+      {/* Walk-in patient registration modal */}
+      {showWalkInModal && (
+        <div className="modal-backdrop" onClick={() => setShowWalkInModal(false)}>
+          <div className="modal-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "560px", width: "95%" }}>
+            <div className="modal-header">
+              <h2>Register Walk-in Patient</h2>
+              <button
+                type="button"
+                className="icon-button"
+                onClick={() => setShowWalkInModal(false)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <form onSubmit={handleRegisterWalkIn} className="admin-form-grid" style={{ padding: "1.2rem" }}>
+              {walkInDuplicate && (
+                <div className="notice notice-warn field-wide" style={{ marginBottom: "0.6rem" }}>
+                  <strong>Patient account already exists:</strong>
+                  <div style={{ fontSize: "0.85rem", marginTop: "0.2rem" }}>
+                    {walkInDuplicate.name || walkInDuplicate.user?.name} · {walkInDuplicate.phone || walkInDuplicate.user?.phone} {walkInDuplicate.email ? `· ${walkInDuplicate.email}` : ""}
+                  </div>
+                  <button
+                    type="button"
+                    className="button button-primary button-small"
+                    style={{ marginTop: "0.5rem" }}
+                    onClick={() => {
+                      setSelectedPatient(walkInDuplicate);
+                      setShowWalkInModal(false);
+                      setWalkInDuplicate(null);
+                    }}
+                  >
+                    Select this Existing Patient
+                  </button>
+                </div>
+              )}
+
+              <Field label="Full Name *">
+                <TextInput
+                  required
+                  value={walkInForm.name}
+                  onChange={(e) => setWalkInForm({ ...walkInForm, name: e.target.value })}
+                />
+              </Field>
+
+              <Field label="Phone Number *">
+                <TextInput
+                  required
+                  placeholder="e.g. 9876543210"
+                  value={walkInForm.phone}
+                  onChange={(e) => setWalkInForm({ ...walkInForm, phone: e.target.value })}
+                />
+              </Field>
+
+              <Field label="Email Address (Optional)">
+                <TextInput
+                  type="email"
+                  value={walkInForm.email}
+                  onChange={(e) => setWalkInForm({ ...walkInForm, email: e.target.value })}
+                />
+              </Field>
+
+              <Field label="Date of Birth">
+                <TextInput
+                  type="date"
+                  value={walkInForm.dateOfBirth}
+                  onChange={(e) => setWalkInForm({ ...walkInForm, dateOfBirth: e.target.value })}
+                />
+              </Field>
+
+              <Field label="Gender">
+                <TextInput
+                  as="select"
+                  value={walkInForm.gender}
+                  onChange={(e) => setWalkInForm({ ...walkInForm, gender: e.target.value })}
+                >
+                  <option value="male">Male</option>
+                  <option value="female">Female</option>
+                  <option value="other">Other</option>
+                </TextInput>
+              </Field>
+
+              <Field label="Address" className="field-wide">
+                <TextInput
+                  value={walkInForm.address}
+                  onChange={(e) => setWalkInForm({ ...walkInForm, address: e.target.value })}
+                />
+              </Field>
+
+              <Field label="Emergency Contact Name">
+                <TextInput
+                  value={walkInForm.emergencyContactName}
+                  onChange={(e) => setWalkInForm({ ...walkInForm, emergencyContactName: e.target.value })}
+                />
+              </Field>
+
+              <Field label="Emergency Contact Phone">
+                <TextInput
+                  value={walkInForm.emergencyContactPhone}
+                  onChange={(e) => setWalkInForm({ ...walkInForm, emergencyContactPhone: e.target.value })}
+                />
+              </Field>
+
+              <Field label="Known Allergies (comma-separated)" className="field-wide">
+                <TextInput
+                  placeholder="e.g. Penicillin, Latex"
+                  value={walkInForm.allergies}
+                  onChange={(e) => setWalkInForm({ ...walkInForm, allergies: e.target.value })}
+                />
+              </Field>
+
+              <Field label="Chronic Health Conditions" className="field-wide">
+                <TextInput
+                  placeholder="e.g. Hypertension, Diabetes"
+                  value={walkInForm.chronicConditions}
+                  onChange={(e) => setWalkInForm({ ...walkInForm, chronicConditions: e.target.value })}
+                />
+              </Field>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.5rem", marginTop: "1rem" }} className="field-wide">
+                <button
+                  type="button"
+                  className="button button-quiet"
+                  onClick={() => setShowWalkInModal(false)}
+                  disabled={walkInBusy}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="button button-primary"
+                  disabled={walkInBusy || !walkInForm.name.trim() || !walkInForm.phone.trim()}
+                >
+                  {walkInBusy ? "Registering…" : "Register Patient"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {dialog}
     </div>
   );
@@ -658,6 +900,55 @@ export function InvoiceCreator() {
       }),
   });
   const invoiceRows = invoices.data?.data || [];
+
+  const treatmentsQuery = useQuery({
+    queryKey: ["treatments"],
+    queryFn: api.treatments.list,
+  });
+  const treatmentCatalog = treatmentsQuery.data?.data || [];
+
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const dailySummary = invoiceRows.reduce(
+    (acc, inv) => {
+      const isMatchDay = (inv.createdAt || "").startsWith(filterDate || todayIso);
+      if (isMatchDay && inv.status === "paid") {
+        const m = (inv.paymentMethod || "cash").toLowerCase();
+        const amt = Number(inv.paidAmount || inv.totalAmount || 0);
+        acc.total += amt;
+        if (m.includes("cash")) acc.cash += amt;
+        else if (m.includes("card")) acc.card += amt;
+        else if (m.includes("upi")) acc.upi += amt;
+        else acc.other += amt;
+      }
+      return acc;
+    },
+    { total: 0, cash: 0, card: 0, upi: 0, other: 0 }
+  );
+
+  const handleExportDailyCsv = () => {
+    const headers = [
+      "Invoice #",
+      "Patient Name",
+      "Patient Phone",
+      "Date",
+      "Payment Method",
+      "Total Collected",
+      "Status",
+    ];
+    const rows = invoiceRows
+      .filter((inv) => (inv.createdAt || "").startsWith(filterDate || todayIso))
+      .map((inv) => [
+        inv.invoiceNumber || inv._id,
+        inv.patient?.name || "Patient",
+        inv.patient?.phone || "",
+        fmtDate(inv.createdAt),
+        (inv.paymentMethod || "N/A").toUpperCase(),
+        inv.paidAmount || inv.totalAmount || 0,
+        inv.status,
+      ]);
+    exportToCsv(`daily-collection-${filterDate || todayIso}.csv`, headers, rows);
+  };
+
   const subtotal = items.reduce(
     (total, item) =>
       total + Number(item.quantity || 0) * Number(item.unitPrice || 0),
@@ -738,7 +1029,36 @@ export function InvoiceCreator() {
         eyebrow="Billing desk"
         title="Invoices & Payments"
         description="Review auto-generated visit invoices, collect payments at counter, add extra procedure items, or issue manual invoices for non-visit charges."
+        actions={
+          <button
+            type="button"
+            className="button button-outline"
+            onClick={handleExportDailyCsv}
+          >
+            <Download size={15} /> Export Daily Collection CSV
+          </button>
+        }
       />
+
+      {/* Daily Collection Summary Card */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "0.8rem", marginBottom: "1.2rem" }}>
+        <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", padding: "0.9rem", borderRadius: "8px" }}>
+          <small style={{ color: "#166534", fontSize: "0.75rem", textTransform: "uppercase", fontWeight: 700 }}>Total Collected ({filterDate || "Today"})</small>
+          <strong style={{ display: "block", fontSize: "1.25rem", color: "#15803d", marginTop: "0.2rem" }}>{rupees(dailySummary.total)}</strong>
+        </div>
+        <div style={{ background: "#fff", border: "1px solid #e2e8f0", padding: "0.9rem", borderRadius: "8px" }}>
+          <small style={{ color: "#64748b", fontSize: "0.75rem", textTransform: "uppercase", fontWeight: 700 }}>Cash</small>
+          <strong style={{ display: "block", fontSize: "1.1rem", color: "#1e293b", marginTop: "0.2rem" }}>{rupees(dailySummary.cash)}</strong>
+        </div>
+        <div style={{ background: "#fff", border: "1px solid #e2e8f0", padding: "0.9rem", borderRadius: "8px" }}>
+          <small style={{ color: "#64748b", fontSize: "0.75rem", textTransform: "uppercase", fontWeight: 700 }}>Card (POS)</small>
+          <strong style={{ display: "block", fontSize: "1.1rem", color: "#1e293b", marginTop: "0.2rem" }}>{rupees(dailySummary.card)}</strong>
+        </div>
+        <div style={{ background: "#fff", border: "1px solid #e2e8f0", padding: "0.9rem", borderRadius: "8px" }}>
+          <small style={{ color: "#64748b", fontSize: "0.75rem", textTransform: "uppercase", fontWeight: 700 }}>UPI / QR</small>
+          <strong style={{ display: "block", fontSize: "1.1rem", color: "#1e293b", marginTop: "0.2rem" }}>{rupees(dailySummary.upi)}</strong>
+        </div>
+      </div>
 
       {invoice && (
         <div className="notice notice-success">
@@ -1041,14 +1361,34 @@ export function InvoiceCreator() {
                         )}
                       </div>
                     ))}
-                    <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.4rem" }}>
+                    <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.4rem", alignItems: "center" }}>
                       <button
                         type="button"
                         className="button button-quiet button-small"
                         onClick={() => setExtraItems((all) => [...all, { description: "", quantity: 1, unitPrice: 0 }])}
                       >
-                        + Add item line
+                        + Add custom line
                       </button>
+                      {treatmentCatalog.length > 0 && (
+                        <select
+                          className="text-input"
+                          style={{ maxWidth: "240px", fontSize: "0.85rem", padding: "0.3rem 0.6rem" }}
+                          onChange={(e) => {
+                            const t = treatmentCatalog.find((x) => x._id === e.target.value);
+                            if (t) {
+                              setExtraItems((all) => [...all, { description: t.name, quantity: 1, unitPrice: t.defaultCost || 0 }]);
+                              e.target.value = "";
+                            }
+                          }}
+                        >
+                          <option value="">+ Add from treatment catalog…</option>
+                          {treatmentCatalog.map((t) => (
+                            <option key={t._id} value={t._id}>
+                              {t.name} ({rupees(t.defaultCost)})
+                            </option>
+                          ))}
+                        </select>
+                      )}
                     </div>
                     <div style={{ marginTop: "0.6rem", display: "flex", gap: "0.5rem", alignItems: "center" }}>
                       <TextInput
@@ -1157,20 +1497,42 @@ export function InvoiceCreator() {
                 </div>
               </Field>
             </div>
-            <div className="invoice-items-head">
+            <div className="invoice-items-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.8rem", flexWrap: "wrap", gap: "0.5rem" }}>
               <h3>Line items</h3>
-              <button
-                type="button"
-                className="button button-quiet button-small"
-                onClick={() =>
-                  setItems((all) => [
-                    ...all,
-                    { description: "", quantity: 1, unitPrice: 0 },
-                  ])
-                }
-              >
-                <Plus size={14} /> Add item
-              </button>
+              <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                {treatmentCatalog.length > 0 && (
+                  <select
+                    className="text-input"
+                    style={{ maxWidth: "240px", fontSize: "0.85rem", padding: "0.3rem 0.6rem" }}
+                    onChange={(e) => {
+                      const t = treatmentCatalog.find((x) => x._id === e.target.value);
+                      if (t) {
+                        setItems((all) => [...all, { description: t.name, quantity: 1, unitPrice: t.defaultCost || 0 }]);
+                        e.target.value = "";
+                      }
+                    }}
+                  >
+                    <option value="">+ Add from treatment catalog…</option>
+                    {treatmentCatalog.map((t) => (
+                      <option key={t._id} value={t._id}>
+                        {t.name} ({rupees(t.defaultCost)})
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <button
+                  type="button"
+                  className="button button-quiet button-small"
+                  onClick={() =>
+                    setItems((all) => [
+                      ...all,
+                      { description: "", quantity: 1, unitPrice: 0 },
+                    ])
+                  }
+                >
+                  <Plus size={14} /> Custom item
+                </button>
+              </div>
             </div>
             {items.map((item, index) => (
               <div className="invoice-item-row" key={index}>
@@ -1281,6 +1643,7 @@ export function NotificationsPage() {
     queryKey: ["notifications"],
     queryFn: () => api.notifications.mine({ limit: 50 }),
     refetchInterval: 30000,
+    refetchIntervalInBackground: false,
   });
   const preferences = useQuery({
     queryKey: ["notification-preferences"],

@@ -58,7 +58,7 @@ exports.createReview = catchAsync(async (req, res, next) => {
 
 // @route GET /api/reviews/dentist/:dentistId
 exports.getDentistReviews = catchAsync(async (req, res) => {
-  const reviews = await Review.find({ dentist: req.params.dentistId })
+  const reviews = await Review.find({ dentist: req.params.dentistId, isHidden: { $ne: true } })
     .populate('patient', 'name profilePhoto')
     .sort('-createdAt');
   success(res, 200, 'Reviews fetched.', reviews);
@@ -90,4 +90,41 @@ exports.replyToReview = catchAsync(async (req, res, next) => {
   }
 
   success(res, 200, 'Reply posted.', review);
+});
+
+// @route GET /api/reviews (admin list of all reviews)
+exports.getAllReviews = catchAsync(async (req, res) => {
+  const { page = 1, limit = 20, rating, isHidden } = req.query;
+  const filter = {};
+  if (rating) filter.rating = Number(rating);
+  if (isHidden !== undefined) filter.isHidden = isHidden === 'true';
+
+  const currentPage = Math.max(1, Number(page) || 1);
+  const pageSize = Math.min(100, Math.max(1, Number(limit) || 20));
+
+  const [reviews, total] = await Promise.all([
+    Review.find(filter)
+      .populate('patient', 'name email phone profilePhoto')
+      .populate({ path: 'dentist', populate: { path: 'user', select: 'name' } })
+      .populate('appointment', 'date startTime mode')
+      .sort('-createdAt')
+      .skip((currentPage - 1) * pageSize)
+      .limit(pageSize),
+    Review.countDocuments(filter),
+  ]);
+
+  success(res, 200, 'All reviews fetched.', reviews, { total, page: currentPage, limit: pageSize });
+});
+
+// @route PATCH /api/reviews/:id/toggle-hide (admin hides/unhides inappropriate review)
+exports.toggleHideReview = catchAsync(async (req, res, next) => {
+  const review = await Review.findById(req.params.id);
+  if (!review) return next(new AppError('Review not found.', 404));
+
+  review.isHidden = !review.isHidden;
+  await review.save();
+
+  await recalculateRating(review.dentist);
+
+  success(res, 200, review.isHidden ? 'Review hidden.' : 'Review unhidden.', review);
 });

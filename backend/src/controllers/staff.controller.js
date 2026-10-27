@@ -82,3 +82,54 @@ exports.activateStaff = catchAsync(async (req, res, next) => {
   if (!user) return next(new AppError('Staff member not found.', 404));
   success(res, 200, 'Staff account activated.', user);
 });
+
+// @route PATCH /api/staff/:id  (admin only)
+exports.updateStaff = catchAsync(async (req, res, next) => {
+  const { name, phone, role } = req.body;
+  const staff = await User.findById(req.params.id);
+  if (!staff) return next(new AppError('Staff member not found.', 404));
+
+  if (role && !['receptionist', 'admin'].includes(role)) {
+    return next(new AppError("role must be 'receptionist' or 'admin'.", 400));
+  }
+
+  if (role && role !== 'admin' && staff.role === 'admin') {
+    const activeAdmins = await User.countDocuments({ role: 'admin', active: { $ne: false } });
+    if (activeAdmins <= 1) {
+      return next(new AppError('Cannot remove admin role from the last active administrator.', 400));
+    }
+  }
+
+  if (phone && phone !== staff.phone) {
+    const existing = await User.findOne({ phone, _id: { $ne: staff._id } });
+    if (existing) return next(new AppError('Another user is already registered with this phone number.', 409));
+    staff.phone = phone;
+  }
+
+  if (name) staff.name = name;
+  if (role) staff.role = role;
+
+  await staff.save();
+  const safe = staff.toObject();
+  delete safe.password;
+  success(res, 200, 'Staff details updated.', safe);
+});
+
+// @route POST /api/staff/:id/reset-password  (admin only)
+exports.resetStaffPassword = catchAsync(async (req, res, next) => {
+  const { temporaryPassword } = req.body;
+  if (!temporaryPassword || temporaryPassword.length < 6) {
+    return next(new AppError('Temporary password must be at least 6 characters.', 400));
+  }
+
+  const staff = await User.findById(req.params.id).select('+password +tokenVersion');
+  if (!staff) return next(new AppError('Staff member not found.', 404));
+
+  staff.password = temporaryPassword;
+  staff.mustChangePassword = true;
+  staff.tokenVersion = (staff.tokenVersion || 0) + 1;
+  staff.refreshSessions = [];
+  await staff.save();
+
+  success(res, 200, 'Staff password has been reset. They will be required to change it upon login.');
+});

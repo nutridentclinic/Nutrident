@@ -1,5 +1,5 @@
 const cloudinary = require('cloudinary').v2;
-const { CloudinaryStorage } = require('multer-storage-cloudinary');
+const multer = require('multer');
 const logger = require('../utils/logger');
 
 const EXACT_PLACEHOLDERS = new Set([
@@ -76,43 +76,119 @@ function applyCloudinaryConfig() {
 // Initial configuration
 applyCloudinaryConfig();
 
-let hasLoggedStartup = false;
-function logCloudinaryStartup() {
-  if (hasLoggedStartup) return;
-  hasLoggedStartup = true;
-  const current = getNormalizedCloudinaryConfig();
-  if (current.isConfigured) {
-    logger.info('Cloudinary: configured');
-  } else {
-    logger.warn(`Cloudinary: NOT configured (missing: ${current.missing.join(', ')})`);
-  }
-}
-
-logCloudinaryStartup();
-
 function isCloudinaryConfigured() {
   return getNormalizedCloudinaryConfig().isConfigured;
 }
 
-const makeStorage = (folder) => {
-  const current = applyCloudinaryConfig();
-  if (!current.isConfigured) {
-    throw new Error('Cloudinary is not configured');
-  }
+function uploadToCloudinary(buffer, options = {}) {
+  return new Promise((resolve, reject) => {
+    const conf = applyCloudinaryConfig();
+    if (!conf.isConfigured) {
+      return reject(new Error('Cloudinary is not configured'));
+    }
 
-  return new CloudinaryStorage({
-    cloudinary,
-    params: {
-      folder: `dental_clinic/${folder}`,
-      allowed_formats: ['jpg', 'jpeg', 'png', 'pdf', 'webp'],
-      resource_type: 'auto',
-    },
+    const folder = options.folder ? `dental_clinic/${options.folder}` : 'dental_clinic';
+    const uploadOptions = {
+      folder,
+      resource_type: options.resource_type || 'auto',
+      ...options,
+    };
+    if (options.folder) {
+      uploadOptions.folder = `dental_clinic/${options.folder}`;
+    }
+
+    const uploadStream = cloudinary.uploader.upload_stream(uploadOptions, (error, result) => {
+      if (error) return reject(error);
+      resolve({
+        url: result.secure_url || result.url,
+        publicId: result.public_id,
+        bytes: result.bytes,
+        format: result.format,
+        resourceType: result.resource_type,
+      });
+    });
+
+    uploadStream.end(buffer);
   });
-};
+}
+
+async function pingCloudinary() {
+  const conf = applyCloudinaryConfig();
+  if (!conf.isConfigured) {
+    return {
+      configured: false,
+      reachable: false,
+      cloudName: conf.cloud_name || null,
+      reason: `Missing configuration (${conf.missing.join(', ')})`,
+    };
+  }
+  let timer;
+  try {
+    const res = await Promise.race([
+      cloudinary.api.ping(),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error('Cloudinary ping timed out')), 4000);
+      }),
+    ]);
+    if (timer) clearTimeout(timer);
+    if (res && (res.status === 'ok' || res.status === 200)) {
+      return {
+        configured: true,
+        reachable: true,
+        cloudName: conf.cloud_name,
+        reason: null,
+      };
+    }
+    return {
+      configured: true,
+      reachable: false,
+      cloudName: conf.cloud_name,
+      reason: `Unexpected ping response: ${JSON.stringify(res)}`,
+    };
+  } catch (err) {
+    if (timer) clearTimeout(timer);
+    return {
+      configured: true,
+      reachable: false,
+      cloudName: conf.cloud_name,
+      reason: err.message || 'Cloudinary unreachable',
+    };
+  }
+}
+
+let hasLoggedStartup = false;
+async function logCloudinaryStartup() {
+  if (hasLoggedStartup) return;
+  hasLoggedStartup = true;
+  const current = getNormalizedCloudinaryConfig();
+  if (!current.isConfigured) {
+    logger.warn(`Cloudinary: NOT configured (missing: ${current.missing.join(', ')})`);
+    return;
+  }
+  try {
+    const ping = await pingCloudinary();
+    if (ping.reachable) {
+      logger.info(`Cloudinary: reachable (cloud: ${ping.cloudName})`);
+    } else {
+      logger.warn(`Cloudinary: configured but unreachable: ${ping.reason} (cloud: ${ping.cloudName})`);
+    }
+  } catch (err) {
+    logger.warn(`Cloudinary: startup ping failed: ${err.message}`);
+  }
+}
+
+if (process.env.NODE_ENV !== 'test') {
+  logCloudinaryStartup();
+}
+
+// Memory storage engine fallback
+const makeStorage = () => multer.memoryStorage();
 
 module.exports = {
   cloudinary,
   makeStorage,
+  uploadToCloudinary,
+  pingCloudinary,
   normalizeValue,
   getNormalizedCloudinaryConfig,
   applyCloudinaryConfig,

@@ -10,19 +10,27 @@ exports.uploadRecord = catchAsync(async (req, res, next) => {
 
   const { patientId, type, title, description, appointmentId } = req.body;
   const targetPatient = req.user.role === 'patient' ? req.user._id : patientId;
-  if (!targetPatient) return next(new AppError('patientId is required.', 400));
+  if (!targetPatient) {
+    if (req.file.filename) await deleteCloudinaryFile(req.file.filename);
+    return next(new AppError('patientId is required.', 400));
+  }
 
-  const record = await MedicalRecord.create({
-    patient: targetPatient,
-    uploadedBy: req.user._id,
-    type: type || 'other',
-    title,
-    description,
-    file: { url: req.file.path, publicId: req.file.filename },
-    relatedAppointment: appointmentId || null,
-  });
+  try {
+    const record = await MedicalRecord.create({
+      patient: targetPatient,
+      uploadedBy: req.user._id,
+      type: type || 'other',
+      title,
+      description,
+      file: { url: req.file.path, publicId: req.file.filename },
+      relatedAppointment: appointmentId || null,
+    });
 
-  success(res, 201, 'Medical record uploaded.', record);
+    success(res, 201, 'Medical record uploaded.', record);
+  } catch (err) {
+    if (req.file.filename) await deleteCloudinaryFile(req.file.filename);
+    throw err;
+  }
 });
 
 // @route GET /api/medical-records/me  (patient)
@@ -51,10 +59,37 @@ exports.getRecordFile = catchAsync(async (req, res, next) => {
     return next(new AppError('You do not have access to this medical record.', 403));
   }
 
-  if (record.file?.url) {
-    return res.redirect(record.file.url);
+  if (!record.file?.url) {
+    return next(new AppError('File URL not found.', 404));
   }
-  return next(new AppError('File URL not found.', 404));
+
+  if (req.query.format === 'json' || req.headers.accept?.includes('application/json')) {
+    return success(res, 200, 'File details fetched.', {
+      url: record.file.url,
+      publicId: record.file.publicId,
+      title: record.title,
+      type: record.type,
+    });
+  }
+
+  const https = require('https');
+  const http = require('http');
+  const clientLib = record.file.url.startsWith('https') ? https : http;
+
+  clientLib.get(record.file.url, (streamRes) => {
+    if (streamRes.statusCode >= 400) {
+      return res.redirect(record.file.url);
+    }
+    const contentType = streamRes.headers['content-type'] || 'application/octet-stream';
+    res.setHeader('Content-Type', contentType);
+    if (streamRes.headers['content-length']) {
+      res.setHeader('Content-Length', streamRes.headers['content-length']);
+    }
+    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(record.title || 'medical-record')}"`);
+    streamRes.pipe(res);
+  }).on('error', () => {
+    res.redirect(record.file.url);
+  });
 });
 
 // @route DELETE /api/medical-records/:id

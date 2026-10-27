@@ -37,11 +37,10 @@ const start = async () => {
 start();
 
 process.on('unhandledRejection', (err) => {
-  logger.error(`Unhandled Rejection: ${err.message}`);
-  server.close(() => process.exit(1));
+  logger.error(`Unhandled Rejection (process will keep serving): ${err?.stack || err?.message || err}`);
 });
 
 process.on('uncaughtException', (err) => {
-  logger.error(`Uncaught Exception: ${err.message}`);
+  logger.error(`Uncaught Exception: ${err?.stack || err?.message || err}`);
   process.exit(1);
 });

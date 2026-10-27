@@ -50,22 +50,24 @@ DrNutrident is a complete dental-clinic management platform consisting of a Node
 - **Live Queue (`/dentist/queue`)**: Real-time Socket.IO waiting room with 8s polling fallback. Call next patient, skip, or mark complete.
 
 ### 3. Front Desk / Receptionist Portal (`/reception`)
-- **Dashboard (`/dashboard/receptionist`)**: Queue stats, today's appointments, check-in quick actions.
-- **Patient Directory (`/reception/patients`)**: Search registered patients, view read-only clinical history, shortcut to check in.
-- **Appointment Lookup (`/reception/appointments`)**: Search by ID or list appointments; confirm, cancel, mark no-show.
-- **Live Queue Management (`/reception/queue`)**: Select dentist, check in registered patients or walk-in visitors, assign appointment ID, call next, skip, complete.
-- **Billing Desk (`/reception/invoices`)**: Create itemized invoices (multiple line items with description, quantity, unit price); validate/preview coupons with patient `userId`; display server-calculated subtotal, tax, and total; browse existing invoices; download PDF; mark unpaid invoices as paid (`cash`, `card`, `upi`, `bank-transfer`).
+- **Dashboard (`/dashboard/receptionist`)**: Queue stats, today's appointments, pending payments, walk-in quick actions.
+- **Patient Directory (`/reception/patients`)**: Search registered patients, register new walk-in patients (`POST /api/patients` with duplicate detection), edit demographic info, view history, and upload records on patient behalf.
+- **Appointment Lookup (`/reception/appointments`)**: Schedule timeline, book on behalf of patient for the single doctor with slot picker (`POST /api/appointments/staff`), reschedule, confirm, mark no-show, cancel with reason.
+- **Live Queue Management (`/reception/queue`)**: Single-doctor auto-selection, check in registered patients or walk-in visitors, call next, skip, complete via Socket.IO with polling fallback.
+- **Billing Desk (`/reception/invoices`)**: Create itemized invoices with treatment catalog lookup, see server-computed subtotal, discount, tax, and total; record payments (`cash`, `card`, `upi`, `bank-transfer`); print/download PDF receipts; view Daily Collection Summary and export to CSV.
 
 ### 4. Administration Portal (`/admin`)
-- **Operations Dashboard**: KPIs for patients, dentists, appointments, revenue, and charts (weekly appointments distribution, monthly revenue trend, top dental specialties).
-- **Dentist Management (`/admin/dentists`)**: List all dentists (`GET /dentists/admin/all`), create new dentist profiles, verify credentials, assign to clinics.
-- **Staff Management (`/admin/staff`)**: Provision receptionist and admin accounts, filter by role/status, activate/deactivate accounts.
-- **Patient Directory (`/admin/patients`)**: Browse registered patients and inspect clinical records.
-- **Treatment Catalog (`/admin/treatments`)**: Full CRUD for treatments, base pricing, and duration.
+- **Operations Dashboard**: Single-clinic KPIs (today's queue, 7d/30d new patients, today's/month revenue, outstanding balance, status breakdown, cancellation/no-show rates, weekly appointments chart, monthly revenue, revenue by treatment, and live system status for Cloudinary, Email, Razorpay, Agora, and Firebase).
+- **Appointments (`/admin/appointments`)**: Global appointment manager with date range, status, payment filters, patient search, slot picker to book on behalf of patients, reschedule, mark no-show, cancel with refund rules, and CSV export.
+- **Doctor Profile (`/admin/dentists`)**: Single-doctor profile management (`siddheshvpatil02@gmail.com`) — edit bio, qualifications, fee, photo, availability, leave dates, accepting-patients toggle. Multi-doctor creation is disabled (`SINGLE_DENTIST_MODE=true`).
+- **Staff Management (`/admin/staff`)**: Provision receptionist and admin accounts, edit staff details, reset passwords (`mustChangePassword: true`), activate/deactivate accounts with safeguards against self/last-admin deactivation.
+- **Patient Directory (`/admin/patients`)**: Search, register walk-in patients, inspect Patient360, edit demographics, activate/deactivate accounts, upload records on patient behalf.
+- **Treatment Catalog (`/admin/treatments`)**: Full CRUD for treatments, base pricing, and duration with confirmation dialogs.
 - **Coupons Management (`/admin/coupons`)**: Create, inspect, update, and delete promotional discount coupons.
-- **Clinic Locations (`/admin/clinics`)**: Manage clinic branches and dentist assignments.
-- **Payments & Refunds (`/admin/payments`)**: Filter payments by status (`paid`, `refunded`, `partially_refunded`, `created`, `failed`), inspect Razorpay order/payment IDs, and execute server-side refunds with confirmation modals and reason tracking.
-- **Clinic Settings (`/admin/settings`)**: Configure clinic name, email, phone, address, platform fee, tax percentage, cancellation refund window, and reminder lead times.
+- **Invoices & Payments (`/admin/payments`)**: Dual-tab view for Invoices and Online Payments/Refunds; mark paid with payment method selection, download invoice PDFs, initiate refunds with reason tracking, inspect Razorpay IDs, and export CSV.
+- **Patient Reviews Moderation (`/admin/reviews`)**: Moderate reviews, hide/unhide inappropriate feedback, view doctor replies.
+- **Clinic Locations (`/admin/clinics`)**: Single-clinic configuration management for DrNutrident.
+- **Clinic Settings (`/admin/settings`)**: Configure clinic name, email, phone, address, hours, platform fee, tax percentage, cancellation refund window, and reminder lead times.
 
 ### 5. Video Consultations (Agora RTC)
 - Mode check: Enabled strictly for `mode: 'video'` and `status: 'confirmed'`.
@@ -184,6 +186,17 @@ npm run seed
 ```
 
 The seed script reads `ADMIN_EMAIL`, `ADMIN_PASSWORD`, and `ADMIN_PHONE` from `backend/.env` and will refuse to execute without them. No default passwords exist.
+
+### Single Doctor Seeding (`npm run seed:doctor`)
+
+To seed the clinic's single doctor account (`siddheshvpatil02@gmail.com`) with default weekly availability (Mon–Sat 09:00–20:00 with lunch break, 30 min slot duration) and deactivate any extraneous dentists:
+
+```bash
+cd backend
+npm run seed:doctor
+```
+
+This script reads `DOCTOR_EMAIL`, `DOCTOR_PASSWORD`, `DOCTOR_PHONE`, `DOCTOR_NAME`, `DOCTOR_SPECIALIZATION`, `DOCTOR_QUALIFICATIONS`, `DOCTOR_EXPERIENCE_YEARS`, and `DOCTOR_CONSULTATION_FEE` from your environment. It is fully idempotent.
 
 ---
 

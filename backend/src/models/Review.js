@@ -8,6 +8,7 @@ const reviewSchema = new mongoose.Schema(
     rating: { type: Number, required: true, min: 1, max: 5 },
     comment: { type: String, trim: true, default: '' },
     isVerifiedPatient: { type: Boolean, default: true }, // true since tied to a real appointment
+    isHidden: { type: Boolean, default: false },
     reply: {
       text: String,
       repliedAt: Date,

@@ -18,7 +18,7 @@ router.patch('/:id/confirm', restrictTo('dentist', 'receptionist', 'admin'), ctr
 router.patch('/:id/cancel', ctrl.cancelAppointment); // patient/dentist/admin - ownership checked in controller
 router.patch('/:id/reschedule', rescheduleRules, validate, ctrl.rescheduleAppointment);
 router.patch('/:id/complete', restrictTo('dentist'), ctrl.completeAppointment);
-router.patch('/:id/no-show', restrictTo('dentist', 'receptionist'), ctrl.markNoShow);
+router.patch('/:id/no-show', restrictTo('dentist', 'receptionist', 'admin'), ctrl.markNoShow);
 router.post('/:id/video/join', ctrl.joinVideoCall);
 
 module.exports = router;

@@ -4,6 +4,7 @@ const Appointment = require('../models/Appointment');
 const Payment = require('../models/Payment');
 const Review = require('../models/Review');
 const Queue = require('../models/Queue');
+const Invoice = require('../models/Invoice');
 const catchAsync = require('../utils/catchAsync');
 const { success } = require('../utils/response');
 
@@ -11,7 +12,7 @@ const { todayInClinic, dayRange, weekRange, addDays, parseDateOnly, weekdayOf, g
 
 const WEEKDAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-// @route GET /api/dashboard/admin  - top-level stats for admin dashboard
+// @route GET /api/dashboard/admin  - top-level single-clinic KPIs for admin dashboard
 exports.getAdminStats = catchAsync(async (req, res) => {
   const todayStr = todayInClinic();
   const range = dayRange(todayStr);
@@ -19,26 +20,93 @@ exports.getAdminStats = catchAsync(async (req, res) => {
   const startOfMonthStr = `${todayStr.slice(0, 7)}-01`;
   const startOfMonth = parseDateOnly(startOfMonthStr);
 
-  const [totalPatients, totalDentists, todaysAppointments, monthRevenueAgg, pendingDentistApprovals] =
-    await Promise.all([
-      User.countDocuments({ role: 'patient' }),
-      User.countDocuments({ role: 'dentist' }),
-      Appointment.countDocuments({
-        date: { $gte: range.start, $lt: range.end },
-        status: { $in: ['pending', 'confirmed', 'completed', 'no-show'] },
-      }),
-      Payment.aggregate([
-        { $match: { status: 'paid', createdAt: { $gte: startOfMonth } } },
-        { $group: { _id: null, total: { $sum: '$amount' } } },
-      ]),
-      Dentist.countDocuments({ isVerified: false }),
-    ]);
+  const sevenDaysAgo = parseDateOnly(addDays(todayStr, -6));
+  const thirtyDaysAgo = parseDateOnly(addDays(todayStr, -29));
+
+  const [
+    totalPatients,
+    newPatients7d,
+    newPatients30d,
+    totalDentists,
+    todaysAppointments,
+    todaysQueue,
+    todayRevenueAgg,
+    monthRevenueAgg,
+    outstandingInvoicesAgg,
+    statusBreakdownAgg,
+    treatmentRevenueAgg,
+    pendingDentistApprovals,
+  ] = await Promise.all([
+    User.countDocuments({ role: 'patient' }),
+    User.countDocuments({ role: 'patient', createdAt: { $gte: sevenDaysAgo } }),
+    User.countDocuments({ role: 'patient', createdAt: { $gte: thirtyDaysAgo } }),
+    User.countDocuments({ role: 'dentist' }),
+    Appointment.countDocuments({
+      date: { $gte: range.start, $lt: range.end },
+      status: { $in: ['pending', 'confirmed', 'completed', 'no-show'] },
+    }),
+    Queue.countDocuments({
+      date: { $gte: range.start, $lt: range.end },
+      status: { $in: ['waiting', 'in-progress'] },
+    }),
+    Payment.aggregate([
+      { $match: { status: 'paid', createdAt: { $gte: range.start, $lt: range.end } } },
+      { $group: { _id: null, total: { $sum: '$amount' } } },
+    ]),
+    Payment.aggregate([
+      { $match: { status: 'paid', createdAt: { $gte: startOfMonth } } },
+      { $group: { _id: null, total: { $sum: '$amount' } } },
+    ]),
+    Invoice.aggregate([
+      { $match: { status: 'unpaid' } },
+      { $group: { _id: null, total: { $sum: '$totalAmount' }, count: { $sum: 1 } } },
+    ]),
+    Appointment.aggregate([
+      { $group: { _id: '$status', count: { $sum: 1 } } },
+    ]),
+    Invoice.aggregate([
+      { $match: { status: 'paid' } },
+      { $unwind: '$items' },
+      { $group: { _id: '$items.description', revenue: { $sum: '$items.amount' }, count: { $sum: '$items.quantity' } } },
+      { $sort: { revenue: -1 } },
+      { $limit: 10 },
+    ]),
+    Dentist.countDocuments({ isVerified: false }),
+  ]);
+
+  const statusCounts = {
+    pending: 0,
+    confirmed: 0,
+    completed: 0,
+    cancelled: 0,
+    noShow: 0,
+    rescheduled: 0,
+  };
+  let totalApptsAll = 0;
+  for (const item of statusBreakdownAgg) {
+    if (item._id === 'no-show') statusCounts.noShow = item.count;
+    else if (statusCounts[item._id] !== undefined) statusCounts[item._id] = item.count;
+    totalApptsAll += item.count;
+  }
+
+  const noShowRate = totalApptsAll > 0 ? Number(((statusCounts.noShow / totalApptsAll) * 100).toFixed(1)) : 0;
+  const cancellationRate = totalApptsAll > 0 ? Number(((statusCounts.cancelled / totalApptsAll) * 100).toFixed(1)) : 0;
 
   success(res, 200, 'Dashboard stats fetched.', {
     totalPatients,
+    newPatients7d,
+    newPatients30d,
     totalDentists,
     todaysAppointments,
+    todaysQueue,
+    todayRevenue: todayRevenueAgg[0]?.total || 0,
     monthRevenue: monthRevenueAgg[0]?.total || 0,
+    outstandingInvoices: outstandingInvoicesAgg[0]?.total || 0,
+    outstandingInvoicesCount: outstandingInvoicesAgg[0]?.count || 0,
+    statusBreakdown: statusCounts,
+    noShowRate,
+    cancellationRate,
+    treatmentRevenue: treatmentRevenueAgg.map((t) => ({ treatment: t._id, revenue: t.revenue, count: t.count })),
     pendingDentistApprovals,
   });
 });
@@ -148,13 +216,16 @@ exports.getMonthlyRevenue = catchAsync(async (req, res) => {
   success(res, 200, 'Monthly revenue fetched.', data);
 });
 
-// @route GET /api/dashboard/admin/top-specialties
+// @route GET /api/dashboard/admin/top-specialties (replaced by revenue by treatment)
 exports.getTopSpecialties = catchAsync(async (req, res) => {
-  const data = await Dentist.aggregate([
-    { $group: { _id: '$specialization', count: { $sum: 1 }, avgRating: { $avg: '$ratingAverage' } } },
-    { $sort: { count: -1 } },
+  const data = await Invoice.aggregate([
+    { $match: { status: 'paid' } },
+    { $unwind: '$items' },
+    { $group: { _id: '$items.description', total: { $sum: '$items.amount' }, count: { $sum: '$items.quantity' } } },
+    { $sort: { total: -1 } },
+    { $limit: 10 },
   ]);
-  success(res, 200, 'Top specialties fetched.', data);
+  success(res, 200, 'Revenue by treatment fetched.', data);
 });
 
 // @route GET /api/dashboard/dentist/me  - a dentist's own earnings & performance

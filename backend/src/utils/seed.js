@@ -49,6 +49,12 @@ const run = async () => {
         { name: 'In-Clinic Teeth Whitening', category: 'Cosmetic', defaultCost: 6000, estimatedDurationMinutes: 60, description: 'Professional enamel whitening with LED activation.' },
       ]);
       logger.info('Starter treatment catalog created.');
+    const seedDoctor = require('./seedDoctor');
+    try {
+      await seedDoctor();
+      logger.info('Doctor profile verified and seeded.');
+    } catch (docErr) {
+      logger.warn(`Doctor seeding skipped or deferred: ${docErr.message}`);
     }
   } finally {
     await mongoose.disconnect();

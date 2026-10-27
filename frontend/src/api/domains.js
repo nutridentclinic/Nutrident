@@ -75,6 +75,10 @@ export const api = {
     mine: () => get('/patients/me'),
     update: (data) => patch('/patients/me', data),
     updateBasic: (data, onProgress) => request({ method: 'PATCH', url: '/patients/me/basic-info', data, onUploadProgress: onProgress }),
+    createByStaff: (data) => post('/patients', data),
+    updateByStaff: (id, data) => patch(`/patients/${id}`, data),
+    activate: (id) => patch(`/patients/${id}/activate`),
+    deactivate: (id) => patch(`/patients/${id}/deactivate`),
     list: (params) => get('/patients', params),
     detail: (id) => get(`/patients/${id}`),
     summary: (id) => get(`/patients/${id}/summary`),
@@ -118,10 +122,18 @@ export const api = {
     complete: (id) => patch(`/queue/${id}/complete`),
     skip: (id) => patch(`/queue/${id}/skip`),
   },
-  reviews: { forDentist: (id) => get(`/reviews/dentist/${id}`), create: (data) => post('/reviews', data), reply: (id, text) => post(`/reviews/${id}/reply`, { text }) },
+  reviews: {
+    forDentist: (id) => get(`/reviews/dentist/${id}`),
+    all: (params) => get('/reviews', params),
+    create: (data) => post('/reviews', data),
+    reply: (id, text) => post(`/reviews/${id}/reply`, { text }),
+    toggleHide: (id) => patch(`/reviews/${id}/toggle-hide`),
+  },
   staff: {
     list: (params) => get('/staff', params),
     create: (data) => post('/staff', data),
+    update: (id, data) => patch(`/staff/${id}`, data),
+    resetPassword: (id, data) => post(`/staff/${id}/reset-password`, data),
     activate: (id) => patch(`/staff/${id}/activate`),
     deactivate: (id) => patch(`/staff/${id}/deactivate`),
   },
@@ -153,4 +165,21 @@ export async function downloadPdf(path, filename) {
   link.download = filename
   link.click()
   URL.revokeObjectURL(url)
+}
+
+export async function openRecordFile(recordId, fallbackUrl) {
+  try {
+    const response = await client.get(`/medical-records/${recordId}/file`, { responseType: 'blob' })
+    const contentType = response.headers['content-type'] || 'application/pdf'
+    const blob = new Blob([response.data], { type: contentType })
+    const url = URL.createObjectURL(blob)
+    window.open(url, '_blank')
+    setTimeout(() => URL.revokeObjectURL(url), 60000)
+  } catch (err) {
+    if (fallbackUrl) {
+      window.open(fallbackUrl, '_blank')
+    } else {
+      throw err
+    }
+  }
 }

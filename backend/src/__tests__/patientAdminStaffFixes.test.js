@@ -43,6 +43,8 @@ const Invoice = require('../models/Invoice');
 const Queue = require('../models/Queue');
 const ClinicSettings = require('../models/ClinicSettings');
 const Notification = require('../models/Notification');
+const Review = require('../models/Review');
+const Patient = require('../models/Patient');
 const { signAccessToken } = require('../utils/generateToken');
 const { getNormalizedCloudinaryConfig } = require('../config/cloudinary');
 const { todayInClinic, dayRange, weekRange, addDays, parseDateOnly, weekdayOf } = require('../utils/clinicDate');
@@ -75,6 +77,8 @@ beforeEach(async () => {
   await Queue.deleteMany({});
   await ClinicSettings.deleteMany({});
   await Notification.deleteMany({});
+  await Review.deleteMany({});
+  await Patient.deleteMany({});
 });
 
 describe('Patient, Admin and Staff Fixes (15 items)', () => {
@@ -739,6 +743,152 @@ describe('Patient, Admin and Staff Fixes (15 items)', () => {
       expect(r1Notifs).toHaveLength(1);
       expect(r2Notifs).toHaveLength(1);
       expect(p1Notifs).toHaveLength(0);
+    });
+  });
+
+  // S5: Staff walk-in registration, demographic updates, patient activate/deactivate
+  describe('S5: Staff walk-in registration, demographic updates & status control', () => {
+    it('allows receptionist to update patient demographics and contact details', async () => {
+      const rec = await User.create({ name: 'Receptionist', email: 'rec@clinic.test', phone: '9999990020', role: 'receptionist', password: 'Password123!' });
+      const recToken = signAccessToken({ id: rec._id, role: 'receptionist', tv: 0 });
+
+      // Create walk-in patient
+      const createRes = await request(app)
+        .post('/api/patients')
+        .set('Authorization', `Bearer ${recToken}`)
+        .send({
+          name: 'Jane Doe',
+          phone: '9888880001',
+          gender: 'female',
+          allergies: ['Penicillin'],
+        });
+      expect(createRes.status).toBe(201);
+      const patientUserId = createRes.body.data.user._id;
+
+      // Update patient demographic details
+      const updateRes = await request(app)
+        .patch(`/api/patients/${patientUserId}`)
+        .set('Authorization', `Bearer ${recToken}`)
+        .send({
+          name: 'Jane Smith',
+          gender: 'female',
+          bloodGroup: 'B+',
+          allergies: ['Penicillin', 'Sulfa'],
+        });
+      expect(updateRes.status).toBe(200);
+      expect(updateRes.body.data.user.name).toBe('Jane Smith');
+      expect(updateRes.body.data.patient.bloodGroup).toBe('B+');
+      expect(updateRes.body.data.patient.allergies).toContain('Sulfa');
+    });
+
+    it('allows admin to activate and deactivate patient accounts', async () => {
+      const admin = await User.create({ name: 'Admin', email: 'admin@clinic.test', phone: '9999990021', role: 'admin', password: 'Password123!' });
+      const rec = await User.create({ name: 'Rec', email: 'rec2@clinic.test', phone: '9999990022', role: 'receptionist', password: 'Password123!' });
+      const patient = await User.create({ name: 'Patient', email: 'pat@clinic.test', phone: '9999990023', role: 'patient', password: 'Password123!' });
+      await Patient.create({ user: patient._id });
+
+      const adminToken = signAccessToken({ id: admin._id, role: 'admin', tv: 0 });
+      const recToken = signAccessToken({ id: rec._id, role: 'receptionist', tv: 0 });
+
+      // Receptionist cannot deactivate
+      const recDeact = await request(app)
+        .patch(`/api/patients/${patient._id}/deactivate`)
+        .set('Authorization', `Bearer ${recToken}`);
+      expect(recDeact.status).toBe(403);
+
+      // Admin deactivates
+      const deactRes = await request(app)
+        .patch(`/api/patients/${patient._id}/deactivate`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(deactRes.status).toBe(200);
+      expect(deactRes.body.data.active).toBe(false);
+
+      // Admin reactivates
+      const actRes = await request(app)
+        .patch(`/api/patients/${patient._id}/activate`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(actRes.status).toBe(200);
+      expect(actRes.body.data.active).toBe(true);
+    });
+  });
+
+  // S6: Staff management - update, reset password, role guard
+  describe('S6: Staff management - update, reset password, and self/last-admin safeguards', () => {
+    it('allows admin to update staff role and reset staff password with mustChangePassword', async () => {
+      const admin = await User.create({ name: 'Admin', email: 'admin2@clinic.test', phone: '9999990024', role: 'admin', password: 'Password123!' });
+      const staff = await User.create({ name: 'Front Desk', email: 'staff@clinic.test', phone: '9999990025', role: 'receptionist', password: 'Password123!' });
+
+      const adminToken = signAccessToken({ id: admin._id, role: 'admin', tv: 0 });
+
+      // Update staff details
+      const updateRes = await request(app)
+        .patch(`/api/staff/${staff._id}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ name: 'Front Desk Lead' });
+      expect(updateRes.status).toBe(200);
+      expect(updateRes.body.data.name).toBe('Front Desk Lead');
+
+      // Reset staff password
+      const resetRes = await request(app)
+        .post(`/api/staff/${staff._id}/reset-password`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ temporaryPassword: 'TempPass123!' });
+      expect(resetRes.status).toBe(200);
+
+      const updatedStaff = await User.findById(staff._id).select('+mustChangePassword');
+      expect(updatedStaff.mustChangePassword).toBe(true);
+    });
+  });
+
+  // S7: Review moderation
+  describe('S7: Review moderation - list reviews and toggle visibility', () => {
+    it('allows admin to list all reviews and toggle isHidden', async () => {
+      const admin = await User.create({ name: 'Admin', email: 'admin3@clinic.test', phone: '9999990026', role: 'admin', password: 'Password123!' });
+      const patient = await User.create({ name: 'Reviewer', email: 'rev@clinic.test', phone: '9999990027', role: 'patient', password: 'Password123!' });
+      const dentistUser = await User.create({ name: 'Doc', email: 'doc@clinic.test', phone: '9999990028', role: 'dentist', password: 'Password123!' });
+      const dentist = await Dentist.create({ user: dentistUser._id, specialization: 'General', consultationFee: 500 });
+
+      const appt = await Appointment.create({
+        patient: patient._id,
+        dentist: dentist._id,
+        date: new Date(),
+        startTime: '10:00',
+        endTime: '10:30',
+        mode: 'in-clinic',
+        status: 'completed',
+        fees: { consultationFee: 500, platformFee: 50, totalAmount: 550 },
+      });
+
+      const review = await Review.create({
+        patient: patient._id,
+        dentist: dentist._id,
+        appointment: appt._id,
+        rating: 1,
+        comment: 'Offensive spam review',
+      });
+
+      const adminToken = signAccessToken({ id: admin._id, role: 'admin', tv: 0 });
+
+      // List reviews
+      const listRes = await request(app)
+        .get('/api/reviews')
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(listRes.status).toBe(200);
+      expect(listRes.body.data.length).toBeGreaterThanOrEqual(1);
+
+      // Hide review
+      const hideRes = await request(app)
+        .patch(`/api/reviews/${review._id}/toggle-hide`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(hideRes.status).toBe(200);
+      expect(hideRes.body.data.isHidden).toBe(true);
+
+      // Unhide review
+      const unhideRes = await request(app)
+        .patch(`/api/reviews/${review._id}/toggle-hide`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(unhideRes.status).toBe(200);
+      expect(unhideRes.body.data.isHidden).toBe(false);
     });
   });
 });

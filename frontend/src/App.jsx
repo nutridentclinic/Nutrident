@@ -59,19 +59,24 @@ function RequireRole({ roles }) {
     queryKey: ['auth-me'],
     queryFn: api.auth.me,
     enabled: !!accessToken,
-    refetchOnMount: 'always',
-    refetchOnWindowFocus: true,
-    retry: false,
-    staleTime: 0,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    retry: (failureCount, error) => {
+      const status = error?.response?.status || error?.status
+      if (status === 401 || status === 403) return false
+      return failureCount < 2
+    },
+    staleTime: 60 * 1000,
   })
 
   useEffect(() => {
     const handleRevalidate = (event) => {
       if (
-        (event.type === 'pageshow' && event.persisted) ||
-        event.type === 'popstate' ||
-        event.type === 'focus' ||
-        (event.type === 'visibilitychange' && document.visibilityState === 'visible')
+        ((event.type === 'pageshow' && event.persisted) ||
+          event.type === 'popstate' ||
+          event.type === 'focus' ||
+          (event.type === 'visibilitychange' && document.visibilityState === 'visible')) &&
+        meQuery.isStale
       ) {
         meQuery.refetch()
       }
@@ -98,22 +103,37 @@ function RequireRole({ roles }) {
 
   useEffect(() => {
     if (meQuery.isError) {
-      logout({ reason: 'expired' })
+      const status = meQuery.error?.response?.status || meQuery.error?.status
+      // Only logout when refresh itself fails with 401/403 (invalid/expired/revoked)
+      if (status === 401 || status === 403) {
+        logout({ reason: 'expired' })
+      }
     }
-  }, [meQuery.isError])
+  }, [meQuery.isError, meQuery.error])
 
   if (!accessToken) {
     return <Navigate to="/login?reason=expired" replace state={{ returnTo: location.pathname + location.search }} />
   }
 
-  if (meQuery.isLoading || !meQuery.data?.data?.user) {
+  const currentUser = meQuery.data?.data?.user || useAuthStore.getState().user
+  const currentProfile = meQuery.data?.data?.profile || useAuthStore.getState().profile
+
+  if (meQuery.isLoading && !currentUser) {
     return <LoadingState label="Verifying your secure session…" />
   }
 
-  const currentUser = meQuery.data.data.user
-  const currentProfile = meQuery.data.data.profile
-
   if (!currentUser) {
+    if (meQuery.isError) {
+      return (
+        <div className="center-shell" style={{ padding: '2rem', textAlign: 'center' }}>
+          <h2>Connection issue</h2>
+          <p>We could not connect to the clinic server. Please check your connection or retry.</p>
+          <button className="primary-button" onClick={() => meQuery.refetch()}>
+            Retry connection
+          </button>
+        </div>
+      )
+    }
     return <Navigate to="/login?reason=expired" replace />
   }
 
@@ -209,10 +229,18 @@ export default function App() {
     </Route>
     <Route element={<RequireRole roles={['admin']} />}>
       <Route path="/admin" element={<PortalLayout />}>
-        <Route index element={<AdminPage page="dashboard" />} /><Route path="dentists" element={<AdminPage page="dentists" />} /><Route path="staff" element={<AdminPage page="staff" />} />
-        <Route path="patients" element={<AdminPage page="patients" />} /><Route path="patients/:patientId" element={<Patient360 readOnly />} />
-        <Route path="treatments" element={<AdminPage page="treatments" />} /><Route path="coupons" element={<AdminPage page="coupons" />} />
-        <Route path="payments" element={<AdminPage page="payments" />} /><Route path="settings" element={<AdminPage page="settings" />} />
+        <Route index element={<AdminPage page="dashboard" />} />
+        <Route path="appointments" element={<AdminPage page="appointments" />} />
+        <Route path="dentists" element={<AdminPage page="dentists" />} />
+        <Route path="staff" element={<AdminPage page="staff" />} />
+        <Route path="patients" element={<AdminPage page="patients" />} />
+        <Route path="patients/:patientId" element={<Patient360 readOnly />} />
+        <Route path="treatments" element={<AdminPage page="treatments" />} />
+        <Route path="coupons" element={<AdminPage page="coupons" />} />
+        <Route path="payments" element={<AdminPage page="payments" />} />
+        <Route path="reviews" element={<AdminPage page="reviews" />} />
+        <Route path="clinics" element={<AdminPage page="clinics" />} />
+        <Route path="settings" element={<AdminPage page="settings" />} />
         <Route path="account" element={<SharedSettingsPage />} />
         <Route path="notifications" element={<NotificationsPage />} />
       </Route>

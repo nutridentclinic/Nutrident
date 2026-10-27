@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { io } from "socket.io-client";
 import {
@@ -13,6 +13,7 @@ import {
   Plus,
   Search,
   UserRound,
+  X,
 } from "lucide-react";
 import { api, downloadPdf } from "../api/domains.js";
 import { apiBaseUrl } from "../api/client.js";
@@ -840,8 +841,33 @@ export function DentistProfilePage() {
 }
 
 export function PatientDirectory({ mode = "staff" }) {
+  const location = useLocation();
+  const isAdmin = mode === "admin" || location.pathname.startsWith("/admin");
   const isDentist = mode === "dentist";
+  const basePath = isDentist ? "/dentist" : isAdmin ? "/admin" : "/reception";
+
+  const queryClient = useQueryClient();
+  const notify = useToast();
   const [search, setSearch] = useState("");
+
+  // Walk-in registration modal state
+  const [showWalkInModal, setShowWalkInModal] = useState(false);
+  const [walkInBusy, setWalkInBusy] = useState(false);
+  const [walkInDuplicate, setWalkInDuplicate] = useState(null);
+  const [walkInForm, setWalkInForm] = useState({
+    name: "",
+    phone: "",
+    email: "",
+    dateOfBirth: "",
+    gender: "other",
+    address: "",
+    emergencyContactName: "",
+    emergencyContactPhone: "",
+    emergencyContactRelation: "Family",
+    allergies: "",
+    chronicConditions: "",
+  });
+
   const dentistPatients = useQuery({
     queryKey: ["patients", "dentist"],
     queryFn: async () => {
@@ -862,13 +888,64 @@ export function PatientDirectory({ mode = "staff" }) {
     },
     enabled: isDentist,
   });
+
   const patients = useQuery({
     queryKey: ["patients", search],
-    queryFn: () => api.patients.list({ search, page: 1, limit: 20 }),
+    queryFn: () => api.patients.list({ search, page: 1, limit: 50 }),
     enabled: !isDentist,
   });
+
   const listQuery = isDentist ? dentistPatients : patients;
   const list = listQuery.data?.data || [];
+
+  const handleRegisterWalkIn = async (e) => {
+    e.preventDefault();
+    setWalkInBusy(true);
+    setWalkInDuplicate(null);
+    try {
+      const payload = {
+        name: walkInForm.name.trim(),
+        phone: walkInForm.phone.trim(),
+        email: walkInForm.email.trim() || undefined,
+        dateOfBirth: walkInForm.dateOfBirth || undefined,
+        gender: walkInForm.gender || "other",
+        address: walkInForm.address.trim() || undefined,
+        emergencyContact: walkInForm.emergencyContactName ? {
+          name: walkInForm.emergencyContactName.trim(),
+          phone: walkInForm.emergencyContactPhone.trim(),
+          relation: walkInForm.emergencyContactRelation.trim(),
+        } : undefined,
+        allergies: walkInForm.allergies ? walkInForm.allergies.split(",").map((s) => s.trim()).filter(Boolean) : [],
+        chronicConditions: walkInForm.chronicConditions ? walkInForm.chronicConditions.split(",").map((s) => s.trim()).filter(Boolean) : [],
+      };
+      const res = await api.patients.createByStaff(payload);
+      notify(res.message || "Patient registered successfully.");
+      setShowWalkInModal(false);
+      setWalkInForm({
+        name: "",
+        phone: "",
+        email: "",
+        dateOfBirth: "",
+        gender: "other",
+        address: "",
+        emergencyContactName: "",
+        emergencyContactPhone: "",
+        emergencyContactRelation: "Family",
+        allergies: "",
+        chronicConditions: "",
+      });
+      queryClient.invalidateQueries({ queryKey: ["patients"] });
+    } catch (err) {
+      if (err.status === 409 && (err.data?.existingUser || err.data?.existingPatient)) {
+        setWalkInDuplicate(err.data.existingPatient || err.data.existingUser);
+      } else {
+        notify(err.message || "Failed to register patient.", "error");
+      }
+    } finally {
+      setWalkInBusy(false);
+    }
+  };
+
   return (
     <div>
       <PageTitle
@@ -877,7 +954,21 @@ export function PatientDirectory({ mode = "staff" }) {
         description={
           isDentist
             ? "Patients seen in your appointment schedule."
-            : "Find a patient account and open their care details."
+            : "Find a patient account, register new walk-in patients, and inspect Patient 360 records."
+        }
+        actions={
+          !isDentist && (
+            <button
+              type="button"
+              className="button button-primary"
+              onClick={() => {
+                setShowWalkInModal(true);
+                setWalkInDuplicate(null);
+              }}
+            >
+              <Plus size={16} /> Register patient
+            </button>
+          )
         }
       />
       {isDentist && dentistPatients.data?.limited && (
@@ -896,6 +987,7 @@ export function PatientDirectory({ mode = "staff" }) {
           />
         </label>
       )}
+
       <AsyncView
         query={listQuery}
         empty={!listQuery.isLoading && !listQuery.isError && !list.length}
@@ -906,7 +998,7 @@ export function PatientDirectory({ mode = "staff" }) {
             <Link
               className="people-row people-row-link"
               key={person._id}
-              to={`${isDentist ? "/dentist" : "/reception"}/patients/${person._id}`}
+              to={`${basePath}/patients/${person._id}`}
             >
               <span className="avatar avatar-large">
                 <UserRound size={18} />
@@ -922,6 +1014,142 @@ export function PatientDirectory({ mode = "staff" }) {
           ))}
         </div>
       </AsyncView>
+
+      {/* Walk-in patient registration modal */}
+      {showWalkInModal && (
+        <div className="modal-backdrop" onClick={() => setShowWalkInModal(false)}>
+          <div className="modal-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "560px", width: "95%" }}>
+            <div className="modal-header">
+              <h2>Register New Patient</h2>
+              <button
+                type="button"
+                className="icon-button"
+                onClick={() => setShowWalkInModal(false)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <form onSubmit={handleRegisterWalkIn} className="admin-form-grid" style={{ padding: "1.2rem" }}>
+              {walkInDuplicate && (
+                <div className="notice notice-warn field-wide" style={{ marginBottom: "0.6rem" }}>
+                  <strong>Patient account already exists:</strong>
+                  <div style={{ fontSize: "0.85rem", marginTop: "0.2rem" }}>
+                    {walkInDuplicate.name || walkInDuplicate.user?.name} · {walkInDuplicate.phone || walkInDuplicate.user?.phone} {walkInDuplicate.email ? `· ${walkInDuplicate.email}` : ""}
+                  </div>
+                  <Link
+                    to={`${basePath}/patients/${walkInDuplicate._id || walkInDuplicate.patientId}`}
+                    className="button button-primary button-small"
+                    style={{ marginTop: "0.5rem", display: "inline-block" }}
+                    onClick={() => setShowWalkInModal(false)}
+                  >
+                    Open Existing Patient Profile
+                  </Link>
+                </div>
+              )}
+
+              <Field label="Full Name *">
+                <TextInput
+                  required
+                  value={walkInForm.name}
+                  onChange={(e) => setWalkInForm({ ...walkInForm, name: e.target.value })}
+                />
+              </Field>
+
+              <Field label="Phone Number *">
+                <TextInput
+                  required
+                  placeholder="e.g. 9876543210"
+                  value={walkInForm.phone}
+                  onChange={(e) => setWalkInForm({ ...walkInForm, phone: e.target.value })}
+                />
+              </Field>
+
+              <Field label="Email Address (Optional)">
+                <TextInput
+                  type="email"
+                  value={walkInForm.email}
+                  onChange={(e) => setWalkInForm({ ...walkInForm, email: e.target.value })}
+                />
+              </Field>
+
+              <Field label="Date of Birth">
+                <TextInput
+                  type="date"
+                  value={walkInForm.dateOfBirth}
+                  onChange={(e) => setWalkInForm({ ...walkInForm, dateOfBirth: e.target.value })}
+                />
+              </Field>
+
+              <Field label="Gender">
+                <TextInput
+                  as="select"
+                  value={walkInForm.gender}
+                  onChange={(e) => setWalkInForm({ ...walkInForm, gender: e.target.value })}
+                >
+                  <option value="male">Male</option>
+                  <option value="female">Female</option>
+                  <option value="other">Other</option>
+                </TextInput>
+              </Field>
+
+              <Field label="Address" className="field-wide">
+                <TextInput
+                  value={walkInForm.address}
+                  onChange={(e) => setWalkInForm({ ...walkInForm, address: e.target.value })}
+                />
+              </Field>
+
+              <Field label="Emergency Contact Name">
+                <TextInput
+                  value={walkInForm.emergencyContactName}
+                  onChange={(e) => setWalkInForm({ ...walkInForm, emergencyContactName: e.target.value })}
+                />
+              </Field>
+
+              <Field label="Emergency Contact Phone">
+                <TextInput
+                  value={walkInForm.emergencyContactPhone}
+                  onChange={(e) => setWalkInForm({ ...walkInForm, emergencyContactPhone: e.target.value })}
+                />
+              </Field>
+
+              <Field label="Known Allergies (comma-separated)" className="field-wide">
+                <TextInput
+                  placeholder="e.g. Penicillin, Latex"
+                  value={walkInForm.allergies}
+                  onChange={(e) => setWalkInForm({ ...walkInForm, allergies: e.target.value })}
+                />
+              </Field>
+
+              <Field label="Chronic Health Conditions" className="field-wide">
+                <TextInput
+                  placeholder="e.g. Hypertension, Diabetes"
+                  value={walkInForm.chronicConditions}
+                  onChange={(e) => setWalkInForm({ ...walkInForm, chronicConditions: e.target.value })}
+                />
+              </Field>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.5rem", marginTop: "1rem" }} className="field-wide">
+                <button
+                  type="button"
+                  className="button button-quiet"
+                  onClick={() => setShowWalkInModal(false)}
+                  disabled={walkInBusy}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="button button-primary"
+                  disabled={walkInBusy || !walkInForm.name.trim() || !walkInForm.phone.trim()}
+                >
+                  {walkInBusy ? "Registering…" : "Register Patient"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1605,6 +1833,7 @@ export function QueuePage({ role = "dentist" }) {
     queryFn: () => api.queue.get(dentistId, date),
     enabled: !!dentistId,
     refetchInterval: socketConnected ? false : 8000,
+    refetchIntervalInBackground: false,
   });
 
   const todayAppointments = useQuery({

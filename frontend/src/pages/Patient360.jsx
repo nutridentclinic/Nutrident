@@ -20,13 +20,15 @@ import {
   Eye,
   RefreshCw,
   Plus,
+  Edit2,
+  X,
 } from 'lucide-react'
-import { api, downloadPdf } from '../api/domains.js'
+import { api, downloadPdf, openRecordFile } from '../api/domains.js'
 import { useAuthStore } from '../store/auth.js'
 import { formatClinicDate } from '../utils/formatDate.js'
 import { FileUpload } from '../components/FileUpload.jsx'
 import BackendPendingNotice from '../components/BackendPendingNotice.jsx'
-import { AsyncView, EmptyState, SectionPanel, StatusBadge, useToast } from '../components/ui.jsx'
+import { AsyncView, EmptyState, Field, SectionPanel, StatusBadge, TextInput, useToast } from '../components/ui.jsx'
 
 const rupees = (amount) => `₹${Number(amount || 0).toLocaleString('en-IN')}`
 
@@ -43,6 +45,21 @@ export function Patient360({ readOnly = false } = {}) {
   const [showUpload, setShowUpload] = useState(false)
   const [recordTitle, setRecordTitle] = useState('')
   const [recordType, setRecordType] = useState('xray')
+
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [editBusy, setEditBusy] = useState(false)
+  const [editForm, setEditForm] = useState({
+    name: '',
+    phone: '',
+    email: '',
+    dateOfBirth: '',
+    gender: 'other',
+    bloodGroup: '',
+    address: '',
+    emergencyContactName: '',
+    emergencyContactPhone: '',
+    emergencyContactRelation: 'Family',
+  })
 
   // 1. Fetch Patient 360 summary
   const summaryQuery = useQuery({
@@ -154,6 +171,47 @@ export function Patient360({ readOnly = false } = {}) {
     notify('Medical record uploaded successfully.')
   }
 
+  const handleToggleActive = async () => {
+    try {
+      const res = patientUser.active === false
+        ? await api.patients.activate(id)
+        : await api.patients.deactivate(id)
+      notify(res.message || 'Patient account status updated.')
+      queryClient.invalidateQueries({ queryKey: ['patient-360-summary', id] })
+    } catch (err) {
+      notify(err.message, 'error')
+    }
+  }
+
+  const handleEditSubmit = async (e) => {
+    e.preventDefault()
+    setEditBusy(true)
+    try {
+      const payload = {
+        name: editForm.name,
+        phone: editForm.phone,
+        email: editForm.email || undefined,
+        dateOfBirth: editForm.dateOfBirth || undefined,
+        gender: editForm.gender,
+        bloodGroup: editForm.bloodGroup || undefined,
+        address: editForm.address || undefined,
+        emergencyContact: editForm.emergencyContactName ? {
+          name: editForm.emergencyContactName,
+          phone: editForm.emergencyContactPhone,
+          relation: editForm.emergencyContactRelation,
+        } : undefined,
+      }
+      const res = await api.patients.update(id, payload)
+      notify(res.message || 'Patient information updated.')
+      setShowEditModal(false)
+      queryClient.invalidateQueries({ queryKey: ['patient-360-summary', id] })
+    } catch (err) {
+      notify(err.message, 'error')
+    } finally {
+      setEditBusy(false)
+    }
+  }
+
   return (
     <div className="patient-360-page">
       {summary.isPendingDeploy && (
@@ -247,7 +305,44 @@ export function Patient360({ readOnly = false } = {}) {
       {/* Tab Content */}
       {activeTab === 'overview' && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <SectionPanel title="Personal Information" description="Demographics and contact info">
+          <SectionPanel
+            title="Personal Information"
+            description="Demographics and contact info"
+            actions={
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <button
+                  type="button"
+                  className="button button-quiet button-small"
+                  onClick={() => {
+                    setEditForm({
+                      name: patientUser.name || '',
+                      phone: patientUser.phone || '',
+                      email: patientUser.email || '',
+                      dateOfBirth: patientProfile.dateOfBirth ? patientProfile.dateOfBirth.slice(0, 10) : '',
+                      gender: patientProfile.gender || 'other',
+                      bloodGroup: patientProfile.bloodGroup || '',
+                      address: patientProfile.address || '',
+                      emergencyContactName: patientProfile.emergencyContact?.name || '',
+                      emergencyContactPhone: patientProfile.emergencyContact?.phone || '',
+                      emergencyContactRelation: patientProfile.emergencyContact?.relation || 'Family',
+                    })
+                    setShowEditModal(true)
+                  }}
+                >
+                  <Edit2 size={13} /> Edit Info
+                </button>
+                {role === 'admin' && (
+                  <button
+                    type="button"
+                    className="button button-outline button-small"
+                    onClick={handleToggleActive}
+                  >
+                    {patientUser.active === false ? 'Activate' : 'Deactivate'}
+                  </button>
+                )}
+              </div>
+            }
+          >
             <dl className="divide-y divide-slate-800 text-sm">
               <div className="py-2 flex justify-between">
                 <dt className="text-slate-400">Date of Birth</dt>
@@ -396,7 +491,7 @@ export function Patient360({ readOnly = false } = {}) {
               <FileUpload
                 endpoint="/medical-records"
                 fileField="file"
-                extraData={{ title: recordTitle || 'Medical Record', recordType, patientId: id }}
+                extraData={{ title: recordTitle || 'Medical Record', type: recordType, recordType, patientId: id }}
                 label="Choose or drop document (PDF, JPG, PNG up to 10MB)"
                 onSuccess={handleRecordUploaded}
               />
@@ -409,18 +504,17 @@ export function Patient360({ readOnly = false } = {}) {
                 <div key={rec._id} className="bg-slate-800/40 p-4 rounded-xl border border-slate-700/60 flex items-center justify-between">
                   <div>
                     <strong className="text-white block">{rec.title}</strong>
-                    <span className="text-xs text-slate-400 uppercase">{rec.recordType} · {formatClinicDate(rec.createdAt)}</span>
+                    <span className="text-xs text-slate-400 uppercase">{rec.type || rec.recordType} · {formatClinicDate(rec.createdAt)}</span>
                   </div>
                   {rec.file?.url && (
-                    <a
-                      href={rec.file.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                    <button
+                      type="button"
+                      onClick={() => openRecordFile(rec._id, rec.file.url)}
                       className="p-2 bg-slate-700/50 hover:bg-slate-700 rounded-lg text-teal-400 transition"
                       title="Open Record"
                     >
                       <Eye size={16} />
-                    </a>
+                    </button>
                   )}
                 </div>
               ))}
@@ -557,6 +651,151 @@ export function Patient360({ readOnly = false } = {}) {
               </div>
             </AsyncView>
           </SectionPanel>
+        </div>
+      )}
+
+      {showEditModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6 shadow-2xl">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                <Edit2 size={18} className="text-teal-400" /> Edit Patient Demographics
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowEditModal(false)}
+                className="text-slate-400 hover:text-white transition"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <form onSubmit={handleEditSubmit} className="mt-4 space-y-4">
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Full Name *</label>
+                <input
+                  type="text"
+                  required
+                  value={editForm.name}
+                  onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-sm text-white"
+                />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs text-slate-400 block mb-1">Phone *</label>
+                  <input
+                    type="tel"
+                    required
+                    value={editForm.phone}
+                    onChange={(e) => setEditForm((f) => ({ ...f, phone: e.target.value }))}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-sm text-white"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-400 block mb-1">Email</label>
+                  <input
+                    type="email"
+                    value={editForm.email}
+                    onChange={(e) => setEditForm((f) => ({ ...f, email: e.target.value }))}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-sm text-white"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label className="text-xs text-slate-400 block mb-1">Date of Birth</label>
+                  <input
+                    type="date"
+                    value={editForm.dateOfBirth}
+                    onChange={(e) => setEditForm((f) => ({ ...f, dateOfBirth: e.target.value }))}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-sm text-white"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-400 block mb-1">Gender</label>
+                  <select
+                    value={editForm.gender}
+                    onChange={(e) => setEditForm((f) => ({ ...f, gender: e.target.value }))}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-sm text-white"
+                  >
+                    <option value="male">Male</option>
+                    <option value="female">Female</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-slate-400 block mb-1">Blood Group</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. O+, A+"
+                    value={editForm.bloodGroup}
+                    onChange={(e) => setEditForm((f) => ({ ...f, bloodGroup: e.target.value }))}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-sm text-white"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Residential Address</label>
+                <textarea
+                  rows={2}
+                  value={editForm.address}
+                  onChange={(e) => setEditForm((f) => ({ ...f, address: e.target.value }))}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-sm text-white"
+                />
+              </div>
+
+              <div className="border-t border-slate-800 pt-3">
+                <span className="text-xs font-semibold text-slate-300 block mb-2">Emergency Contact</span>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="text-xs text-slate-400 block mb-1">Name</label>
+                    <input
+                      type="text"
+                      value={editForm.emergencyContactName}
+                      onChange={(e) => setEditForm((f) => ({ ...f, emergencyContactName: e.target.value }))}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-400 block mb-1">Phone</label>
+                    <input
+                      type="tel"
+                      value={editForm.emergencyContactPhone}
+                      onChange={(e) => setEditForm((f) => ({ ...f, emergencyContactPhone: e.target.value }))}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-400 block mb-1">Relation</label>
+                    <input
+                      type="text"
+                      value={editForm.emergencyContactRelation}
+                      onChange={(e) => setEditForm((f) => ({ ...f, emergencyContactRelation: e.target.value }))}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm text-white"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowEditModal(false)}
+                  className="button button-quiet button-small"
+                  disabled={editBusy}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="button button-primary button-small"
+                  disabled={editBusy}
+                >
+                  {editBusy ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>

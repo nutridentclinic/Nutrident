@@ -23,7 +23,7 @@ exports.protect = catchAsync(async (req, res, next) => {
     return next(new AppError('Invalid or expired token. Please log in again.', 401));
   }
 
-  const currentUser = await User.findById(decoded.id).select('+active +tokenVersion +passwordChangedAt +isEmailVerified');
+  const currentUser = await User.findById(decoded.id).select('+active +tokenVersion +passwordChangedAt +isEmailVerified +refreshSessions');
   if (!currentUser || currentUser.active === false) {
     return next(new AppError('The user belonging to this token no longer exists or has been deactivated.', 401));
   }
@@ -31,6 +31,11 @@ exports.protect = catchAsync(async (req, res, next) => {
   // Reject tokens whose tokenVersion differs from current user value
   const userTv = currentUser.tokenVersion || 0;
   if (decoded.tv !== undefined && decoded.tv !== userTv) {
+    return next(new AppError('Session invalidated. Please log in again.', 401));
+  }
+
+  // If token carries a session ID, verify the session has not been revoked
+  if (decoded.sid && currentUser.refreshSessions && !currentUser.refreshSessions.some((s) => s.sessionId === decoded.sid)) {
     return next(new AppError('Session invalidated. Please log in again.', 401));
   }
 
@@ -45,6 +50,7 @@ exports.protect = catchAsync(async (req, res, next) => {
     }));
   }
 
+  currentUser.sid = decoded.sid;
   req.user = currentUser;
   next();
 });

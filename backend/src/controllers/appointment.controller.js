@@ -329,7 +329,7 @@ exports.cancelAppointment = catchAsync(async (req, res, next) => {
   }
 
   appointment.status = 'cancelled';
-  appointment.cancelledBy = req.user.role === 'patient' ? 'patient' : req.user.role === 'dentist' ? 'dentist' : 'admin';
+  appointment.cancelledBy = req.user.role === 'patient' ? 'patient' : req.user.role === 'dentist' ? 'dentist' : req.user.role === 'receptionist' ? 'receptionist' : 'admin';
   appointment.cancellationReason = reason || '';
   await appointment.save();
 

@@ -214,4 +214,83 @@ describe('Workstream A2 & D: Backend real logout, token revocation, no-store hea
     expect(res6.status).toBe(429);
     expect(res6.body.message).toContain('Account locked');
   });
+
+  test('per-session isolation: logging out on Device A does not log out Device B', async () => {
+    const user = await User.create({
+      name: 'Multi Device User',
+      email: 'multidevice@example.com',
+      phone: '9494949494',
+      password: 'Password123!',
+      role: 'patient',
+      isEmailVerified: true,
+    });
+
+    // 1. Device A logs in
+    const loginA = await request(app).post('/api/auth/login').send({
+      email: 'multidevice@example.com',
+      password: 'Password123!',
+    });
+    const { accessToken: tokenA, refreshToken: refreshA } = loginA.body.data;
+
+    // 2. Device B logs in
+    const loginB = await request(app).post('/api/auth/login').send({
+      email: 'multidevice@example.com',
+      password: 'Password123!',
+    });
+    const { accessToken: tokenB, refreshToken: refreshB } = loginB.body.data;
+
+    // 3. Device A logs out
+    const logoutA = await request(app)
+      .post('/api/auth/logout')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ refreshToken: refreshA });
+    expect(logoutA.status).toBe(200);
+
+    // 4. Device A is revoked
+    const meA = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${tokenA}`);
+    expect(meA.status).toBe(401);
+    const refreshResA = await request(app).post('/api/auth/refresh-token').send({ refreshToken: refreshA });
+    expect(refreshResA.status).toBe(401);
+
+    // 5. Device B remains authenticated and can access /auth/me and refresh tokens
+    const meB = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${tokenB}`);
+    expect(meB.status).toBe(200);
+    expect(meB.body.data.user.email).toBe('multidevice@example.com');
+
+    const refreshResB = await request(app).post('/api/auth/refresh-token').send({ refreshToken: refreshB });
+    expect(refreshResB.status).toBe(200);
+    expect(refreshResB.body.data.accessToken).toBeDefined();
+  });
+
+  test('real refresh token rotation: old refresh token is invalidated upon rotation', async () => {
+    const user = await User.create({
+      name: 'Rotation User',
+      email: 'rotation@example.com',
+      phone: '9393939393',
+      password: 'Password123!',
+      role: 'patient',
+      isEmailVerified: true,
+    });
+
+    const loginRes = await request(app).post('/api/auth/login').send({
+      email: 'rotation@example.com',
+      password: 'Password123!',
+    });
+    const { refreshToken: initialRefresh } = loginRes.body.data;
+
+    // 1. Perform first refresh
+    const firstRefresh = await request(app).post('/api/auth/refresh-token').send({ refreshToken: initialRefresh });
+    expect(firstRefresh.status).toBe(200);
+    const { refreshToken: newRefresh, accessToken: newAccess } = firstRefresh.body.data;
+    expect(newRefresh).not.toBe(initialRefresh);
+
+    // 2. Try to reuse the old refresh token (replay attack) -> MUST return 401
+    const replayAttempt = await request(app).post('/api/auth/refresh-token').send({ refreshToken: initialRefresh });
+    expect(replayAttempt.status).toBe(401);
+    expect(replayAttempt.body.message).toMatch(/Invalid or expired/i);
+
+    // 3. The new refresh token works
+    const secondRefresh = await request(app).post('/api/auth/refresh-token').send({ refreshToken: newRefresh });
+    expect(secondRefresh.status).toBe(200);
+  });
 });

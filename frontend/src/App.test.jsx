@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { cleanup, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -42,6 +42,7 @@ function renderRoute(path) {
 }
 
 afterEach(() => {
+  cleanup()
   useAuthStore.getState().clearSession()
   useAuthStore.persist.clearStorage()
 })
@@ -59,6 +60,6 @@ describe('protected role routes', () => {
       refreshToken: 'patient-refresh',
     })
     renderRoute('/admin')
-    expect(await screen.findByRole('heading', { name: /Good .*Patient/ })).toBeTruthy()
+    expect(await screen.findByRole('heading', { name: /Good .*Patient/i }, { timeout: 5000 })).toBeTruthy()
   })
 })

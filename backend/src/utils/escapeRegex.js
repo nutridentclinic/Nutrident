@@ -1,1 +1,8 @@
-module.exports = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+function escapeRegex(value) {
+  if (value === null || value === undefined) return '';
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+escapeRegex.escapeRegex = escapeRegex;
+
+module.exports = escapeRegex;

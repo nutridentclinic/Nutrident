@@ -11,10 +11,11 @@ const { apiLimiter } = require('./middleware/rateLimit.middleware');
 const { razorpayWebhook } = require('./controllers/payment.controller');
 const getCorsOrigins = require('./utils/corsOrigins');
 const noStore = require('./middleware/noStore.middleware');
+const logger = require('./utils/logger');
 
 const app = express();
 const corsOrigins = getCorsOrigins();
-app.set('trust proxy', Number(process.env.TRUST_PROXY) || 0);
+app.set('trust proxy', Number(process.env.TRUST_PROXY) || (process.env.NODE_ENV === 'production' ? 1 : 0));
 
 // --- Security & core middleware ---
 app.use(helmet());
@@ -22,7 +23,8 @@ app.use(
   cors({
     origin: (origin, callback) => {
       if (!origin || corsOrigins.includes(origin)) return callback(null, true);
-      return callback(new Error('Origin is not allowed by CORS.'));
+      logger.warn(`CORS rejected origin: ${origin}`);
+      return callback(null, false);
     },
     credentials: true,
   })
@@ -39,11 +41,12 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(sanitizeInput);
 
-app.use('/api', apiLimiter);
 app.use('/api', noStore);
 
-// --- Health check ---
+// --- Health check (exempt from rate limits) ---
 app.get('/api/health', (req, res) => res.status(200).json({ success: true, message: 'API is running' }));
+
+app.use('/api', apiLimiter);
 
 // --- Routes ---
 app.use('/api/auth', require('./routes/auth.routes'));

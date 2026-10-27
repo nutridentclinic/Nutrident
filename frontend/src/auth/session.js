@@ -46,26 +46,29 @@ export async function logout({ reason, broadcast = true } = {}) {
     }
   }
 
-  // 1. Best-effort POST /auth/logout (short timeout, never blocks navigation)
-  try {
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 2000)
-    await client
-      .post(
-        '/auth/logout',
-        { refreshToken },
-        {
-          headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
-          signal: controller.signal,
-          timeout: 2000,
-        },
-      )
-      .catch(() => {
-        // Ignore network errors or 404 before redeploy
-      })
-    clearTimeout(timeoutId)
-  } catch {
-    // Best-effort
+  // 1. Best-effort POST /auth/logout (only on user-initiated manual sign out)
+  const shouldCallServerLogout = !reason || reason === 'manual'
+  if (shouldCallServerLogout) {
+    try {
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 2000)
+      await client
+        .post(
+          '/auth/logout',
+          { refreshToken },
+          {
+            headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+            signal: controller.signal,
+            timeout: 2000,
+          },
+        )
+        .catch(() => {
+          // Ignore network errors or 404 before redeploy
+        })
+      clearTimeout(timeoutId)
+    } catch {
+      // Best-effort
+    }
   }
 
   // 2. Abort in-flight requests

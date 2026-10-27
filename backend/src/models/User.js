@@ -38,6 +38,18 @@ const userSchema = new mongoose.Schema(
     active: { type: Boolean, default: true, select: false },
     mustChangePassword: { type: Boolean, default: false },
     tokenVersion: { type: Number, default: 0, select: false },
+    refreshSessions: {
+      type: [
+        {
+          sessionId: { type: String, required: true },
+          tokenHash: { type: String, required: true },
+          createdAt: { type: Date, default: Date.now },
+          expiresAt: { type: Date, required: true },
+        },
+      ],
+      select: false,
+      default: [],
+    },
 
     // FCM token placeholder - populated once push notifications are wired up
     fcmToken: { type: String, default: null },

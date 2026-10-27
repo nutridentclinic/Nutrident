@@ -19,8 +19,26 @@ export function ToastProvider({ children }) {
         setToast((current) => (current?.type === 'info' ? null : current))
       }
     }
+    const handleReconnecting = (e) => {
+      if (e.detail?.reconnecting) {
+        setToast({ message: 'Reconnecting to clinic server…', type: 'info' })
+      }
+    }
+    const handleReconnected = () => {
+      setToast({ message: 'Connection restored', type: 'success' })
+      window.setTimeout(() => {
+        setToast((current) => (current?.message === 'Connection restored' ? null : current))
+      }, 3000)
+    }
+
     window.addEventListener('clinic-server-waking', handleWaking)
-    return () => window.removeEventListener('clinic-server-waking', handleWaking)
+    window.addEventListener('clinic:reconnecting', handleReconnecting)
+    window.addEventListener('clinic:reconnected', handleReconnected)
+    return () => {
+      window.removeEventListener('clinic-server-waking', handleWaking)
+      window.removeEventListener('clinic:reconnecting', handleReconnecting)
+      window.removeEventListener('clinic:reconnected', handleReconnected)
+    }
   }, [])
 
   return (

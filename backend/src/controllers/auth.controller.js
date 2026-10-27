@@ -12,16 +12,46 @@ const { auth: firebaseAuth, isConfigured } = require('../config/firebase');
 const logger = require('../utils/logger');
 const { deleteCloudinaryFile } = require('../utils/cloudinaryCleanup');
 
-const issueTokens = (user) => {
+const hashToken = (token) => crypto.createHash('sha256').update(String(token)).digest('hex');
+
+const issueTokens = async (user, sidToReuse = null) => {
+  const sessionId = sidToReuse || crypto.randomUUID();
   const payload = {
     id: user._id,
     role: user.role,
     tv: user.tokenVersion || 0,
+    sid: sessionId,
   };
-  return {
-    accessToken: signAccessToken(payload),
-    refreshToken: signRefreshToken(payload),
-  };
+  const accessToken = signAccessToken(payload);
+  const refreshToken = signRefreshToken({
+    ...payload,
+    jti: crypto.randomUUID(),
+  });
+  const tokenHash = hashToken(refreshToken);
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+
+  let sessions = user.refreshSessions;
+  if (!sessions) {
+    const fresh = await User.findById(user._id).select('+refreshSessions');
+    sessions = fresh?.refreshSessions || [];
+  }
+
+  sessions = sessions.filter((s) => s.sessionId !== sessionId && s.expiresAt > now);
+  if (sessions.length >= 10) {
+    sessions.shift();
+  }
+  sessions.push({
+    sessionId,
+    tokenHash,
+    createdAt: now,
+    expiresAt,
+  });
+
+  await User.findByIdAndUpdate(user._id, { refreshSessions: sessions });
+  user.refreshSessions = sessions;
+
+  return { accessToken, refreshToken };
 };
 
 const sanitizeUser = (user) => {
@@ -185,7 +215,7 @@ exports.login = catchAsync(async (req, res, next) => {
     });
   }
 
-  const tokens = issueTokens(user);
+  const tokens = await issueTokens(user);
   success(res, 200, 'Logged in successfully.', { user: sanitizeUser(user), ...tokens });
 });
 
@@ -249,7 +279,7 @@ exports.verifyOTP = catchAsync(async (req, res, next) => {
   user.otpLockUntil = undefined;
   await user.save({ validateBeforeSave: false });
 
-  const tokens = issueTokens(user);
+  const tokens = await issueTokens(user);
   success(res, 200, 'Account verified successfully.', {
     user: sanitizeUser(user),
     ...tokens,
@@ -345,7 +375,9 @@ exports.refreshToken = catchAsync(async (req, res, next) => {
     return next(new AppError('Invalid or expired refresh token. Please log in again.', 401));
   }
 
-  const user = await User.findById(decoded.id).select('+active +tokenVersion +isEmailVerified +passwordChangedAt');
+  const user = await User.findById(decoded.id).select(
+    '+active +tokenVersion +isEmailVerified +passwordChangedAt +refreshSessions'
+  );
   if (!user || user.active === false) {
     return next(new AppError('User no longer exists or account has been deactivated.', 401));
   }
@@ -353,6 +385,14 @@ exports.refreshToken = catchAsync(async (req, res, next) => {
   const userTv = user.tokenVersion || 0;
   if (decoded.tv !== undefined && decoded.tv !== userTv) {
     return next(new AppError('Session has been revoked. Please log in again.', 401));
+  }
+
+  // Real refresh token rotation check:
+  // If sid is present, token hash must match the stored active session hash
+  const tokenHash = hashToken(refreshToken);
+  const currentSession = (user.refreshSessions || []).find((s) => s.sessionId === decoded.sid);
+  if (decoded.sid && (!currentSession || currentSession.tokenHash !== tokenHash)) {
+    return next(new AppError('Invalid or expired refresh token. Please log in again.', 401));
   }
 
   if (user.changedPasswordAfter && user.changedPasswordAfter(decoded.iat)) {
@@ -368,32 +408,39 @@ exports.refreshToken = catchAsync(async (req, res, next) => {
     });
   }
 
-  // Rotate refresh token on every refresh (old one is invalidated)
-  const tokens = issueTokens(user);
+  // Rotate refresh token on every refresh (old token hash replaced, old one invalidated)
+  const tokens = await issueTokens(user, decoded.sid);
   success(res, 200, 'Token refreshed.', tokens);
 });
 
 // @route POST /api/auth/logout
 exports.logout = catchAsync(async (req, res, next) => {
   let userId = req.user?._id;
+  let targetSid = req.user?.sid;
 
-  if (!userId && req.body?.refreshToken) {
+  if (req.body?.refreshToken) {
     try {
       const decoded = verifyRefreshToken(req.body.refreshToken);
-      const user = await User.findById(decoded.id).select('+active +tokenVersion');
-      if (user && user.active !== false) {
-        const userTv = user.tokenVersion || 0;
-        if (decoded.tv === undefined || decoded.tv === userTv) {
-          userId = user._id;
-        }
-      }
+      userId = userId || decoded.id;
+      targetSid = targetSid || decoded.sid;
     } catch {
       // Ignore invalid refresh token in logout
     }
   }
 
   if (userId) {
-    await User.findByIdAndUpdate(userId, { $inc: { tokenVersion: 1 } });
+    if (targetSid) {
+      // Per-session logout: revoke only this session/device
+      await User.findByIdAndUpdate(userId, {
+        $pull: { refreshSessions: { sessionId: targetSid } },
+      });
+    } else {
+      // Global fallback logout if session ID not present
+      await User.findByIdAndUpdate(userId, {
+        $inc: { tokenVersion: 1 },
+        $set: { refreshSessions: [] },
+      });
+    }
   }
 
   success(res, 200, 'Logged out successfully.');
@@ -619,7 +666,7 @@ exports.updatePassword = catchAsync(async (req, res, next) => {
   user.tokenVersion = (user.tokenVersion || 0) + 1; // Invalidate other sessions
   await user.save();
 
-  const tokens = issueTokens(user);
+  const tokens = await issueTokens(user);
   success(res, 200, 'Password updated successfully.', tokens);
 });
 

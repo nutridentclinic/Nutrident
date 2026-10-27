@@ -259,7 +259,7 @@ describe('Workstream B & D Integration Tests', () => {
       });
       const staffToken = signAccessToken({ id: receptionist._id, role: 'receptionist', tv: 0 });
 
-      // 1. Staff walk-in registration (POST /api/patients) is disabled per S1
+      // 1. Staff walk-in registration (POST /api/patients) enabled per S5
       const regRes = await request(app)
         .post('/api/patients')
         .set('Authorization', `Bearer ${staffToken}`)
@@ -268,18 +268,20 @@ describe('Workstream B & D Integration Tests', () => {
           phone: '9876543210',
           gender: 'female',
         });
-      expect(regRes.status).toBe(400);
+      expect(regRes.status).toBe(201);
+      expect(regRes.body.data.user.phone).toBe('9876543210');
+      const walkInUserId = regRes.body.data.user._id;
 
-      // Create a registered patient account
-      const registeredPatient = await User.create({
-        name: 'Registered Patient',
-        phone: '9876543210',
-        email: 'regpatient@clinic.test',
-        password: 'Password123!',
-        role: 'patient',
-        isEmailVerified: true,
-      });
-      const walkInUserId = registeredPatient._id;
+      // Duplicate registration returns 409 with existing patient info
+      const dupRes = await request(app)
+        .post('/api/patients')
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send({
+          name: 'Walk In Patient Duplicate',
+          phone: '9876543210',
+        });
+      expect(dupRes.status).toBe(409);
+      expect(dupRes.body.data.existingUser._id.toString()).toBe(walkInUserId.toString());
 
       // 2. Book appointment via POST /api/appointments/staff
       const d = new Date();
@@ -446,6 +448,66 @@ describe('Workstream B & D Integration Tests', () => {
       expect(res.body.data.teeth).toHaveLength(1);
       expect(res.body.data.teeth[0].toothNumber).toBe(11);
       expect(res.body.data.teeth[0].condition).toBe('crowned');
+    });
+  });
+
+  describe('Doctor Seed and Idempotency (Single Doctor Mode)', () => {
+    it('seeds the doctor idempotently, allows login with tokens, returns exactly 1 dentist, and rejects a second dentist with 409', async () => {
+      const seedDoctor = require('../utils/seedDoctor');
+      process.env.DOCTOR_EMAIL = 'siddheshvpatil02@gmail.com';
+      process.env.DOCTOR_PASSWORD = 'Dentist@123';
+      process.env.DOCTOR_PHONE = '+919876543210';
+      process.env.DOCTOR_NAME = 'Dr. Siddhesh Patil';
+
+      // 1. Run seedDoctor twice to test idempotency
+      await seedDoctor();
+      await seedDoctor();
+
+      // 2. POST /api/auth/login with doctor credentials returns tokens
+      const loginRes = await request(app)
+        .post('/api/auth/login')
+        .send({ email: 'siddheshvpatil02@gmail.com', password: 'Dentist@123' });
+      expect(loginRes.status).toBe(200);
+      expect(loginRes.body.success).toBe(true);
+      expect(loginRes.body.data.accessToken).toBeDefined();
+      expect(loginRes.body.data.refreshToken).toBeDefined();
+      expect(loginRes.body.data.user.role).toBe('dentist');
+
+      // 3. GET /api/dentists returns exactly 1
+      const listRes = await request(app).get('/api/dentists');
+      expect(listRes.status).toBe(200);
+      expect(listRes.body.data).toHaveLength(1);
+
+      // Verify doctor weekly availability
+      const doctorProfile = listRes.body.data[0];
+      expect(doctorProfile.isVerified).toBe(true);
+      expect(doctorProfile.isActive).toBe(true);
+      expect(doctorProfile.weeklyAvailability.length).toBeGreaterThanOrEqual(6);
+
+      // 4. POST /api/dentists returns 409
+      const admin = await User.create({
+        name: 'Admin For Test',
+        email: 'admintest@clinic.test',
+        phone: '9999998877',
+        password: 'Password123!',
+        role: 'admin',
+      });
+      const adminToken = signAccessToken({ id: admin._id, role: admin.role, tv: 0 });
+
+      const createRes = await request(app)
+        .post('/api/dentists')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          name: 'Dr. Extra Clinician',
+          email: 'extra@clinic.test',
+          phone: '9999998866',
+          password: 'Password123!',
+          specialization: 'Periodontist',
+          consultationFee: 600,
+        });
+
+      expect(createRes.status).toBe(409);
+      expect(createRes.body.message).toMatch(/already has its dentist/i);
     });
   });
 });

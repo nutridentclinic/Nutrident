@@ -9,6 +9,8 @@ router.use(protect, restrictTo('admin'));
 
 router.post('/', createStaffRules, validate, ctrl.createStaff);
 router.get('/', ctrl.getAllStaff);
+router.patch('/:id', ctrl.updateStaff);
+router.post('/:id/reset-password', ctrl.resetStaffPassword);
 router.patch('/:id/deactivate', ctrl.deactivateStaff);
 router.patch('/:id/activate', ctrl.activateStaff);
 

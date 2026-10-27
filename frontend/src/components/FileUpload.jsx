@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { AlertCircle, CheckCircle2, FileText, Image as ImageIcon, RotateCcw, Upload, X } from 'lucide-react'
+import { useAuthStore } from '../store/auth.js'
 
 export async function resizeImage(file, maxDimension = 1600) {
   if (!file || !file.type || !file.type.startsWith('image/') || typeof Image === 'undefined') {
@@ -198,8 +199,12 @@ export function FileUpload({
       if (inputRef.current) inputRef.current.value = ''
       onSuccess?.(result)
     } catch (err) {
-      let message = err.message || 'File upload failed. Please try again.'
-      if (err.status === 503 || err.response?.status === 503 || String(message).includes('503')) {
+      const user = useAuthStore.getState().user
+      const isStaff = user && ['dentist', 'receptionist', 'admin'].includes(user.role)
+      const backendMessage = err.response?.data?.message || err.message || 'File upload failed. Please try again.'
+      let message = backendMessage
+      const is503 = err.status === 503 || err.response?.status === 503 || String(message).includes('503')
+      if (is503 && !isStaff) {
         message = 'Uploads are temporarily unavailable. Please try again later or contact the clinic.'
       }
       setError(message)

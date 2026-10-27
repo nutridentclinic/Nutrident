@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
   Activity,
+  Building2,
   CalendarDays,
   ClipboardList,
   FileText,
@@ -54,12 +55,15 @@ const navigation = {
   ],
   admin: [
     { to: '/admin', label: 'Overview', icon: Home, end: true },
+    { to: '/admin/appointments', label: 'Appointments', icon: CalendarDays },
     { to: '/admin/dentists', label: 'Doctor profile', icon: HeartPulse },
     { to: '/admin/staff', label: 'Staff', icon: Users },
     { to: '/admin/patients', label: 'Patients', icon: ClipboardList },
     { to: '/admin/treatments', label: 'Treatment catalog', icon: FileText },
     { to: '/admin/coupons', label: 'Coupons', icon: Wallet },
-    { to: '/admin/payments', label: 'Payments & refunds', icon: Wallet },
+    { to: '/admin/payments', label: 'Invoices & Payments', icon: Wallet },
+    { to: '/admin/reviews', label: 'Reviews', icon: MessageSquareText },
+    { to: '/admin/clinics', label: 'Clinic locations', icon: Building2 },
     { to: '/admin/settings', label: 'Clinic settings', icon: Settings2 },
   ],
 }
@@ -85,6 +89,7 @@ export default function PortalLayout() {
     queryFn: () => api.notifications.mine({ limit: 1 }),
     enabled: !!user,
     refetchInterval: 30000,
+    refetchIntervalInBackground: false,
   })
   const unreadCount = notificationData?.meta?.unreadCount || 0
   const homePath = { patient: '/app', dentist: '/dentist', receptionist: '/reception', admin: '/admin' }[role]

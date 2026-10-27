@@ -1,4 +1,4 @@
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { usePrimaryDentist } from "../hooks/usePrimaryDentist.js";
@@ -20,7 +20,7 @@ import {
   UserRound,
   X,
 } from "lucide-react";
-import { api, downloadPdf } from "../api/domains.js";
+import { api, downloadPdf, openRecordFile } from "../api/domains.js";
 import { useAuthStore } from "../store/auth.js";
 import { FileUpload } from "../components/FileUpload.jsx";
 import { clinicDate, isPastSlot } from "../utils/booking.js";
@@ -691,6 +691,7 @@ export function AppointmentBooking() {
     queryFn: () => fetchPrimarySlotsWithFallback(date, effectiveDentistId),
     enabled: !!date && selectedDayInfo?.status !== "closed" && selectedDayInfo?.status !== "leave" && selectedDayInfo?.status !== "paused",
     refetchInterval: 30000,
+    refetchIntervalInBackground: false,
     ...queryOptions,
   });
 
@@ -1384,14 +1385,13 @@ export function PatientRecords() {
                   {item.description && <p>{item.description}</p>}
                 </div>
                 <div className="record-row-actions">
-                  <a
+                  <button
+                    type="button"
                     className="button button-quiet button-small"
-                    href={item.file?.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                    onClick={() => openRecordFile(item._id, item.file?.url)}
                   >
                     Open file <ArrowRight size={14} />
-                  </a>
+                  </button>
                   <button
                     className="icon-button danger-icon"
                     aria-label="Delete record"

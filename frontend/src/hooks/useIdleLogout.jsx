@@ -5,7 +5,8 @@ import { useAuthStore } from '../store/auth.js'
 export function useIdleLogout() {
   const user = useAuthStore((state) => state.user)
   const isStaff = user && ['dentist', 'receptionist', 'admin'].includes(user.role)
-  const idleMinutes = isStaff ? Number(import.meta.env.VITE_IDLE_LOGOUT_MINUTES || 30) : 0
+  const defaultMinutes = user?.role === 'receptionist' ? 60 : 30
+  const idleMinutes = isStaff ? Number(import.meta.env.VITE_IDLE_LOGOUT_MINUTES || defaultMinutes) : 0
 
   const [warningOpen, setWarningOpen] = useState(false)
   const [secondsRemaining, setSecondsRemaining] = useState(60)
