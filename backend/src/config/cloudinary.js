@@ -17,7 +17,7 @@ const EXACT_PLACEHOLDERS = new Set([
 
 function normalizeValue(val) {
   if (val === undefined || val === null) return '';
-  let str = String(val).trim();
+  let str = String(val).replace(/[\r\n]/g, '').trim();
   if ((str.startsWith('"') && str.endsWith('"')) || (str.startsWith("'") && str.endsWith("'"))) {
     str = str.slice(1, -1).trim();
   }
@@ -36,17 +36,17 @@ function getNormalizedCloudinaryConfig(env = process.env) {
 
   const missing = [];
   if (!cloud_name || isPlaceholder(cloud_name)) {
-    missing.push('NAME');
+    missing.push('CLOUDINARY_CLOUD_NAME');
   } else if (!/^[A-Za-z0-9_-]+$/.test(cloud_name)) {
-    missing.push('NAME_FORMAT');
+    missing.push('CLOUDINARY_CLOUD_NAME (invalid format, must match /^[A-Za-z0-9_-]+$/)');
   }
 
   if (!api_key || isPlaceholder(api_key)) {
-    missing.push('KEY');
+    missing.push('CLOUDINARY_API_KEY');
   }
 
   if (!api_secret || isPlaceholder(api_secret)) {
-    missing.push('SECRET');
+    missing.push('CLOUDINARY_API_SECRET');
   }
 
   const isConfigured = missing.length === 0;
@@ -119,41 +119,77 @@ async function pingCloudinary() {
       configured: false,
       reachable: false,
       cloudName: conf.cloud_name || null,
+      missing: conf.missing,
+      pingStatus: 'not_configured',
       reason: `Missing configuration (${conf.missing.join(', ')})`,
     };
   }
-  let timer;
-  try {
-    const res = await Promise.race([
-      cloudinary.api.ping(),
-      new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error('Cloudinary ping timed out')), 4000);
-      }),
-    ]);
-    if (timer) clearTimeout(timer);
-    if (res && (res.status === 'ok' || res.status === 200)) {
+
+  const attemptPing = () =>
+    new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Cloudinary ping timed out')), 10000);
+      cloudinary.api
+        .ping()
+        .then((res) => {
+          clearTimeout(timer);
+          resolve(res);
+        })
+        .catch((err) => {
+          clearTimeout(timer);
+          reject(err);
+        });
+    });
+
+  let lastErr = null;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const res = await attemptPing();
+      if (res && (res.status === 'ok' || res.status === 200)) {
+        return {
+          configured: true,
+          reachable: true,
+          cloudName: conf.cloud_name,
+          missing: [],
+          pingStatus: 'ok',
+          reason: null,
+        };
+      }
       return {
         configured: true,
-        reachable: true,
+        reachable: false,
         cloudName: conf.cloud_name,
-        reason: null,
+        missing: [],
+        pingStatus: 'unauthorized',
+        reason: `Unexpected ping response: ${JSON.stringify(res)}`,
       };
+    } catch (err) {
+      lastErr = err;
+      const errMsg = String(err.message || '');
+      const httpCode = err.http_code;
+      if (httpCode === 401 || httpCode === 403 || /unauthorized|invalid api_key|must supply/i.test(errMsg)) {
+        return {
+          configured: true,
+          reachable: false,
+          cloudName: conf.cloud_name,
+          missing: [],
+          pingStatus: 'unauthorized',
+          reason: errMsg || 'Cloudinary credentials rejected (check cloud name, key or secret)',
+        };
+      }
+      if (attempt < 2) {
+        await new Promise((r) => setTimeout(r, 500));
+      }
     }
-    return {
-      configured: true,
-      reachable: false,
-      cloudName: conf.cloud_name,
-      reason: `Unexpected ping response: ${JSON.stringify(res)}`,
-    };
-  } catch (err) {
-    if (timer) clearTimeout(timer);
-    return {
-      configured: true,
-      reachable: false,
-      cloudName: conf.cloud_name,
-      reason: err.message || 'Cloudinary unreachable',
-    };
   }
+
+  return {
+    configured: true,
+    reachable: false,
+    cloudName: conf.cloud_name,
+    missing: [],
+    pingStatus: 'unreachable',
+    reason: lastErr?.message || 'Cloudinary unreachable after retry',
+  };
 }
 
 let hasLoggedStartup = false;

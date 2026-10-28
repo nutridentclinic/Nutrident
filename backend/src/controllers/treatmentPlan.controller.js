@@ -6,13 +6,32 @@ const AppError = require('../utils/appError');
 const { success } = require('../utils/response');
 const { notify } = require('../services/notification.service');
 
+function serializeTreatmentPlan(planDoc) {
+  if (!planDoc) return null;
+  const plan = typeof planDoc.toObject === 'function' ? planDoc.toObject() : { ...planDoc };
+  const steps = (plan.steps || []).map((step) => {
+    const s = typeof step.toObject === 'function' ? step.toObject() : { ...step };
+    const toothNumbers = s.toothNumbers || [];
+    return {
+      ...s,
+      teeth: toothNumbers,
+      toothNumbers,
+    };
+  });
+  return {
+    ...plan,
+    requiresFollowUp: Boolean(plan.followUpRequired),
+    followUpRequired: Boolean(plan.followUpRequired),
+    steps,
+  };
+}
+
 // @route POST /api/treatment-plans  (dentist)
 exports.createPlan = catchAsync(async (req, res, next) => {
   const dentist = await Dentist.findOne({ user: req.user._id });
   if (!dentist) return next(new AppError('Dentist profile not found.', 404));
 
   const { patientId, title, notes, steps, followUpRequired, followUpDate } = req.body;
-  const totalEstimatedCost = (steps || []).reduce((sum, s) => sum + (s.cost || 0), 0);
 
   const treatmentIds = (steps || []).map((s) => s.treatment).filter(Boolean);
   const treatments = treatmentIds.length > 0 ? await Treatment.find({ _id: { $in: treatmentIds } }) : [];
@@ -20,12 +39,17 @@ exports.createPlan = catchAsync(async (req, res, next) => {
 
   const enrichedSteps = (steps || []).map((s) => {
     const t = s.treatment ? treatmentMap.get(String(s.treatment)) : null;
+    const cost = s.cost !== undefined ? Number(s.cost) : (t?.defaultCost || 0);
     return {
       ...s,
       name: s.name || t?.name || 'Dental Procedure',
-      defaultCost: s.defaultCost !== undefined ? s.defaultCost : (t?.defaultCost || s.cost || 0),
+      cost,
+      defaultCost: s.defaultCost !== undefined ? Number(s.defaultCost) : (t?.defaultCost || cost),
+      toothNumbers: Array.isArray(s.toothNumbers) ? s.toothNumbers.map(Number) : (Array.isArray(s.teeth) ? s.teeth.map(Number) : []),
     };
   });
+
+  const totalEstimatedCost = enrichedSteps.reduce((sum, s) => sum + (s.cost || 0), 0);
 
   const plan = await TreatmentPlan.create({
     patient: patientId,
@@ -34,9 +58,13 @@ exports.createPlan = catchAsync(async (req, res, next) => {
     notes,
     steps: enrichedSteps,
     totalEstimatedCost,
-    followUpRequired,
-    followUpDate,
+    followUpRequired: Boolean(followUpRequired),
+    followUpDate: followUpDate || null,
   });
+
+  const populated = await TreatmentPlan.findById(plan._id)
+    .populate({ path: 'dentist', populate: { path: 'user', select: 'name profilePhoto' }, options: { strictPopulate: false } })
+    .populate({ path: 'steps.treatment', options: { strictPopulate: false } });
 
   await notify({
     userId: patientId,
@@ -46,7 +74,7 @@ exports.createPlan = catchAsync(async (req, res, next) => {
     relatedId: plan._id,
   });
 
-  success(res, 201, 'Treatment plan created.', plan);
+  success(res, 201, 'Treatment plan created.', serializeTreatmentPlan(populated || plan));
 });
 
 // @route GET /api/treatment-plans/me  (patient)
@@ -55,7 +83,7 @@ exports.getMyPlans = catchAsync(async (req, res) => {
     .populate({ path: 'dentist', populate: { path: 'user', select: 'name profilePhoto' }, options: { strictPopulate: false } })
     .populate({ path: 'steps.treatment', options: { strictPopulate: false } })
     .sort('-createdAt');
-  success(res, 200, 'Treatment plans fetched.', plans);
+  success(res, 200, 'Treatment plans fetched.', plans.map(serializeTreatmentPlan));
 });
 
 // @route GET /api/treatment-plans/patient/:patientId  (dentist/receptionist)
@@ -64,7 +92,7 @@ exports.getPatientPlans = catchAsync(async (req, res) => {
     .populate({ path: 'dentist', populate: { path: 'user', select: 'name profilePhoto' }, options: { strictPopulate: false } })
     .populate({ path: 'steps.treatment', options: { strictPopulate: false } })
     .sort('-createdAt');
-  success(res, 200, 'Treatment plans fetched.', plans);
+  success(res, 200, 'Treatment plans fetched.', plans.map(serializeTreatmentPlan));
 });
 
 // @route PATCH /api/treatment-plans/:id/steps/:stepId  (dentist updates a step's status)
@@ -83,6 +111,10 @@ exports.updateStep = catchAsync(async (req, res, next) => {
   if (plan.steps.every((s) => s.status === 'completed')) plan.status = 'completed';
   await plan.save();
 
+  const refreshed = await TreatmentPlan.findById(plan._id)
+    .populate({ path: 'dentist', populate: { path: 'user', select: 'name profilePhoto' }, options: { strictPopulate: false } })
+    .populate({ path: 'steps.treatment', options: { strictPopulate: false } });
+
   await notify({
     userId: plan.patient,
     title: 'Treatment Updated',
@@ -91,5 +123,5 @@ exports.updateStep = catchAsync(async (req, res, next) => {
     relatedId: plan._id,
   });
 
-  success(res, 200, 'Step updated.', plan);
+  success(res, 200, 'Step updated.', serializeTreatmentPlan(refreshed || plan));
 });

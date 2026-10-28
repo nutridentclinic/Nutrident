@@ -14,6 +14,8 @@ const { parseDateOnly, dayRange, todayInClinic } = require('../utils/clinicDate'
 const { processRefund } = require('../services/payment.service');
 const { generateAgoraToken, mongoIdToAgoraUid, isConfigured } = require('../config/agora');
 const { isAppointmentParticipant, isWithinVideoWindow } = require('../utils/appointmentAccess');
+const { resolvePrimaryDentist } = require('../utils/clinicDentist');
+const { computeBookableChecklist } = require('./dentist.controller');
 
 // Wraps Appointment.create() so a race-condition duplicate (caught by the DB's
 // partial unique index, not just the application-level assertSlotIsFree check)
@@ -29,25 +31,53 @@ const createAppointmentSafe = async (data) => {
   }
 };
 
-// Helper to resolve the clinic's single dentist
-const resolvePrimaryDentist = async (requestedDentistId) => {
-  const primary = await Dentist.findOne().populate('user', 'name profilePhoto');
-  if (!primary) {
-    throw new AppError('No dentist is configured for this clinic.', 404);
+function validateDentistBookability(dentist) {
+  const checklist = computeBookableChecklist(dentist);
+  if (!checklist.bookable) {
+    let code = 'DOCTOR_NOT_BOOKABLE';
+    let message = checklist.reasons[0] || 'This doctor is currently not accepting appointments.';
+
+    if (!checklist.checks.verified) {
+      code = 'DOCTOR_NOT_VERIFIED';
+      message = 'Credentials not verified';
+    } else if (!checklist.checks.accepting) {
+      code = 'DOCTOR_PAUSED';
+      if (dentist.pausedUntil && new Date(dentist.pausedUntil) > new Date()) {
+        const dateStr = new Date(dentist.pausedUntil).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+        message = dentist.pausedReason
+          ? `Appointments paused until ${dateStr}: ${dentist.pausedReason}`
+          : `Appointments paused until ${dateStr}`;
+      } else {
+        message = dentist.pausedReason ? `Appointments paused: ${dentist.pausedReason}` : 'Not accepting new appointments';
+      }
+    } else if (!checklist.checks.weeklyHoursSet) {
+      code = 'NO_AVAILABILITY';
+      message = 'Weekly hours not set';
+    } else if (!checklist.checks.slotLengthSet) {
+      code = 'NO_AVAILABILITY';
+      message = 'Slot duration not set';
+    } else if (!checklist.checks.feeSet) {
+      code = 'NO_AVAILABILITY';
+      message = 'Consultation fee not set';
+    }
+
+    return new AppError(message, 400, {
+      code,
+      reasons: checklist.reasons,
+      checklist,
+    });
   }
-  if (requestedDentistId && String(primary._id) !== String(requestedDentistId)) {
-    throw new AppError('The specified dentist is not the clinic doctor.', 400);
-  }
-  return primary;
-};
+  return null;
+}
 
 // @route POST /api/appointments  (patient books an appointment)
 exports.createAppointment = catchAsync(async (req, res, next) => {
   const { dentistId, date, startTime, mode, reasonForVisit, familyMemberName, payAtClinic, paymentOption } = req.body;
 
   const dentist = await resolvePrimaryDentist(dentistId);
-  if (!dentist.isActive || !dentist.isVerified || (dentist.pausedUntil && new Date(dentist.pausedUntil) > new Date())) {
-    return next(new AppError('This doctor is currently not accepting appointments.', 400));
+  const bookableError = validateDentistBookability(dentist);
+  if (bookableError) {
+    return next(bookableError);
   }
 
   // Confirm the requested date/time is actually one of the dentist's published, still-open slots
@@ -153,8 +183,9 @@ exports.createStaffAppointment = catchAsync(async (req, res, next) => {
   }
 
   const dentist = await resolvePrimaryDentist(dentistId);
-  if (!dentist.isActive || !dentist.isVerified) {
-    return next(new AppError('This doctor is currently not accepting appointments.', 400));
+  const bookableError = validateDentistBookability(dentist);
+  if (bookableError) {
+    return next(bookableError);
   }
 
   const publishedSlots = await getAvailableSlots(dentist._id, date);
@@ -545,9 +576,11 @@ exports.joinVideoCall = catchAsync(async (req, res, next) => {
 
 // @route GET /api/appointments (E3 - receptionist/admin appointment list)
 exports.getAllAppointments = catchAsync(async (req, res) => {
-  const { date, from, to, status, dentistId, patientId, search, page = 1, limit = 20 } = req.query;
+  const { date, from, to, status, paymentStatus, mode, dentistId, patientId, search, page = 1, limit = 20 } = req.query;
   const filter = {};
   if (status) filter.status = status;
+  if (paymentStatus) filter.paymentStatus = paymentStatus;
+  if (mode) filter.mode = mode;
   if (dentistId) filter.dentist = dentistId;
   if (patientId) filter.patient = patientId;
   if (date) {

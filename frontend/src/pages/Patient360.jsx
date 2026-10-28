@@ -565,9 +565,16 @@ export function Patient360({ readOnly = false } = {}) {
                         <h4 className="text-white font-bold text-base">{plan.title}</h4>
                         <p className="text-xs text-slate-400 mt-0.5">Created {formatClinicDate(plan.createdAt)}</p>
                       </div>
-                      <span className="text-sm font-semibold text-teal-400">
-                        {rupees(plan.totalEstimatedCost)}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        {(plan.followUpRequired || plan.requiresFollowUp) && (
+                          <span className="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full border border-amber-500/30">
+                            Follow-up: {plan.followUpDate ? formatClinicDate(plan.followUpDate) : "Required"}
+                          </span>
+                        )}
+                        <span className="text-sm font-semibold text-teal-400">
+                          {rupees(plan.totalEstimatedCost)}
+                        </span>
+                      </div>
                     </div>
 
                     {/* Progress Bar */}
@@ -582,20 +589,23 @@ export function Patient360({ readOnly = false } = {}) {
                     </div>
 
                     <div className="divide-y divide-slate-700/40 mt-4">
-                      {(plan.steps || []).map((step, idx) => (
-                        <div key={idx} className="py-2 flex items-center justify-between text-sm">
-                          <div>
-                            <span className="text-white font-medium">{step.name || step.treatment?.name || 'Procedure Step'}</span>
-                            {step.toothNumbers?.length > 0 && (
-                              <span className="text-xs text-slate-400 block">Teeth: {step.toothNumbers.join(', ')}</span>
-                            )}
+                      {(plan.steps || []).map((step, idx) => {
+                        const toothList = (step.toothNumbers && step.toothNumbers.length ? step.toothNumbers : step.teeth) || [];
+                        return (
+                          <div key={idx} className="py-2 flex items-center justify-between text-sm">
+                            <div>
+                              <span className="text-white font-medium">{step.name || step.treatment?.name || 'Procedure Step'}</span>
+                              {toothList.length > 0 && (
+                                <span className="text-xs text-slate-400 block">Teeth: {toothList.join(', ')}</span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <span className="text-slate-300">{rupees(step.cost)}</span>
+                              <StatusBadge value={step.status} />
+                            </div>
                           </div>
-                          <div className="flex items-center gap-3">
-                            <span className="text-slate-300">{rupees(step.cost)}</span>
-                            <StatusBadge value={step.status} />
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 )

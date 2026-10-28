@@ -19,13 +19,15 @@ exports.getSystemStatus = catchAsync(async (req, res) => {
 
   const firebaseConfigured = !!process.env.FIREBASE_SERVICE_ACCOUNT_BASE64;
 
-  const cloudinaryPing = !cloudinaryStatus.configured
-    ? 'not_configured'
-    : cloudinaryStatus.reachable
-      ? 'ok'
-      : (cloudinaryStatus.reason?.includes('401') || cloudinaryStatus.reason?.includes('Invalid') || cloudinaryStatus.reason?.includes('Must supply'))
-        ? 'unauthorized'
-        : 'unreachable';
+  const cloudinaryPing = cloudinaryStatus.pingStatus || (
+    !cloudinaryStatus.configured
+      ? 'not_configured'
+      : cloudinaryStatus.reachable
+        ? 'ok'
+        : (cloudinaryStatus.reason?.includes('401') || cloudinaryStatus.reason?.includes('Invalid') || cloudinaryStatus.reason?.includes('Must supply'))
+          ? 'unauthorized'
+          : 'unreachable'
+  );
 
   success(res, 200, 'System status fetched.', {
     uploads: cloudinaryStatus.configured && cloudinaryStatus.reachable,
@@ -34,10 +36,13 @@ exports.getSystemStatus = catchAsync(async (req, res) => {
     video: videoConfigured,
     firebase: firebaseConfigured,
     cloudinaryPing,
+    missingCloudinaryVars: cloudinaryStatus.missing || [],
     cloudinary: {
       configured: cloudinaryStatus.configured,
       reachable: cloudinaryStatus.reachable,
       cloudName: cloudinaryStatus.cloudName,
+      missing: cloudinaryStatus.missing || [],
+      pingStatus: cloudinaryPing,
       reason: cloudinaryStatus.reason,
     },
     providers: {

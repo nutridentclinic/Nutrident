@@ -128,33 +128,47 @@ cp backend/.env.example backend/.env
 
 Set the required environment variables:
 - `PORT=5000`
-- `NODE_ENV=development`
-- `CORS_ORIGINS=http://localhost:5173,http://localhost:3000`
+- `NODE_ENV=development` (or `production` on Render)
+- `TRUST_PROXY=1` (required when deployed behind reverse proxy like Render to key rate-limiters accurately)
+- `CORS_ORIGINS=http://localhost:5173,http://localhost:3000` (or exact Vercel frontend origin in production)
+- `CLIENT_URL=http://localhost:5173` (or production frontend URL)
 - `MONGO_URI=mongodb://localhost:27017/dental_clinic` (or your MongoDB Atlas connection URI)
 - `JWT_SECRET=` (at least 64 random characters, e.g. `node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"`)
-- `JWT_REFRESH_SECRET=` (a separate 64 random character string)
-- `JWT_EXPIRES_IN=7d`
-- `JWT_REFRESH_EXPIRES_IN=30d`
+- `JWT_REFRESH_SECRET=` (a separate distinct 64 random character string)
+- `JWT_EXPIRES_IN=15m` (short-lived access tokens with proactive background refresh ~60s before expiry)
+- `JWT_REFRESH_EXPIRES_IN=7d` (session duration with single-flight refresh across tabs)
+- `OTP_SECRET=` (at least 32 random characters for HMAC verification of registration/reset OTPs)
 - `BCRYPT_SALT_ROUNDS=10`
 - `CLINIC_TIMEZONE=Asia/Kolkata`
+- `SINGLE_DENTIST_MODE=true` (enforces single-doctor practice architecture)
 - `PENDING_APPOINTMENT_TTL_MINUTES=15`
 - `VIDEO_JOIN_EARLY_MINUTES=15`
 - `VIDEO_JOIN_LATE_MINUTES=30`
 - `ADMIN_EMAIL=admin@drnutrident.com`
 - `ADMIN_PASSWORD=SecureAdminPassword123!`
 - `ADMIN_PHONE=+919876543210`
-- `ADMIN_NAME=Super Admin`
+- `ADMIN_NAME=Clinic Admin`
+- `DOCTOR_EMAIL=siddheshvpatil02@gmail.com`
+- `DOCTOR_PASSWORD=Dentist@123`
+- `DOCTOR_PHONE=+919876543210`
+- `DOCTOR_NAME=Dr. Siddhesh Patil`
+- `DOCTOR_SPECIALIZATION=Chief Dental Surgeon & Implantologist`
+- `DOCTOR_QUALIFICATIONS=BDS, MDS (Oral & Maxillofacial Surgery)`
+- `DOCTOR_EXPERIENCE_YEARS=10`
+- `DOCTOR_CONSULTATION_FEE=500`
 
-Optional integration variables (can be populated when testing external providers):
+Optional external service integration variables (set in Render/Vercel settings):
 - `RAZORPAY_KEY_ID=rzp_test_...`
 - `RAZORPAY_KEY_SECRET=...`
 - `RAZORPAY_WEBHOOK_SECRET=...`
 - `AGORA_APP_ID=...`
 - `AGORA_APP_CERTIFICATE=...`
-- `CLOUDINARY_CLOUD_NAME=...`
+- `CLOUDINARY_CLOUD_NAME=...` (exact lowercase cloud name from Cloudinary dashboard)
 - `CLOUDINARY_API_KEY=...`
 - `CLOUDINARY_API_SECRET=...`
 - `BREVO_API_KEY=...`
+- `EMAIL_FROM_ADDRESS=...` (Brevo-verified sender email)
+- `FIREBASE_SERVICE_ACCOUNT_BASE64=...`
 
 > [!CAUTION]
 > Never place secrets or private keys in version control or frontend environment files. Keep `backend/.env` strictly in `.gitignore`.

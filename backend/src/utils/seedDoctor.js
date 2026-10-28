@@ -90,7 +90,8 @@ const seedDoctor = async () => {
       weeklyAvailability,
       slotDurationMinutes: 30,
     });
-    logger.info(`Doctor profile created for Dr. ${doctorUser.name}.`);
+    const displayName = doctorUser.name.startsWith('Dr.') ? doctorUser.name : `Dr. ${doctorUser.name}`;
+    logger.info(`Doctor profile created for ${displayName}.`);
   } else {
     dentistProfile.specialization = config.specialization;
     dentistProfile.qualifications = config.qualifications;
@@ -107,7 +108,8 @@ const seedDoctor = async () => {
       dentistProfile.slotDurationMinutes = 30;
     }
     await dentistProfile.save();
-    logger.info(`Doctor profile updated for Dr. ${doctorUser.name}.`);
+    const displayName = doctorUser.name.startsWith('Dr.') ? doctorUser.name : `Dr. ${doctorUser.name}`;
+    logger.info(`Doctor profile updated for ${displayName}.`);
   }
 
   // 3. Delete or deactivate every other dentist User + Dentist docs and log what was removed

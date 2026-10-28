@@ -11,34 +11,19 @@ import {
   YAxis,
 } from "recharts";
 import {
-  Activity,
-  AlertTriangle,
   ArrowRight,
-  BadgeCheck,
-  Building2,
-  Calendar,
   CalendarDays,
-  Camera,
-  Check,
-  Clock,
-  ClipboardList,
   Download,
   Edit2,
   Eye,
   EyeOff,
   FileText,
   KeyRound,
-  MessageSquareText,
-  PauseCircle,
-  PlayCircle,
   Plus,
   RefreshCw,
   Search,
-  ShieldAlert,
   ShieldCheck,
   Star,
-  Trash2,
-  UserCheck,
   UserPlus,
   Users,
   Wallet,
@@ -1119,7 +1104,7 @@ export function AdminReviews() {
 export function DentistManagement() {
   const queryClient = useQueryClient();
   const notify = useToast();
-  const { confirm, dialog } = useConfirm();
+  const { dialog } = useConfirm();
 
   const [form, setForm] = useState({
     name: "",
@@ -2712,6 +2697,16 @@ function SystemStatusCard() {
     <SectionPanel
       title="System integration status"
       description="Live operational readiness for third-party integrations (Cloudinary, Brevo, Razorpay, Agora)."
+      actions={
+        <button
+          type="button"
+          className="button button-quiet button-small"
+          onClick={() => query.refetch()}
+          disabled={query.isFetching}
+        >
+          <RefreshCw size={14} className={query.isFetching ? "spin" : ""} /> {query.isFetching ? "Testing…" : "Re-test now"}
+        </button>
+      }
     >
       {query.isLoading ? (
         <p className="muted-copy">Checking server integrations…</p>
@@ -2734,9 +2729,14 @@ function SystemStatusCard() {
                 {status.uploads ? "Operational" : "Unavailable"}
               </span>
             </div>
-            <small style={{ color: "var(--text-muted, #64748b)" }}>
-              Ping: {status.cloudinaryPing || "unknown"}
-              {status.reasonCategory?.uploads && status.reasonCategory.uploads !== "ok" && ` · ${status.reasonCategory.uploads}`}
+            <small style={{ color: "var(--text-muted, #64748b)", display: "block" }}>
+              Ping: <strong>{status.cloudinaryPing || "unknown"}</strong>
+            </small>
+            <small style={{ color: status.uploads ? "#16a34a" : "#b91c1c", display: "block", marginTop: "0.2rem" }}>
+              {status.cloudinaryPing === "ok" && "Cloudinary connected and authenticated."}
+              {status.cloudinaryPing === "not_configured" && "Missing required environment configuration."}
+              {status.cloudinaryPing === "unauthorized" && "Credentials rejected. Check cloud name, key & secret."}
+              {status.cloudinaryPing === "unreachable" && "Connection timed out during ping."}
             </small>
           </div>
 
@@ -2799,11 +2799,31 @@ function SystemStatusCard() {
       {status && !status.uploads && (
         <div className="notice notice-warn" style={{ marginTop: "1.2rem" }}>
           <strong>Cloudinary Upload Service Configuration Required:</strong>
+          {status.missingCloudinaryVars?.length > 0 && (
+            <div style={{ marginTop: "0.4rem", marginBottom: "0.4rem" }}>
+              <strong>Missing or unconfigured variables: </strong>
+              {status.missingCloudinaryVars.map((v) => (
+                <code key={v} style={{ marginRight: "0.4rem", padding: "2px 6px", background: "#fef2f2", color: "#991b1b", borderRadius: "4px" }}>
+                  {v}
+                </code>
+              ))}
+            </div>
+          )}
+          {status.cloudinaryPing === "unauthorized" && (
+            <p style={{ margin: "0.4rem 0", color: "#991b1b" }}>
+              <strong>Authentication Failure:</strong> Cloudinary rejected the credentials. Verify that the cloud name is lowercase and case-sensitive (not the mixed-case name), and that the key and secret belong to that cloud environment with no surrounding spaces or quotes.
+            </p>
+          )}
+          {status.cloudinaryPing === "unreachable" && (
+            <p style={{ margin: "0.4rem 0", color: "#991b1b" }}>
+              <strong>Connection Timeout:</strong> The ping timed out after 10 seconds. Click "Re-test now" once Render has fully spun up.
+            </p>
+          )}
           <ol style={{ margin: "0.4rem 0 0 1.2rem", padding: 0 }}>
-            <li>Verify Render environment variables: <code>CLOUDINARY_CLOUD_NAME</code>, <code>CLOUDINARY_API_KEY</code>, <code>CLOUDINARY_API_SECRET</code> without surrounding quotes or spaces.</li>
-            <li>In Cloudinary Console → Settings → Security, ensure <em>Allow delivery of PDF files</em> is checked.</li>
-            <li>Trigger a manual redeploy of the backend on Render to apply environment updates.</li>
-            <li>Confirm that this card shows Uploads (Cloudinary) as <strong>Operational</strong>.</li>
+            <li>In Render Dashboard → Environment, configure <code>CLOUDINARY_CLOUD_NAME</code>, <code>CLOUDINARY_API_KEY</code>, and <code>CLOUDINARY_API_SECRET</code> without quotes, spaces, or Windows line endings.</li>
+            <li>In Cloudinary Console → Settings → Security, ensure <em>PDF and ZIP files delivery</em> is checked.</li>
+            <li>Rotate the previously exposed API credentials in Cloudinary Settings and save new values to Render.</li>
+            <li>Click <strong>Re-test now</strong> above to verify that status changes to <strong>Operational</strong>.</li>
           </ol>
         </div>
       )}

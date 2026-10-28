@@ -109,8 +109,8 @@ describe('Patient, Admin and Staff Fixes (15 items)', () => {
         CLOUDINARY_API_SECRET: '',
       });
       expect(res.isConfigured).toBe(false);
-      expect(res.missing).toContain('NAME');
-      expect(res.missing).toContain('KEY');
+      expect(res.missing).toContain('CLOUDINARY_CLOUD_NAME');
+      expect(res.missing).toContain('CLOUDINARY_API_KEY');
     });
 
     it('GET /api/admin/system-status returns service status booleans for admin', async () => {

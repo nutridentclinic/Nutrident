@@ -56,9 +56,13 @@ const upload = (folder) => ({
       if (err) {
         if (err.name === 'MulterError') {
           if (err.code === 'LIMIT_FILE_SIZE') {
-            return next(new AppError('File size exceeds the 10 MB limit.', 400));
+            const sizeErr = new AppError('File size exceeds the 10 MB limit.', 400);
+            sizeErr.code = 'UPLOAD_TOO_LARGE';
+            return next(sizeErr);
           }
-          return next(new AppError(`Upload error: ${err.message}`, 400));
+          const multerErr = new AppError(`Upload error: ${err.message}`, 400);
+          multerErr.code = 'UPLOAD_FAILED';
+          return next(multerErr);
         }
         return next(err);
       }
@@ -72,18 +76,24 @@ const upload = (folder) => ({
       if (!isCloudinaryConfigured()) {
         const conf = getNormalizedCloudinaryConfig();
         logger.warn(`Upload rejected: Cloudinary is not configured on the server (missing: ${conf.missing.join(', ')})`);
-        return next(new AppError(FRIENDLY_UPLOAD_ERROR, 503));
+        const confErr = new AppError(FRIENDLY_UPLOAD_ERROR, 503);
+        confErr.code = 'UPLOAD_NOT_CONFIGURED';
+        return next(confErr);
       }
 
       // 2. Size verification
       if (req.file.size > 10 * 1024 * 1024) {
-        return next(new AppError('File size exceeds the 10 MB limit.', 400));
+        const sizeErr = new AppError('File size exceeds the 10 MB limit.', 400);
+        sizeErr.code = 'UPLOAD_TOO_LARGE';
+        return next(sizeErr);
       }
 
       // 3. Real magic bytes validation (magic bytes must match JPG, PNG, WEBP, or PDF)
       const detected = detectMagicBytes(req.file.buffer);
       if (!detected) {
-        return next(new AppError('Unsupported file type. Only JPG, PNG, WEBP, PDF allowed.', 400));
+        const typeErr = new AppError('Unsupported file type. Only JPG, PNG, WEBP, PDF allowed.', 400);
+        typeErr.code = 'UPLOAD_BAD_TYPE';
+        return next(typeErr);
       }
 
       // 4. Upload buffer to Cloudinary
@@ -113,7 +123,15 @@ const upload = (folder) => ({
           error: uploadErr.stack || uploadErr,
         });
 
-        return next(new AppError(FRIENDLY_UPLOAD_ERROR, 503));
+        const appErr = new AppError(FRIENDLY_UPLOAD_ERROR, 503);
+        if (httpCode === 401 || httpCode === 403 || /unauthorized|invalid api_key|must supply/i.test(msg)) {
+          appErr.code = 'UPLOAD_AUTH_FAILED';
+        } else if (/timeout|timed out|enotfound|econnrefused|unreachable/i.test(msg)) {
+          appErr.code = 'UPLOAD_UNREACHABLE';
+        } else {
+          appErr.code = 'UPLOAD_FAILED';
+        }
+        return next(appErr);
       }
     });
   },

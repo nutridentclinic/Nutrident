@@ -12,6 +12,7 @@ import {
   MessageSquareText,
   Plus,
   Search,
+  Trash2,
   UserRound,
   X,
 } from "lucide-react";
@@ -83,10 +84,14 @@ export function DentistDashboard() {
     queryKey: ["appointments", "dentist", dateToday()],
     queryFn: () => api.appointments.dentistMine({ date: dateToday() }),
   });
-  const needsAvailability =
-    profile &&
-    !(profile.weeklyAvailability || []).some((day) => (day.slots || []).length);
-  const isPaused = profile && (!profile.isActive || (profile.pausedUntil && new Date(profile.pausedUntil) > new Date()));
+  const primary = usePrimaryDentist();
+  const docProfile = profile || primary.dentist;
+  const isVerified = Boolean(docProfile?.isVerified);
+  const isAccepting = Boolean(docProfile?.isActive && (!docProfile?.pausedUntil || new Date(docProfile.pausedUntil) <= new Date()));
+  const hasWeeklyHours = Boolean(docProfile?.weeklyAvailability?.some((day) => (day.slots || []).length > 0));
+  const hasSlotLength = Boolean((docProfile?.slotDurationMinutes || docProfile?.slotDuration) > 0);
+  const hasFee = Boolean(docProfile?.consultationFee > 0);
+  const isReady = isVerified && isAccepting && hasWeeklyHours && hasSlotLength && hasFee;
 
   return (
     <div>
@@ -100,46 +105,65 @@ export function DentistDashboard() {
           </Link>
         }
       />
-      {isPaused && (
-        <div className="notice notice-error" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', marginBottom: '1.25rem' }}>
-          <div>
-            <strong>Appointments are currently paused.</strong>
-            <p style={{ margin: '0.25rem 0 0', fontSize: '0.875rem' }}>
-              Patients cannot book new appointments{profile.pausedReason ? ` (Reason: ${profile.pausedReason})` : ''}{profile.pausedUntil ? ` until ${formatClinicDate(profile.pausedUntil)}` : ''}.
-            </p>
+      {!isReady && (
+        <div className="notice notice-warn" style={{ marginBottom: "1.25rem" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.5rem", marginBottom: "0.5rem" }}>
+            <strong>Booking Readiness Checklist: Appointments are currently not fully bookable online.</strong>
+            <span className="status-badge status-inactive">Not Bookable</span>
           </div>
-          <button
-            type="button"
-            className="button button-primary button-small"
-            style={{ flexShrink: 0 }}
-            onClick={async () => {
-              try {
-                await api.dentists.toggleActive({ isActive: true });
-                notify('Resumed accepting appointments.');
-                queryClient.invalidateQueries({ queryKey: ['auth-profile'] });
-                queryClient.invalidateQueries({ queryKey: ['dentist-profile'] });
-                queryClient.invalidateQueries({ queryKey: ['primary-dentist'] });
-              } catch (err) {
-                notify(err.message, 'error');
-              }
-            }}
-          >
-            Resume appointments
-          </button>
-        </div>
-      )}
-      {needsAvailability && (
-        <div className="notice notice-warn availability-alert">
-          <span>
-            <strong>Availability is not set yet.</strong> Patients cannot book
-            until you publish your weekly hours.
-          </span>
-          <Link
-            className="button button-outline button-small"
-            to="/dentist/availability"
-          >
-            Set availability <ArrowRight size={14} />
-          </Link>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "0.75rem", marginTop: "0.5rem", fontSize: "0.9rem" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0.4rem 0.6rem", background: isVerified ? "#f0f8f6" : "#fff2f0", borderRadius: "6px" }}>
+              <span>{isVerified ? "✓" : "✗"} Credentials verified</span>
+              {!isVerified && <span style={{ fontSize: "0.75rem", color: "#d32f2f" }}>Awaiting admin</span>}
+            </div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0.4rem 0.6rem", background: isAccepting ? "#f0f8f6" : "#fff2f0", borderRadius: "6px" }}>
+              <span>{isAccepting ? "✓" : "✗"} Accepting visits</span>
+              {!isAccepting && (
+                <button
+                  type="button"
+                  className="button button-primary button-small"
+                  style={{ fontSize: "0.75rem", padding: "2px 8px" }}
+                  onClick={async () => {
+                    try {
+                      await api.dentists.toggleActive({ isActive: true });
+                      notify("Resumed accepting appointments.");
+                      queryClient.invalidateQueries({ queryKey: ["auth-profile"] });
+                      queryClient.invalidateQueries({ queryKey: ["dentist-profile"] });
+                      queryClient.invalidateQueries({ queryKey: ["primary-dentist"] });
+                    } catch (err) {
+                      notify(err.message, "error");
+                    }
+                  }}
+                >
+                  Resume
+                </button>
+              )}
+            </div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0.4rem 0.6rem", background: hasWeeklyHours ? "#f0f8f6" : "#fff2f0", borderRadius: "6px" }}>
+              <span>{hasWeeklyHours ? "✓" : "✗"} Weekly schedule</span>
+              {!hasWeeklyHours && (
+                <Link to="/dentist/availability" className="button button-outline button-small" style={{ fontSize: "0.75rem", padding: "2px 8px" }}>
+                  Set hours
+                </Link>
+              )}
+            </div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0.4rem 0.6rem", background: hasSlotLength ? "#f0f8f6" : "#fff2f0", borderRadius: "6px" }}>
+              <span>{hasSlotLength ? "✓" : "✗"} Slot length ({docProfile?.slotDurationMinutes || docProfile?.slotDuration || 0}m)</span>
+              {!hasSlotLength && (
+                <Link to="/dentist/availability" className="button button-outline button-small" style={{ fontSize: "0.75rem", padding: "2px 8px" }}>
+                  Set slot
+                </Link>
+              )}
+            </div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0.4rem 0.6rem", background: hasFee ? "#f0f8f6" : "#fff2f0", borderRadius: "6px" }}>
+              <span>{hasFee ? "✓" : "✗"} Consultation fee ({rupees(docProfile?.consultationFee)})</span>
+              {!hasFee && (
+                <Link to="/dentist/profile" className="button button-outline button-small" style={{ fontSize: "0.75rem", padding: "2px 8px" }}>
+                  Set fee
+                </Link>
+              )}
+            </div>
+          </div>
         </div>
       )}
       <div className="dashboard-metrics">
@@ -1662,34 +1686,110 @@ function CreatePlan({ patientId, onCreated }) {
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
-  const [treatmentId, setTreatmentId] = useState("");
+  const [followUpRequired, setFollowUpRequired] = useState(false);
+  const [followUpDate, setFollowUpDate] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [steps, setSteps] = useState([
+    { treatment: "", name: "", cost: 0, toothNumbers: [], status: "planned" },
+  ]);
   const notify = useToast();
+
+  const handleTreatmentChange = (index, trId) => {
+    const catalogItem = (treatments.data?.data || []).find((t) => t._id === trId);
+    setSteps((prev) =>
+      prev.map((s, i) =>
+        i === index
+          ? {
+              ...s,
+              treatment: trId,
+              name: catalogItem?.name || s.name,
+              cost: catalogItem?.defaultCost ?? s.cost ?? 0,
+            }
+          : s
+      )
+    );
+  };
+
+  const handleStepFieldChange = (index, field, value) => {
+    setSteps((prev) =>
+      prev.map((s, i) => (i === index ? { ...s, [field]: value } : s))
+    );
+  };
+
+  const toggleTooth = (index, toothNum) => {
+    setSteps((prev) =>
+      prev.map((s, i) => {
+        if (i !== index) return s;
+        const current = s.toothNumbers || [];
+        const exists = current.includes(toothNum);
+        const updated = exists
+          ? current.filter((n) => n !== toothNum)
+          : [...current, toothNum].sort((a, b) => a - b);
+        return { ...s, toothNumbers: updated };
+      })
+    );
+  };
+
+  const addStep = () => {
+    setSteps((prev) => [
+      ...prev,
+      { treatment: "", name: "", cost: 0, toothNumbers: [], status: "planned" },
+    ]);
+  };
+
+  const removeStep = (index) => {
+    if (steps.length <= 1) return;
+    setSteps((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const totalCost = steps.reduce((sum, s) => sum + Number(s.cost || 0), 0);
+
   const submit = async (event) => {
     event.preventDefault();
-    const item = (treatments.data?.data || []).find(
-      (entry) => entry._id === treatmentId,
-    );
+    if (!title.trim()) {
+      notify("Please provide a plan title.", "error");
+      return;
+    }
+    for (let i = 0; i < steps.length; i++) {
+      if (!steps[i].name && !steps[i].treatment) {
+        notify(`Please select or enter a treatment procedure for step ${i + 1}.`, "error");
+        return;
+      }
+    }
+
+    setBusy(true);
     try {
-      const result = await api.plans.create({
+      const payload = {
         patientId,
         title,
         notes,
-        steps: [
-          {
-            treatment: treatmentId,
-            name: item?.name,
-            cost: item?.defaultCost || 0,
-            status: "planned",
-          },
-        ],
-      });
-      notify(result.message);
+        followUpRequired,
+        followUpDate: followUpRequired && followUpDate ? followUpDate : undefined,
+        steps: steps.map((s) => ({
+          treatment: s.treatment || undefined,
+          name: s.name || "Dental Procedure",
+          cost: Number(s.cost || 0),
+          toothNumbers: s.toothNumbers || [],
+          status: s.status || "planned",
+        })),
+      };
+
+      const result = await api.plans.create(payload);
+      notify(result.message || "Treatment plan created.");
       setOpen(false);
+      setTitle("");
+      setNotes("");
+      setFollowUpRequired(false);
+      setFollowUpDate("");
+      setSteps([{ treatment: "", name: "", cost: 0, toothNumbers: [], status: "planned" }]);
       onCreated();
     } catch (error) {
       notify(error.message, "error");
+    } finally {
+      setBusy(false);
     }
   };
+
   return (
     <>
       <button
@@ -1699,37 +1799,194 @@ function CreatePlan({ patientId, onCreated }) {
         <Plus size={15} /> New plan
       </button>
       {open && (
-        <form className="inline-create-form" onSubmit={submit}>
-          <Field label="Plan title">
-            <TextInput
-              required
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-            />
-          </Field>
-          <Field label="Treatment">
-            <TextInput
-              as="select"
-              required
-              value={treatmentId}
-              onChange={(event) => setTreatmentId(event.target.value)}
-            >
-              <option value="">Choose from catalog</option>
-              {(treatments.data?.data || []).map((item) => (
-                <option value={item._id} key={item._id}>
-                  {item.name}
-                </option>
-              ))}
-            </TextInput>
-          </Field>
-          <Field label="Notes">
-            <TextInput
-              value={notes}
-              onChange={(event) => setNotes(event.target.value)}
-            />
-          </Field>
-          <button className="button button-primary">Create plan</button>
-        </form>
+        <div className="modal-backdrop" onClick={() => setOpen(false)}>
+          <div
+            className="modal-dialog"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: "700px", width: "95%", maxHeight: "90vh", overflowY: "auto" }}
+          >
+            <div className="modal-header">
+              <h2>Create Treatment Plan</h2>
+              <button type="button" className="icon-button" onClick={() => setOpen(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            <form onSubmit={submit} className="stack-form" style={{ padding: "1.2rem" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+                <Field label="Plan title *" className="field-wide">
+                  <TextInput
+                    required
+                    placeholder="e.g. Root Canal Therapy & Crown"
+                    value={title}
+                    onChange={(event) => setTitle(event.target.value)}
+                  />
+                </Field>
+                <Field label="Clinical notes" className="field-wide">
+                  <TextInput
+                    as="textarea"
+                    rows={2}
+                    placeholder="Clinical diagnosis, patient preferences or notes"
+                    value={notes}
+                    onChange={(event) => setNotes(event.target.value)}
+                  />
+                </Field>
+              </div>
+
+              <div style={{ marginTop: "1rem" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.6rem" }}>
+                  <label className="field-label" style={{ fontWeight: 600 }}>Treatment Steps ({steps.length})</label>
+                  <button type="button" className="button button-quiet button-small" onClick={addStep}>
+                    <Plus size={14} /> Add step
+                  </button>
+                </div>
+
+                <div style={{ display: "grid", gap: "1rem" }}>
+                  {steps.map((step, idx) => (
+                    <div
+                      key={idx}
+                      style={{
+                        padding: "0.8rem",
+                        borderRadius: "8px",
+                        border: "1px solid #dbe5e1",
+                        background: "#fafcfb",
+                      }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
+                        <strong>Step {idx + 1}</strong>
+                        {steps.length > 1 && (
+                          <button
+                            type="button"
+                            className="button button-quiet button-small"
+                            style={{ color: "#d32f2f", padding: "2px 6px" }}
+                            onClick={() => removeStep(idx)}
+                          >
+                            <Trash2 size={13} /> Remove
+                          </button>
+                        )}
+                      </div>
+
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.8rem" }}>
+                        <Field label="Treatment catalog item">
+                          <TextInput
+                            as="select"
+                            value={step.treatment}
+                            onChange={(e) => handleTreatmentChange(idx, e.target.value)}
+                          >
+                            <option value="">Custom / Choose procedure</option>
+                            {(treatments.data?.data || []).map((item) => (
+                              <option value={item._id} key={item._id}>
+                                {item.name} ({rupees(item.defaultCost)})
+                              </option>
+                            ))}
+                          </TextInput>
+                        </Field>
+
+                        <Field label="Procedure step name *">
+                          <TextInput
+                            required
+                            placeholder="e.g. Molar Access & Canal Cleaning"
+                            value={step.name}
+                            onChange={(e) => handleStepFieldChange(idx, "name", e.target.value)}
+                          />
+                        </Field>
+
+                        <Field label="Estimated cost (INR) *">
+                          <TextInput
+                            type="number"
+                            min="0"
+                            required
+                            value={step.cost}
+                            onChange={(e) => handleStepFieldChange(idx, "cost", e.target.value)}
+                          />
+                        </Field>
+
+                        <Field label="Initial step status">
+                          <TextInput
+                            as="select"
+                            value={step.status}
+                            onChange={(e) => handleStepFieldChange(idx, "status", e.target.value)}
+                          >
+                            <option value="planned">Planned</option>
+                            <option value="in-progress">In progress</option>
+                            <option value="completed">Completed</option>
+                          </TextInput>
+                        </Field>
+                      </div>
+
+                      {/* FDI Tooth picker */}
+                      <div style={{ marginTop: "0.6rem" }}>
+                        <label style={{ fontSize: "0.8rem", color: "#5d6e69", display: "block", marginBottom: "0.3rem" }}>
+                          Tooth Numbers (FDI): {step.toothNumbers?.length ? step.toothNumbers.join(", ") : "General / All"}
+                        </label>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "3px", maxHeight: "80px", overflowY: "auto" }}>
+                          {FDI_TEETH.map((num) => {
+                            const isSelected = (step.toothNumbers || []).includes(num);
+                            return (
+                              <button
+                                key={num}
+                                type="button"
+                                style={{
+                                  fontSize: "0.75rem",
+                                  padding: "2px 6px",
+                                  borderRadius: "4px",
+                                  border: isSelected ? "1px solid #137a76" : "1px solid #cbd5e1",
+                                  background: isSelected ? "#137a76" : "#fff",
+                                  color: isSelected ? "#fff" : "#334155",
+                                  cursor: "pointer",
+                                }}
+                                onClick={() => toggleTooth(idx, num)}
+                              >
+                                {num}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Follow-up section */}
+              <div style={{ marginTop: "1rem", paddingTop: "0.8rem", borderTop: "1px solid #e7eeeb" }}>
+                <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer", marginBottom: "0.5rem" }}>
+                  <input
+                    type="checkbox"
+                    checked={followUpRequired}
+                    onChange={(e) => setFollowUpRequired(e.target.checked)}
+                    style={{ width: "16px", height: "16px" }}
+                  />
+                  <span style={{ fontSize: "0.9rem", fontWeight: 500 }}>Follow-up consultation required</span>
+                </label>
+                {followUpRequired && (
+                  <Field label="Recommended follow-up date">
+                    <TextInput
+                      type="date"
+                      value={followUpDate}
+                      onChange={(e) => setFollowUpDate(e.target.value)}
+                    />
+                  </Field>
+                )}
+              </div>
+
+              {/* Total & Submit */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "1.2rem", paddingTop: "0.8rem", borderTop: "1px solid #e7eeeb" }}>
+                <div>
+                  <span style={{ fontSize: "0.85rem", color: "#64748b" }}>Total Estimated Cost: </span>
+                  <strong style={{ fontSize: "1.1rem", color: "#137a76" }}>{rupees(totalCost)}</strong>
+                </div>
+                <div style={{ display: "flex", gap: "0.5rem" }}>
+                  <button type="button" className="button button-quiet" onClick={() => setOpen(false)} disabled={busy}>
+                    Cancel
+                  </button>
+                  <button type="submit" className="button button-primary" disabled={busy}>
+                    {busy ? "Saving Plan…" : "Create Treatment Plan"}
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </>
   );
@@ -1820,7 +2077,6 @@ export function QueuePage({ role = "dentist" }) {
   const [date, setDate] = useState(dateToday());
   const [patientSearch, setPatientSearch] = useState("");
   const [selectedPatient, setSelectedPatient] = useState(null);
-  const [appointmentId, setAppointmentId] = useState("");
   const [socketConnected, setSocketConnected] = useState(false);
   const queryClient = useQueryClient();
   const notify = useToast();
@@ -1888,7 +2144,6 @@ export function QueuePage({ role = "dentist" }) {
       notify(result.message);
       setSelectedPatient(null);
       setPatientSearch("");
-      setAppointmentId("");
       queue.refetch();
     } catch (error) {
       notify(error.message, "error");
@@ -2028,7 +2283,7 @@ export function QueuePage({ role = "dentist" }) {
           {/* Prompt to register if patient is not registered */}
           <div className="notice notice-info" style={{ marginTop: "1.2rem" }}>
             <p>
-              <strong>Patient does not have an account?</strong> Staff walk-in registration is disabled to ensure proper security and verified patient records.
+              <strong>Patient does not have an account?</strong> Register them directly from the Patients directory or invite them to create an account online:
             </p>
             <div style={{ display: "flex", alignItems: "center", gap: "0.8rem", marginTop: "0.4rem" }}>
               <span>Ask the patient to self-register at: <code>{typeof window !== "undefined" ? window.location.origin : ""}/register</code></span>

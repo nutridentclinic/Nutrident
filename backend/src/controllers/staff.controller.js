@@ -117,7 +117,7 @@ exports.updateStaff = catchAsync(async (req, res, next) => {
 
 // @route POST /api/staff/:id/reset-password  (admin only)
 exports.resetStaffPassword = catchAsync(async (req, res, next) => {
-  const { temporaryPassword } = req.body;
+  const temporaryPassword = req.body.temporaryPassword || req.body.password;
   if (!temporaryPassword || temporaryPassword.length < 6) {
     return next(new AppError('Temporary password must be at least 6 characters.', 400));
   }

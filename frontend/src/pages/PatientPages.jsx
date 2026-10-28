@@ -868,8 +868,10 @@ export function AppointmentBooking() {
             Dr. {dentist?.user?.name || "The doctor"} is not taking new appointments
             {dentist?.pausedUntil ? ` until ${formatClinicDate(dentist.pausedUntil)}` : " online at this time"}.
           </strong>
-          {dentist?.pausedReason && (
-            <p style={{ marginTop: "0.4rem" }}>Reason: {dentist.pausedReason}</p>
+          {primary.bookingDisabledReason && (
+            <p style={{ marginTop: "0.4rem" }}>
+              <strong>Status:</strong> {primary.bookingDisabledReason}
+            </p>
           )}
           <p style={{ marginTop: "0.4rem" }}>
             Please call the clinic directly at {settings?.contactPhone || "the front desk"} or check back soon. Existing appointments can still be viewed in My Appointments.
@@ -1171,14 +1173,17 @@ export function AppointmentBooking() {
               </button>
             ) : (
               <button
-                disabled={busy || !selectedSlot}
+                disabled={busy || !selectedSlot || !isAcceptingAppointments}
+                title={!isAcceptingAppointments ? (primary.bookingDisabledReason || "Doctor is not accepting appointments") : undefined}
                 className="button button-primary button-wide"
               >
                 {busy
                   ? resultLabel || "Working…"
-                  : paymentChoice === "at-clinic"
-                    ? "Confirm booking (Pay at clinic)"
-                    : "Continue to secure payment"}{" "}
+                  : !isAcceptingAppointments
+                    ? (primary.bookingDisabledReason || "Booking unavailable")
+                    : paymentChoice === "at-clinic"
+                      ? "Confirm booking (Pay at clinic)"
+                      : "Continue to secure payment"}{" "}
                 <ArrowRight size={16} />
               </button>
             )}
@@ -1412,12 +1417,33 @@ export function PatientRecords() {
 
 export function PatientTreatmentPlans() {
   const user = useAuthStore((state) => state.user);
+  const status = useAuthStore((state) => state.status);
+  const isBooting = status === "booting" && !user && !import.meta.env?.VITEST;
+
   const plans = useQuery({
-    queryKey: ["patient-plans", user?._id],
+    queryKey: ["patient-plans", user?._id || "me"],
     queryFn: api.plans.mine,
+    enabled: Boolean(user?._id) || Boolean(import.meta.env?.VITEST),
     ...queryOptions,
   });
   const planItems = plans.data?.data || [];
+
+  if (isBooting) {
+    return (
+      <div>
+        <PageTitle
+          eyebrow="Clinical care plan"
+          title="Treatment plans"
+          description="Review planned dental procedures, completed steps, and estimated visit costs."
+        />
+        <div className="skeleton-card" style={{ padding: "2rem", display: "grid", gap: "1rem" }}>
+          <div className="skeleton-bar" style={{ height: "24px", width: "40%" }} />
+          <div className="skeleton-bar" style={{ height: "16px", width: "70%" }} />
+          <div className="skeleton-bar" style={{ height: "80px", width: "100%" }} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -1462,6 +1488,7 @@ export function PatientTreatmentPlans() {
               .filter((s) => s.status === "completed")
               .reduce((sum, s) => sum + Number(s.cost || 0), 0);
             const totalCost = plan.totalEstimatedCost ?? steps.reduce((sum, s) => sum + Number(s.cost || 0), 0);
+            const hasFollowUp = Boolean(plan.requiresFollowUp || plan.followUpRequired);
 
             return (
               <article className="plan-card" key={plan._id} style={{ marginBottom: "1.5rem" }}>
@@ -1474,7 +1501,7 @@ export function PatientTreatmentPlans() {
                     </p>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                    {plan.requiresFollowUp && (
+                    {hasFollowUp && (
                       <span className="status-badge status-warn" style={{ fontSize: "0.8rem" }}>
                         Follow-up: {plan.followUpDate ? fmtDate(plan.followUpDate) : "Required"}
                       </span>
@@ -1513,37 +1540,40 @@ export function PatientTreatmentPlans() {
 
                 <div className="plan-steps" style={{ marginTop: "1rem" }}>
                   <h4 style={{ fontSize: "0.95rem", marginBottom: "0.5rem" }}>Treatment Steps</h4>
-                  {steps.map((step, idx) => (
-                    <div className="plan-step" key={step._id || idx} style={{ display: "flex", alignItems: "center", gap: "0.8rem", padding: "0.6rem 0", borderBottom: "1px solid #f0f4f2" }}>
-                      <span className="step-check">
-                        {step.status === "completed" ? (
-                          <Check size={16} color="#2a9d8f" />
-                        ) : (
-                          <Clock3 size={16} color="#8c9b96" />
-                        )}
-                      </span>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                          <strong>
-                            {step.treatment?.name || step.name || "Treatment Procedure"}
-                          </strong>
-                          <StatusBadge value={step.status} />
+                  {steps.map((step, idx) => {
+                    const toothList = (step.toothNumbers && step.toothNumbers.length ? step.toothNumbers : step.teeth) || [];
+                    return (
+                      <div className="plan-step" key={step._id || idx} style={{ display: "flex", alignItems: "center", gap: "0.8rem", padding: "0.6rem 0", borderBottom: "1px solid #f0f4f2" }}>
+                        <span className="step-check">
+                          {step.status === "completed" ? (
+                            <Check size={16} color="#2a9d8f" />
+                          ) : (
+                            <Clock3 size={16} color="#8c9b96" />
+                          )}
+                        </span>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                            <strong>
+                              {step.treatment?.name || step.name || "Treatment Procedure"}
+                            </strong>
+                            <StatusBadge value={step.status} />
+                          </div>
+                          <small style={{ color: "#6b7d78" }}>
+                            {toothList.length ? `Teeth: ${toothList.join(", ")}` : "Teeth: General"} · {rupees(step.cost)}
+                          </small>
                         </div>
-                        <small style={{ color: "#6b7d78" }}>
-                          {step.teeth?.length ? `Teeth: ${step.teeth.join(", ")}` : "Teeth: General"} · {rupees(step.cost)}
-                        </small>
-                      </div>
 
-                      {step.appointment && (
-                        <Link
-                          to={`/app/appointments/${step.appointment?._id || step.appointment}`}
-                          className="button button-quiet button-small"
-                        >
-                          Linked visit <ArrowRight size={13} />
-                        </Link>
-                      )}
-                    </div>
-                  ))}
+                        {step.appointment && (
+                          <Link
+                            to={`/app/appointments/${step.appointment?._id || step.appointment}`}
+                            className="button button-quiet button-small"
+                          >
+                            Linked visit <ArrowRight size={13} />
+                          </Link>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
 
                 <div className="plan-total" style={{ marginTop: "1rem", paddingTop: "0.8rem", borderTop: "1px solid #e7eeeb", display: "flex", justifyContent: "space-between" }}>

@@ -8,6 +8,7 @@ const { success } = require('../utils/response');
 const { getAvailableSlots, getDentistAvailabilityRange } = require('../services/availability.service');
 const { deleteCloudinaryFile } = require('../utils/cloudinaryCleanup');
 const escapeRegex = require('../utils/escapeRegex');
+const { getClinicDentist } = require('../utils/clinicDentist');
 
 function computeBookableChecklist(dentist) {
   const reasons = [];
@@ -33,6 +34,8 @@ function computeBookableChecklist(dentist) {
   };
 }
 
+exports.computeBookableChecklist = computeBookableChecklist;
+
 // @route POST /api/dentists  (admin only) - onboard a new dentist
 exports.createDentist = catchAsync(async (req, res, next) => {
   if (process.env.SINGLE_DENTIST_MODE !== 'false') {
@@ -42,12 +45,12 @@ exports.createDentist = catchAsync(async (req, res, next) => {
     }
   }
 
-  const { name, email, phone, password, specialization, qualifications, experienceYears, consultationFee, about, languages, clinicAddress } = req.body;
+  const { name, email, phone, password, specialization, qualifications, experienceYears, consultationFee, about, languages, clinicAddress, slotDurationMinutes } = req.body;
 
   const existing = await User.findOne({ $or: [{ email }, { phone }] });
   if (existing) return next(new AppError('A user with this email or phone already exists.', 409));
 
-  const user = await User.create({ name, email, phone, password, role: 'dentist', isEmailVerified: true });
+  const user = await User.create({ name, email, phone, password, role: 'dentist', isEmailVerified: true, active: true });
   const dentist = await Dentist.create({
     user: user._id,
     specialization,
@@ -57,11 +60,16 @@ exports.createDentist = catchAsync(async (req, res, next) => {
     about,
     languages,
     clinicAddress,
+    isVerified: true,
+    isActive: true,
+    pausedUntil: null,
+    pausedReason: '',
+    slotDurationMinutes: slotDurationMinutes || 30,
   });
 
   const safeUser = user.toObject();
   delete safeUser.password;
-  success(res, 201, 'Dentist onboarded successfully. Pending credential verification.', { user: safeUser, dentist });
+  success(res, 201, 'Dentist onboarded successfully.', { user: safeUser, dentist });
 });
 
 // @route GET /api/dentists  - search/filter/discover dentists
@@ -114,7 +122,7 @@ exports.getNearbyDentists = catchAsync(async (req, res, next) => {
 
 // @route GET /api/dentists/primary (public) - single-dentist profile and reviews
 exports.getPrimaryDentist = catchAsync(async (req, res, next) => {
-  const dentist = await Dentist.findOne().populate('user', 'name profilePhoto phone email active');
+  const dentist = await getClinicDentist({ populateUser: true, populateSelect: 'name profilePhoto phone email active' });
   if (!dentist) {
     return next(new AppError('No dentist has been set up for this clinic yet.', 404));
   }
@@ -149,7 +157,7 @@ exports.getPrimarySlots = catchAsync(async (req, res, next) => {
   const { date } = req.query;
   if (!date) return next(new AppError('date query param is required (YYYY-MM-DD).', 400));
 
-  const dentist = await Dentist.findOne();
+  const dentist = await getClinicDentist({ populateUser: false });
   if (!dentist) {
     return next(new AppError('No dentist has been set up for this clinic yet.', 404));
   }
@@ -160,7 +168,7 @@ exports.getPrimarySlots = catchAsync(async (req, res, next) => {
 
 // @route GET /api/dentists/primary/availability?from=YYYY-MM-DD&to=YYYY-MM-DD
 exports.getPrimaryAvailability = catchAsync(async (req, res, next) => {
-  const dentist = await Dentist.findOne();
+  const dentist = await getClinicDentist({ populateUser: false });
   if (!dentist) {
     return next(new AppError('No dentist has been set up for this clinic yet.', 404));
   }

@@ -49,6 +49,8 @@ const run = async () => {
         { name: 'In-Clinic Teeth Whitening', category: 'Cosmetic', defaultCost: 6000, estimatedDurationMinutes: 60, description: 'Professional enamel whitening with LED activation.' },
       ]);
       logger.info('Starter treatment catalog created.');
+    }
+
     const seedDoctor = require('./seedDoctor');
     try {
       await seedDoctor();
