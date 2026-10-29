@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
   Activity,
@@ -20,8 +20,9 @@ import {
 import { useAuthStore } from '../store/auth.js'
 import { logout } from '../auth/session.js'
 import { api } from '../api/domains.js'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useIdleLogout, IdleWarningModal } from '../hooks/useIdleLogout.jsx'
+import ErrorBoundary from '../components/ErrorBoundary.jsx'
 
 const navigation = {
   patient: [
@@ -79,9 +80,38 @@ export default function PortalLayout() {
   const [menuOpen, setMenuOpen] = useState(false)
   const { user } = useAuthStore()
   const location = useLocation()
+  const queryClient = useQueryClient()
+  const navRef = useRef(null)
   const role = user?.role || 'patient'
   const items = navigation[role] || navigation.patient
   const isPatient = role === 'patient'
+
+  // Scroll active nav item into view on route change
+  useEffect(() => {
+    if (!navRef.current) return
+    const active = navRef.current.querySelector('.nav-link-active')
+    if (active && typeof active.scrollIntoView === 'function') {
+      active.scrollIntoView({ block: 'nearest' })
+    }
+  }, [location.pathname])
+
+  const handleNavKeyDown = (e) => {
+    if (!navRef.current) return
+    const links = Array.from(navRef.current.querySelectorAll('.nav-link'))
+    if (!links.length) return
+    const activeIdx = links.indexOf(document.activeElement)
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      const next = activeIdx >= 0 && activeIdx < links.length - 1 ? activeIdx + 1 : 0
+      links[next]?.focus()
+      links[next]?.scrollIntoView({ block: 'nearest' })
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      const prev = activeIdx > 0 ? activeIdx - 1 : links.length - 1
+      links[prev]?.focus()
+      links[prev]?.scrollIntoView({ block: 'nearest' })
+    }
+  }
 
   // Notifications enabled for all roles
   const { data: notificationData } = useQuery({
@@ -114,7 +144,13 @@ export default function PortalLayout() {
           </span>
         </Link>
         <div className="sidebar-caption">{roleLabel[role]}</div>
-        <nav className="sidebar-nav" aria-label="Workspace navigation">
+        <nav
+          ref={navRef}
+          tabIndex={0}
+          onKeyDown={handleNavKeyDown}
+          className="sidebar-nav"
+          aria-label="Workspace navigation"
+        >
           {items.map(({ to, label, icon: Icon, end }) => (
             <NavLink
               key={to}
@@ -178,9 +214,24 @@ export default function PortalLayout() {
               <small>{role}</small>
             </span>
           </div>
+          <button
+            type="button"
+            className="mobile-topbar-logout"
+            aria-label="Sign out"
+            title="Sign out"
+            onClick={handleLogout}
+          >
+            <LogOut size={16} />
+            <span>Sign out</span>
+          </button>
         </header>
         <main className="portal-content">
-          <Outlet />
+          <ErrorBoundary
+            dashboardPath={homePath}
+            onReset={() => queryClient.invalidateQueries()}
+          >
+            <Outlet />
+          </ErrorBoundary>
         </main>
         {isPatient && (
           <nav className="mobile-tabs" aria-label="Patient navigation">

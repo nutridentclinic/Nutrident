@@ -12,7 +12,10 @@ import {
 } from "recharts";
 import {
   ArrowRight,
+  Building2,
   CalendarDays,
+  Check,
+  ClipboardList,
   Download,
   Edit2,
   Eye,
@@ -1143,27 +1146,56 @@ export function DentistManagement() {
   const dentists = query.data?.data || [];
   const doctor = dentists[0] || null;
 
+  const slotDuration = doctor?.slotDurationMinutes || doctor?.slotDuration || 30;
+  const isAccepting = doctor
+    ? (doctor.isAcceptingAppointments !== undefined
+        ? doctor.isAcceptingAppointments
+        : Boolean(doctor.isActive && (!doctor.pausedUntil || new Date(doctor.pausedUntil) <= new Date())))
+    : false;
+
+  const formatClinicAddress = (addr) => {
+    if (!addr) return "";
+    if (typeof addr === "string") return addr;
+    if (typeof addr === "object") {
+      const parts = [addr.addressLine, addr.city, addr.state, addr.pincode].filter(Boolean);
+      return parts.join(", ");
+    }
+    return "";
+  };
+
   // Bookable checklist calculation
   const checklist = useMemo(() => {
     if (!doctor) return null;
+    if (doctor.checklist) {
+      const checks = doctor.checklist.checks || {};
+      return {
+        isBookable: Boolean(doctor.checklist.bookable ?? doctor.checklist.isBookable),
+        reasons: doctor.checklist.reasons || [],
+        verified: Boolean(checks.verified ?? doctor.isVerified),
+        accepting: Boolean(checks.accepting ?? isAccepting),
+        weeklyHours: Boolean(checks.weeklyHoursSet ?? ((doctor.weeklyAvailability || []).some((d) => (d.slots || []).length > 0))),
+        slotLength: Boolean(checks.slotLengthSet ?? (slotDuration > 0)),
+        fee: Boolean(checks.feeSet ?? ((doctor.consultationFee || 0) > 0)),
+      };
+    }
     const reasons = [];
     if (!doctor.isVerified) reasons.push("Credentials unverified");
-    if (doctor.isAcceptingAppointments === false) reasons.push("Appointments are paused");
+    if (!isAccepting) reasons.push(doctor.pausedReason ? `Appointments paused: ${doctor.pausedReason}` : "Appointments are paused");
     const hasHours = (doctor.weeklyAvailability || []).some((d) => (d.slots || []).length > 0);
     if (!hasHours) reasons.push("Weekly schedule hours not configured");
-    if (!doctor.slotDuration) reasons.push("Consultation slot duration not set");
+    if (!slotDuration) reasons.push("Consultation slot duration not set");
     if (!doctor.consultationFee || doctor.consultationFee <= 0) reasons.push("Consultation fee is not set");
 
     return {
       isBookable: reasons.length === 0,
       reasons,
       verified: !!doctor.isVerified,
-      accepting: doctor.isAcceptingAppointments !== false,
+      accepting: isAccepting,
       weeklyHours: hasHours,
-      slotLength: !!doctor.slotDuration,
+      slotLength: !!slotDuration,
       fee: (doctor.consultationFee || 0) > 0,
     };
-  }, [doctor]);
+  }, [doctor, isAccepting, slotDuration]);
 
   const createDentist = async (event) => {
     event.preventDefault();
@@ -1213,7 +1245,7 @@ export function DentistManagement() {
     e.preventDefault();
     if (!doctor) return;
     setBusy(true);
-    const nextActive = doctor.isAcceptingAppointments === false;
+    const nextActive = !isAccepting;
     try {
       const result = await api.dentists.toggleActive({
         isActive: nextActive,
@@ -1239,7 +1271,19 @@ export function DentistManagement() {
     if (!doctor || !editForm) return;
     setBusy(true);
     try {
-      const result = await api.dentists.updateDoctor(doctor._id, editForm);
+      const payload = {
+        ...editForm,
+        experienceYears: Number(editForm.experienceYears || 0),
+        consultationFee: Number(editForm.consultationFee || 0),
+        slotDurationMinutes: Number(editForm.slotDuration || editForm.slotDurationMinutes || 30),
+        qualifications: typeof editForm.qualifications === "string"
+          ? editForm.qualifications.split(",").map((s) => s.trim()).filter(Boolean)
+          : (editForm.qualifications || []),
+        languages: typeof editForm.languages === "string"
+          ? editForm.languages.split(",").map((s) => s.trim()).filter(Boolean)
+          : (editForm.languages || []),
+      };
+      const result = await api.dentists.updateDoctor(doctor._id, payload);
       notify(result.message || "Doctor profile updated.");
       setShowEditModal(false);
       queryClient.invalidateQueries({ queryKey: ["dentists"] });
@@ -1308,13 +1352,13 @@ export function DentistManagement() {
                       email: doctor.user?.email || "",
                       phone: doctor.user?.phone || "",
                       specialization: doctor.specialization || "",
-                      qualifications: (doctor.qualifications || []).join(", "),
+                      qualifications: Array.isArray(doctor.qualifications) ? doctor.qualifications.join(", ") : (doctor.qualifications || ""),
                       experienceYears: doctor.experienceYears || 0,
                       consultationFee: doctor.consultationFee || 0,
                       about: doctor.about || "",
-                      languages: (doctor.languages || []).join(", "),
-                      clinicAddress: doctor.clinicAddress || "",
-                      slotDuration: doctor.slotDuration || 30,
+                      languages: Array.isArray(doctor.languages) ? doctor.languages.join(", ") : (doctor.languages || ""),
+                      clinicAddress: formatClinicAddress(doctor.clinicAddress),
+                      slotDuration: slotDuration,
                     });
                     setShowEditModal(true);
                   }}
@@ -1334,7 +1378,7 @@ export function DentistManagement() {
             <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: "1.5rem", alignItems: "start" }}>
               <div>
                 <img
-                  src={doctor.user?.photo?.url || "/placeholder-doctor.jpg"}
+                  src={doctor.user?.profilePhoto?.url || doctor.user?.photo?.url || "/placeholder-doctor.jpg"}
                   alt={doctor.user?.name || "Doctor"}
                   style={{ width: "110px", height: "110px", borderRadius: "50%", objectFit: "cover", border: "3px solid #137a76" }}
                   onError={(e) => { e.currentTarget.src = "https://images.unsplash.com/photo-1622253692010-333f2da6031d?auto=format&fit=crop&w=300&q=80"; }}
@@ -1352,11 +1396,11 @@ export function DentistManagement() {
 
               <div style={{ display: "grid", gap: "0.5rem" }}>
                 <div><strong>Email:</strong> {doctor.user?.email} · <strong>Phone:</strong> {doctor.user?.phone}</div>
-                <div><strong>Qualifications:</strong> {doctor.qualifications?.join(", ") || "BDS"}</div>
-                <div><strong>Languages:</strong> {doctor.languages?.join(", ") || "English, Hindi"}</div>
-                <div><strong>Slot duration:</strong> {doctor.slotDuration || 30} minutes</div>
-                {doctor.clinicAddress && <div><strong>Clinic address:</strong> {doctor.clinicAddress}</div>}
-                <div><strong>Rating:</strong> {doctor.rating || 5} ★ ({doctor.reviewCount || 0} reviews)</div>
+                <div><strong>Qualifications:</strong> {(Array.isArray(doctor.qualifications) ? doctor.qualifications : []).join(", ") || "BDS"}</div>
+                <div><strong>Languages:</strong> {(Array.isArray(doctor.languages) ? doctor.languages : []).join(", ") || "English, Hindi"}</div>
+                <div><strong>Slot duration:</strong> {slotDuration} minutes</div>
+                {formatClinicAddress(doctor.clinicAddress) && <div><strong>Clinic address:</strong> {formatClinicAddress(doctor.clinicAddress)}</div>}
+                <div><strong>Rating:</strong> {doctor.ratingAverage || doctor.rating || 5} ★ ({doctor.ratingCount || doctor.reviewCount || 0} reviews)</div>
                 {doctor.about && (
                   <p style={{ marginTop: "0.4rem", color: "#495a55", fontSize: "0.9rem" }}>{doctor.about}</p>
                 )}
@@ -1387,7 +1431,7 @@ export function DentistManagement() {
                   <div>{checklist.verified ? "✓" : "✗"} Verified credentials</div>
                   <div>{checklist.accepting ? "✓" : "✗"} Accepting visits</div>
                   <div>{checklist.weeklyHours ? "✓" : "✗"} Weekly schedule set</div>
-                  <div>{checklist.slotLength ? "✓" : "✗"} Slot length set ({doctor.slotDuration || 0}m)</div>
+                  <div>{checklist.slotLength ? "✓" : "✗"} Slot length set ({slotDuration}m)</div>
                   <div>{checklist.fee ? "✓" : "✗"} Consultation fee set ({rupees(doctor.consultationFee)})</div>
                 </div>
               </div>
@@ -1396,9 +1440,9 @@ export function DentistManagement() {
             {/* Status badges and Quick action buttons */}
             <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "0.8rem", marginTop: "1.2rem", paddingTop: "1rem", borderTop: "1px solid #e7eeeb" }}>
               <StatusBadge value={doctor.isVerified ? "verified" : "pending"} />
-              <StatusBadge value={doctor.isAcceptingAppointments !== false ? "active" : "inactive"} />
-              <span className={`status-badge ${doctor.isAcceptingAppointments !== false ? "status-active" : "status-inactive"}`}>
-                {doctor.isAcceptingAppointments !== false ? "Accepting visits" : "Visits paused"}
+              <StatusBadge value={isAccepting ? "active" : "inactive"} />
+              <span className={`status-badge ${isAccepting ? "status-active" : "status-inactive"}`}>
+                {isAccepting ? "Accepting visits" : "Visits paused"}
               </span>
 
               <div style={{ marginLeft: "auto", display: "flex", gap: "0.5rem" }}>
@@ -1413,10 +1457,10 @@ export function DentistManagement() {
                 )}
                 <button
                   type="button"
-                  className={`button button-small ${doctor.isAcceptingAppointments !== false ? "button-quiet" : "button-primary"}`}
+                  className={`button button-small ${isAccepting ? "button-quiet" : "button-primary"}`}
                   onClick={() => setShowPauseModal(true)}
                 >
-                  {doctor.isAcceptingAppointments !== false ? "Pause appointments" : "Resume appointments"}
+                  {isAccepting ? "Pause appointments" : "Resume appointments"}
                 </button>
               </div>
             </div>

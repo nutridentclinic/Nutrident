@@ -107,24 +107,71 @@ export function SectionPanel({ title, description, actions, children, className 
 
 export function ConfirmDialog({ open, title, description, confirmLabel = 'Confirm', danger = false, busy = false, onConfirm, onCancel, children }) {
   const cancelRef = useRef(null)
+  const dialogRef = useRef(null)
+
   useEffect(() => {
     if (!open) return undefined
+    const originalOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
     cancelRef.current?.focus()
+
     const onKeyDown = (event) => {
-      if (event.key === 'Escape' && !busy) onCancel()
+      if (event.key === 'Escape' && !busy) {
+        onCancel()
+        return
+      }
+      if (event.key === 'Tab' && dialogRef.current) {
+        const focusables = dialogRef.current.querySelectorAll('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')
+        if (focusables.length === 0) return
+        const first = focusables[0]
+        const last = focusables[focusables.length - 1]
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault()
+          last.focus()
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault()
+          first.focus()
+        }
+      }
     }
     window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
+    return () => {
+      document.body.style.overflow = originalOverflow
+      window.removeEventListener('keydown', onKeyDown)
+    }
   }, [open, busy, onCancel])
 
   if (!open) return null
-  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onCancel() }}><section className="modal-panel confirm-panel" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-description"><h2 id="confirm-title">{title}</h2><p id="confirm-description">{description}</p>{children}<div className="inline-actions"><button ref={cancelRef} className="button button-quiet" onClick={onCancel} disabled={busy}>Keep</button><button className={`button ${danger ? 'button-danger' : 'button-primary'}`} onClick={onConfirm} disabled={busy}>{busy ? 'Working…' : confirmLabel}</button></div></section></div>
+  return (
+    <div
+      className="modal-backdrop"
+      role="presentation"
+      onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onCancel() }}
+    >
+      <section
+        ref={dialogRef}
+        className="modal-panel confirm-panel"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="confirm-title"
+        aria-describedby="confirm-description"
+      >
+        <h2 id="confirm-title">{title}</h2>
+        <p id="confirm-description">{description}</p>
+        {children}
+        <div className="inline-actions">
+          <button ref={cancelRef} className="button button-quiet" onClick={onCancel} disabled={busy}>Keep</button>
+          <button className={`button ${danger ? 'button-danger' : 'button-primary'}`} onClick={onConfirm} disabled={busy}>{busy ? 'Working…' : confirmLabel}</button>
+        </div>
+      </section>
+    </div>
+  )
 }
 
-export function AsyncView({ query, empty = false, children, emptyTitle, retry }) {
-  if (query.isLoading) return <LoadingState />
-  if (query.isError) return <ErrorState error={query.error} onRetry={retry || query.refetch} />
-  if (empty) return <EmptyState title={emptyTitle} />
+export function AsyncView({ query, empty = false, children, emptyTitle, emptyDescription, emptyAction, retry }) {
+  if (query?.isLoading) return <LoadingState />
+  if (query?.isError) return <ErrorState error={query.error} onRetry={retry || (() => query.refetch?.())} />
+  if (empty) return <EmptyState title={emptyTitle} action={emptyAction}>{emptyDescription}</EmptyState>
   return children
 }
 

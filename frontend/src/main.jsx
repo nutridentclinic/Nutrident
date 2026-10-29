@@ -14,12 +14,15 @@ import '@fontsource/manrope/800.css'
 import './index.css'
 import App from './App.jsx'
 import { ToastProvider } from './components/ui.jsx'
+import ErrorBoundary from './components/ErrorBoundary.jsx'
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <ToastProvider><App /></ToastProvider>
+        <ErrorBoundary>
+          <ToastProvider><App /></ToastProvider>
+        </ErrorBoundary>
       </BrowserRouter>
     </QueryClientProvider>
   </StrictMode>,

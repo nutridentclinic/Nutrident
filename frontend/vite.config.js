@@ -10,7 +10,7 @@ const securityHeaders = {
   'Referrer-Policy': 'strict-origin-when-cross-origin',
   'Permissions-Policy': 'camera=(self), microphone=(self)',
   'Content-Security-Policy':
-    "default-src 'self'; script-src 'self' 'unsafe-inline' https://checkout.razorpay.com; connect-src 'self' https://drnutrident-backend-wj1n.onrender.com https://*.razorpay.com https://*.agora.io https://*.agoralabs.com wss://drnutrident-backend-wj1n.onrender.com wss://*.agora.io wss://*.agoralabs.com; frame-src https://api.razorpay.com https://checkout.razorpay.com; img-src 'self' data: blob: https://res.cloudinary.com; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self'; frame-ancestors 'none';",
+    "default-src 'self'; script-src 'self' 'unsafe-inline' https://checkout.razorpay.com; connect-src 'self' https://drnutrident-backend-wj1n.onrender.com https://*.onrender.com https://*.razorpay.com https://*.agora.io https://*.agoralabs.com wss://drnutrident-backend-wj1n.onrender.com wss://*.onrender.com wss://*.agora.io wss://*.agoralabs.com https://res.cloudinary.com https://api.cloudinary.com; frame-src 'self' blob: https://api.razorpay.com https://checkout.razorpay.com https://res.cloudinary.com; object-src 'self' blob: https://res.cloudinary.com; img-src 'self' data: blob: https://res.cloudinary.com; media-src 'self' blob: https://res.cloudinary.com; style-src 'self' 'unsafe-inline'; font-src 'self'; frame-ancestors 'none';",
 }
 
 export default defineConfig({
