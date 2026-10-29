@@ -621,6 +621,27 @@ exports.getMe = catchAsync(async (req, res) => {
   success(res, 200, 'Profile fetched.', { user: sanitizeUser(req.user), profile });
 });
 
+// @route PATCH /api/auth/me
+exports.updateMe = catchAsync(async (req, res, next) => {
+  const { name, phone } = req.body;
+  const updates = {};
+  if (name !== undefined) {
+    if (!name.trim()) return next(new AppError('Name is required.', 400));
+    updates.name = name.trim();
+  }
+  if (phone !== undefined) {
+    const cleanPhone = phone.trim();
+    if (!cleanPhone) return next(new AppError('Phone is required.', 400));
+    const existing = await User.findOne({ phone: cleanPhone, _id: { $ne: req.user._id } });
+    if (existing) {
+      return next(new AppError('Phone number is already in use by another account.', 400));
+    }
+    updates.phone = cleanPhone;
+  }
+  const user = await User.findByIdAndUpdate(req.user._id, updates, { returnDocument: 'after' }).select('-password');
+  success(res, 200, 'Profile updated successfully.', sanitizeUser(user));
+});
+
 // @route POST /api/auth/verify-phone
 exports.verifyPhone = catchAsync(async (req, res, next) => {
   if (!isConfigured()) {
@@ -663,7 +684,7 @@ exports.updatePassword = catchAsync(async (req, res, next) => {
   user.password = req.body.newPassword;
   user.passwordChangedAt = new Date();
   user.mustChangePassword = false;
-  user.tokenVersion = (user.tokenVersion || 0) + 1; // Invalidate other sessions
+  if (req.body.logoutOtherSessions !== false) { user.tokenVersion = (user.tokenVersion || 0) + 1; }
   await user.save();
 
   const tokens = await issueTokens(user);

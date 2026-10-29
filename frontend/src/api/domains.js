@@ -10,6 +10,7 @@ export const api = {
     login: (data) => post('/auth/login', data),
     register: (data) => post('/auth/register', data),
     me: () => get('/auth/me'),
+    updateMe: (data) => patch('/auth/me', data),
     verifyOtp: (data) => post('/auth/verify-otp', data),
     resendOtp: (data) => post('/auth/resend-otp', data),
     forgotPassword: (data) => post('/auth/forgot-password', data),
@@ -121,6 +122,7 @@ export const api = {
     call: (id) => patch(`/queue/${id}/call`),
     complete: (id) => patch(`/queue/${id}/complete`),
     skip: (id) => patch(`/queue/${id}/skip`),
+    remove: (id) => request({ method: 'DELETE', url: `/queue/${id}` }),
   },
   reviews: {
     forDentist: (id) => get(`/reviews/dentist/${id}`),

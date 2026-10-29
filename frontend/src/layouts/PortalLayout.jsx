@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
   Activity,
+  Bell,
   Building2,
   CalendarDays,
   ClipboardList,
@@ -203,6 +204,38 @@ export default function PortalLayout() {
             <i>/</i>
             <strong>{items.find((item) => location.pathname === item.to)?.label || 'Your care'}</strong>
           </div>
+          <Link
+            to={notificationsPath}
+            className="icon-button topbar-bell"
+            aria-label={`Notifications ${unreadCount > 0 ? `(${unreadCount} unread)` : ''}`}
+            title="Notifications"
+            style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          >
+            <Bell size={19} />
+            {unreadCount > 0 && (
+              <span
+                className="badge-dot"
+                style={{
+                  position: 'absolute',
+                  top: '2px',
+                  right: '2px',
+                  minWidth: '16px',
+                  height: '16px',
+                  borderRadius: '8px',
+                  background: '#ef4444',
+                  color: '#fff',
+                  fontSize: '10px',
+                  fontWeight: 700,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: '0 3px',
+                }}
+              >
+                {unreadCount > 9 ? '9+' : unreadCount}
+              </span>
+            )}
+          </Link>
           <div className="topbar-profile">
             {user?.profilePhoto?.url ? (
               <img src={user.profilePhoto.url} alt={user.name} className="avatar avatar-img" />

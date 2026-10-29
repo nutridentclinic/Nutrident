@@ -17,7 +17,7 @@ import {
   X,
 } from "lucide-react";
 import { api, downloadPdf } from "../api/domains.js";
-import { apiBaseUrl } from "../api/client.js";
+import { apiBaseUrl, executeTokenRefresh } from "../api/client.js";
 import { useAuthStore } from "../store/auth.js";
 import { usePrimaryDentist } from "../hooks/usePrimaryDentist.js";
 import { FileUpload } from "../components/FileUpload.jsx";
@@ -2078,8 +2078,23 @@ export function QueuePage({ role = "dentist" }) {
   const [patientSearch, setPatientSearch] = useState("");
   const [selectedPatient, setSelectedPatient] = useState(null);
   const [socketConnected, setSocketConnected] = useState(false);
+  const [activeTab, setActiveTab] = useState("all"); // 'all', 'waiting', 'in-progress', 'done'
+  const [lastCompletedVisit, setLastCompletedVisit] = useState(null);
+
+  // Walk-in modal state
+  const [showWalkInModal, setShowWalkInModal] = useState(false);
+  const [walkInBusy, setWalkInBusy] = useState(false);
+  const [walkInForm, setWalkInForm] = useState({
+    name: "",
+    phone: "",
+    email: "",
+    gender: "other",
+    address: "",
+  });
+
   const queryClient = useQueryClient();
   const notify = useToast();
+  const { confirm, dialog } = useConfirm();
   const user = useAuthStore((state) => state.user);
 
   const dentistId = isDentist ? dentistProfile.profile?._id : primaryDoctor.dentistId;
@@ -2109,18 +2124,42 @@ export function QueuePage({ role = "dentist" }) {
       return undefined;
     const socketUrl =
       import.meta.env.VITE_SOCKET_URL || apiBaseUrl.replace(/\/api\/?$/, "");
+
     const socket = io(socketUrl, {
-      auth: { token: useAuthStore.getState().accessToken },
+      auth: (cb) => {
+        cb({ token: useAuthStore.getState().accessToken });
+      },
       reconnection: true,
     });
+
     socket.on("connect", () => {
       setSocketConnected(true);
       socket.emit("queue:join", dentistId);
     });
+
+    socket.on("connect_error", async (err) => {
+      if (err.message && (err.message.includes("Invalid or expired") || err.message.includes("token"))) {
+        try {
+          const { refreshToken } = useAuthStore.getState();
+          if (refreshToken) {
+            await executeTokenRefresh(refreshToken);
+            socket.auth = { token: useAuthStore.getState().accessToken };
+            socket.connect();
+          }
+        } catch {
+          setSocketConnected(false);
+        }
+      } else {
+        setSocketConnected(false);
+      }
+    });
+
     socket.on("disconnect", () => setSocketConnected(false));
-    socket.on("queue:updated", () =>
-      queryClient.invalidateQueries({ queryKey: ["queue", dentistId, date] }),
-    );
+    socket.on("queue:updated", () => {
+      queryClient.invalidateQueries({ queryKey: ["queue", dentistId, date] });
+      queryClient.invalidateQueries({ queryKey: ["queue-today-appointments", date] });
+    });
+
     return () => {
       socket.emit("queue:leave", dentistId);
       socket.disconnect();
@@ -2145,32 +2184,158 @@ export function QueuePage({ role = "dentist" }) {
       setSelectedPatient(null);
       setPatientSearch("");
       queue.refetch();
+      todayAppointments.refetch();
+    } catch (error) {
+      notify(error.message, "error");
+    }
+  };
+
+  const handleRegisterAndCheckIn = async (e) => {
+    e.preventDefault();
+    if (!walkInForm.name.trim() || !walkInForm.phone.trim()) {
+      notify("Patient name and phone are required.", "error");
+      return;
+    }
+    setWalkInBusy(true);
+    try {
+      const patientRes = await api.patients.createByStaff({
+        name: walkInForm.name.trim(),
+        phone: walkInForm.phone.trim(),
+        email: walkInForm.email.trim() || undefined,
+        gender: walkInForm.gender || "other",
+        address: walkInForm.address.trim() || undefined,
+      });
+      const createdPatient = patientRes.data?.patient || patientRes.data;
+      const patientId = createdPatient?._id || createdPatient?.user?._id;
+
+      const checkInRes = await api.queue.checkIn({
+        dentistId,
+        patientId,
+        date,
+      });
+      notify(checkInRes.message || "Walk-in patient registered and checked into queue.", "success");
+      setShowWalkInModal(false);
+      setWalkInForm({ name: "", phone: "", email: "", gender: "other", address: "" });
+      queue.refetch();
+    } catch (err) {
+      notify(err.message || "Failed to register and check in walk-in patient.", "error");
+    } finally {
+      setWalkInBusy(false);
+    }
+  };
+
+  const handleCallNext = async (entry) => {
+    try {
+      const result = await api.queue.call(entry._id);
+      notify(result.message);
+      queue.refetch();
+    } catch (error) {
+      notify(error.message, "error");
+    }
+  };
+
+  const handleComplete = async (entry) => {
+    const approved = await confirm({
+      title: `Mark Token #${entry.tokenNumber} as completed?`,
+      description: `Patient: ${entry.patient?.name || entry.walkInName || "Patient"}. This marks their clinical visit as completed.`,
+      confirmLabel: "Complete visit",
+      cancelLabel: "Keep in queue",
+    });
+    if (!approved) return;
+    try {
+      const result = await api.queue.complete(entry._id);
+      notify(result.message || "Visit marked as completed.", "success");
+      setLastCompletedVisit(result.data || { entry });
+      queue.refetch();
+      todayAppointments.refetch();
+    } catch (error) {
+      notify(error.message, "error");
+    }
+  };
+
+  const handleSkip = async (entry) => {
+    const approved = await confirm({
+      title: `Skip Token #${entry.tokenNumber}?`,
+      description: `Patient: ${entry.patient?.name || entry.walkInName || "Patient"}. They will be marked as skipped.`,
+      confirmLabel: "Skip patient",
+      cancelLabel: "Keep in queue",
+      danger: true,
+    });
+    if (!approved) return;
+    try {
+      const result = await api.queue.skip(entry._id);
+      notify(result.message);
+      queue.refetch();
+    } catch (error) {
+      notify(error.message, "error");
+    }
+  };
+
+  const handleRemove = async (entry) => {
+    const approved = await confirm({
+      title: `Remove Token #${entry.tokenNumber} from queue?`,
+      description: `Patient: ${entry.patient?.name || entry.walkInName || "Patient"}. This removes their active waiting entry.`,
+      confirmLabel: "Remove from queue",
+      cancelLabel: "Keep in queue",
+      danger: true,
+    });
+    if (!approved) return;
+    try {
+      const result = await api.queue.remove(entry._id);
+      notify(result.message);
+      queue.refetch();
     } catch (error) {
       notify(error.message, "error");
     }
   };
 
   const entries = queue.data?.data || [];
+  const waitingEntries = entries.filter((e) => e.status === "waiting");
+  const inProgressEntries = entries.filter((e) => e.status === "in-progress");
+  const doneEntries = entries.filter((e) => ["completed", "skipped", "cancelled"].includes(e.status));
+
+  const filteredEntries =
+    activeTab === "waiting"
+      ? waitingEntries
+      : activeTab === "in-progress"
+      ? inProgressEntries
+      : activeTab === "done"
+      ? doneEntries
+      : entries;
+
   const registeredAppts = (todayAppointments.data?.data || []).filter(
-    (a) => ["pending", "confirmed"].includes(a.status) && !entries.some((e) => e.appointment?._id === a._id || e.appointment === a._id)
+    (a) => ["pending", "confirmed"].includes(a.status) && !entries.some((e) => (e.appointment?._id || e.appointment) === a._id)
   );
 
   return (
     <div>
+      {dialog}
       <PageTitle
-        eyebrow="Today’s flow"
+        eyebrow="Clinic waiting room"
         title="Live queue"
-        description="Single-dentist clinic queue. Live socket updates active when connected."
+        description="Single-dentist live clinic waiting room with real-time socket updates."
         actions={
-          <span
-            className={`connection-indicator ${socketConnected ? "connected" : ""}`}
-          >
-            <i />
-            {socketConnected ? "Live updates active" : "Live updates paused"}
-          </span>
+          <div style={{ display: "flex", gap: "0.6rem", alignItems: "center" }}>
+            {!isDentist && (
+              <button
+                type="button"
+                className="button button-primary button-small"
+                onClick={() => setShowWalkInModal(true)}
+              >
+                <Plus size={14} /> Walk-in patient + check in
+              </button>
+            )}
+            <span
+              className={`connection-indicator ${socketConnected ? "connected" : ""}`}
+            >
+              <i />
+              {socketConnected ? "Live updates active" : "Live updates paused (polling 8s)"}
+            </span>
+          </div>
         }
       />
-      <div className="filter-bar">
+
+      <div className="filter-bar" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "0.8rem" }}>
         <Field label="Queue date">
           <TextInput
             type="date"
@@ -2178,20 +2343,91 @@ export function QueuePage({ role = "dentist" }) {
             onChange={(event) => setDate(event.target.value)}
           />
         </Field>
+
+        {/* Tab filters */}
+        <div className="filter-chips" style={{ display: "flex", gap: "0.4rem" }}>
+          <button
+            type="button"
+            className={`button button-small ${activeTab === "all" ? "button-primary" : "button-outline"}`}
+            onClick={() => setActiveTab("all")}
+          >
+            All ({entries.length})
+          </button>
+          <button
+            type="button"
+            className={`button button-small ${activeTab === "waiting" ? "button-primary" : "button-outline"}`}
+            onClick={() => setActiveTab("waiting")}
+          >
+            Waiting ({waitingEntries.length})
+          </button>
+          <button
+            type="button"
+            className={`button button-small ${activeTab === "in-progress" ? "button-primary" : "button-outline"}`}
+            onClick={() => setActiveTab("in-progress")}
+          >
+            In-Progress ({inProgressEntries.length})
+          </button>
+          <button
+            type="button"
+            className={`button button-small ${activeTab === "done" ? "button-primary" : "button-outline"}`}
+            onClick={() => setActiveTab("done")}
+          >
+            Done ({doneEntries.length})
+          </button>
+        </div>
       </div>
+
+      {lastCompletedVisit && (
+        <div className="notice notice-success" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <Check size={16} /> Token #{lastCompletedVisit.entry?.tokenNumber} marked as completed.
+          </div>
+          {lastCompletedVisit.invoice?._id ? (
+            <Link
+              to={`/reception/invoices?open=${lastCompletedVisit.invoice._id}`}
+              className="button button-small button-outline"
+            >
+              View Invoice #{lastCompletedVisit.invoice.invoiceNumber} <ArrowRight size={14} />
+            </Link>
+          ) : lastCompletedVisit.entry?.appointment ? (
+            <Link
+              to={`/reception/invoices?appointmentId=${lastCompletedVisit.entry.appointment}`}
+              className="button button-small button-primary"
+            >
+              Create invoice for visit <ArrowRight size={14} />
+            </Link>
+          ) : null}
+        </div>
+      )}
 
       {!isDentist && dentistId && (
         <SectionPanel
           title="Check in a registered patient"
-          description="Check in from today’s appointments or search registered patient accounts."
+          description="Check in scheduled patients or search registered accounts."
         >
-          {/* Quick check-in from today's appointments */}
+          <div style={{ padding: "0.6rem 0.8rem", background: "#f8faf9", borderRadius: "6px", fontSize: "0.85rem", display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.8rem", border: "1px solid #e2ece8" }}>
+            <div>
+              Ask the patient to self-register at: <code>{typeof window !== "undefined" ? window.location.origin : ""}/register</code>
+            </div>
+            <button
+              type="button"
+              className="button button-small button-outline"
+              onClick={() => {
+                if (typeof navigator !== "undefined" && navigator.clipboard) {
+                  navigator.clipboard.writeText(`${window.location.origin}/register`);
+                }
+                notify("Registration link copied to clipboard", "success");
+              }}
+            >
+              Copy registration link
+            </button>
+          </div>
           {registeredAppts.length > 0 && (
             <div style={{ marginBottom: "1.2rem" }}>
               <span className="field-label" style={{ display: "block", marginBottom: "0.5rem" }}>
-                Today's scheduled appointments ready for check-in:
+                Scheduled appointments ready for check-in:
               </span>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "0.6rem" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "0.6rem" }}>
                 {registeredAppts.map((appt) => (
                   <div
                     key={appt._id}
@@ -2208,7 +2444,7 @@ export function QueuePage({ role = "dentist" }) {
                     <div>
                       <strong>{appt.patient?.name || "Patient"}</strong>
                       <div style={{ fontSize: "0.8rem", color: "#6b7d78" }}>
-                        {appt.startTime} · {appt.mode} · payment {appt.paymentStatus}
+                        {appt.startTime} · {appt.mode} · payment: {appt.paymentStatus}
                       </div>
                     </div>
                     <button
@@ -2224,9 +2460,8 @@ export function QueuePage({ role = "dentist" }) {
             </div>
           )}
 
-          {/* Search patient form */}
           <div style={{ display: "grid", gap: "0.8rem" }}>
-            <span className="field-label">Or search registered patient:</span>
+            <span className="field-label">Search registered patient:</span>
             {selectedPatient ? (
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.6rem 0.8rem", background: "#f0f7f5", borderRadius: "6px", border: "1px solid #c2e2dc" }}>
                 <div>
@@ -2279,67 +2514,45 @@ export function QueuePage({ role = "dentist" }) {
               </div>
             )}
           </div>
-
-          {/* Prompt to register if patient is not registered */}
-          <div className="notice notice-info" style={{ marginTop: "1.2rem" }}>
-            <p>
-              <strong>Patient does not have an account?</strong> Register them directly from the Patients directory or invite them to create an account online:
-            </p>
-            <div style={{ display: "flex", alignItems: "center", gap: "0.8rem", marginTop: "0.4rem" }}>
-              <span>Ask the patient to self-register at: <code>{typeof window !== "undefined" ? window.location.origin : ""}/register</code></span>
-              <button
-                type="button"
-                className="button button-outline button-small"
-                onClick={() => {
-                  navigator.clipboard?.writeText(`${window.location.origin}/register`);
-                  notify("Registration link copied to clipboard.");
-                }}
-              >
-                Copy registration link
-              </button>
-            </div>
-          </div>
         </SectionPanel>
       )}
 
-      {dentistId && (
+      {dentistId ? (
         <SectionPanel
-          title="Waiting room"
-          description={`${entries.filter((entry) => entry.status === "waiting").length} waiting · ${entries.filter((entry) => entry.status === "in-progress").length} in progress`}
+          title="Waiting room flow"
+          description={`${waitingEntries.length} waiting · ${inProgressEntries.length} in progress · ${doneEntries.length} done`}
         >
           <AsyncView
             query={queue}
-            empty={!queue.isLoading && !queue.isError && !entries.length}
-            emptyTitle="No one is in the queue"
+            empty={!queue.isLoading && !queue.isError && !filteredEntries.length}
+            emptyTitle="No patients in the queue"
+            emptyDescription="Check in arriving patients or register walk-ins above."
           >
             <div className="queue-list">
-              {entries.map((entry) => (
-                <article className="queue-row" key={entry._id}>
-                  <span className="queue-token">{entry.tokenNumber}</span>
-                  <span className="queue-person">
+              {filteredEntries.map((entry) => (
+                <article className="queue-row" key={entry._id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0.8rem 1rem", borderBottom: "1px solid #eef2f0" }}>
+                  <span className="queue-token" style={{ minWidth: "40px", fontSize: "1.1rem", fontWeight: 700, color: "#166534" }}>
+                    #{entry.tokenNumber}
+                  </span>
+                  <span className="queue-person" style={{ flex: 1, padding: "0 1rem" }}>
                     <strong>
-                      {entry.patient?.name || (entry.walkInName ? "Legacy walk-in" : "Patient")}
+                      {entry.patient?.name || entry.walkInName || "Walk-in patient"}
                     </strong>
-                    <small>
-                      {entry.estimatedWaitMinutes
-                        ? `Estimated wait ${entry.estimatedWaitMinutes} min`
-                        : entry.patient?.phone || ""}
-                    </small>
+                    <div style={{ fontSize: "0.8rem", color: "#6b7d78" }}>
+                      {entry.patient?.phone ? `${entry.patient.phone} · ` : ""}
+                      {entry.status === "waiting"
+                        ? (entry.estimatedWaitMinutes ? `Est. wait ~${entry.estimatedWaitMinutes} min` : "Waiting")
+                        : `Status: ${entry.status}`}
+                    </div>
                   </span>
                   <StatusBadge value={entry.status} />
-                  <div className="queue-actions">
+
+                  <div className="queue-actions" style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginLeft: "1rem" }}>
                     {entry.status === "waiting" && (
                       <button
+                        type="button"
                         className="button button-primary button-small"
-                        onClick={async () => {
-                          try {
-                            const result = await api.queue.call(entry._id);
-                            notify(result.message);
-                            queue.refetch();
-                          } catch (error) {
-                            notify(error.message, "error");
-                          }
-                        }}
+                        onClick={() => handleCallNext(entry)}
                       >
                         Call next
                       </button>
@@ -2347,36 +2560,36 @@ export function QueuePage({ role = "dentist" }) {
                     {["waiting", "in-progress"].includes(entry.status) && (
                       <>
                         <button
+                          type="button"
+                          className="button button-outline button-small"
+                          onClick={() => handleComplete(entry)}
+                        >
+                          Complete
+                        </button>
+                        <button
+                          type="button"
                           className="button button-quiet button-small"
-                          onClick={async () => {
-                            try {
-                              const result = await api.queue.skip(entry._id);
-                              notify(result.message);
-                              queue.refetch();
-                            } catch (error) {
-                              notify(error.message, "error");
-                            }
-                          }}
+                          onClick={() => handleSkip(entry)}
                         >
                           Skip
                         </button>
                         <button
-                          className="button button-outline button-small"
-                          onClick={async () => {
-                            try {
-                              const result = await api.queue.complete(
-                                entry._id,
-                              );
-                              notify(result.message);
-                              queue.refetch();
-                            } catch (error) {
-                              notify(error.message, "error");
-                            }
-                          }}
+                          type="button"
+                          className="button button-quiet button-small"
+                          style={{ color: "#b91c1c" }}
+                          onClick={() => handleRemove(entry)}
                         >
-                          Complete
+                          Remove
                         </button>
                       </>
+                    )}
+                    {entry.status === "completed" && entry.appointment && (
+                      <Link
+                        to={`/reception/invoices?appointmentId=${entry.appointment._id || entry.appointment}`}
+                        className="button button-quiet button-small"
+                      >
+                        Invoice
+                      </Link>
                     )}
                   </div>
                 </article>
@@ -2384,6 +2597,84 @@ export function QueuePage({ role = "dentist" }) {
             </div>
           </AsyncView>
         </SectionPanel>
+      ) : (
+        <div className="notice notice-warn">
+          No primary clinic doctor is configured or verified. Set up the doctor profile first.
+        </div>
+      )}
+
+      {/* Walk-in patient registration modal */}
+      {showWalkInModal && (
+        <div className="modal-backdrop" onClick={() => setShowWalkInModal(false)}>
+          <div className="modal-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "520px", width: "90%" }}>
+            <div className="modal-header">
+              <h2>Register walk-in patient + Check in</h2>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="Close"
+                onClick={() => setShowWalkInModal(false)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <form onSubmit={handleRegisterAndCheckIn} className="stack-form" style={{ padding: "1.2rem" }}>
+              <Field label="Full name *">
+                <TextInput
+                  required
+                  value={walkInForm.name}
+                  onChange={(e) => setWalkInForm({ ...walkInForm, name: e.target.value })}
+                  placeholder="Patient's legal name"
+                />
+              </Field>
+              <Field label="Phone number *">
+                <TextInput
+                  type="tel"
+                  required
+                  value={walkInForm.phone}
+                  onChange={(e) => setWalkInForm({ ...walkInForm, phone: e.target.value })}
+                  placeholder="10-digit mobile number"
+                />
+              </Field>
+              <Field label="Email (optional)">
+                <TextInput
+                  type="email"
+                  value={walkInForm.email}
+                  onChange={(e) => setWalkInForm({ ...walkInForm, email: e.target.value })}
+                  placeholder="name@example.com"
+                />
+              </Field>
+              <Field label="Gender">
+                <select
+                  className="input"
+                  value={walkInForm.gender}
+                  onChange={(e) => setWalkInForm({ ...walkInForm, gender: e.target.value })}
+                >
+                  <option value="female">Female</option>
+                  <option value="male">Male</option>
+                  <option value="other">Other</option>
+                </select>
+              </Field>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.8rem", marginTop: "1rem" }}>
+                <button
+                  type="button"
+                  className="button button-quiet"
+                  onClick={() => setShowWalkInModal(false)}
+                  disabled={walkInBusy}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="button button-primary"
+                  disabled={walkInBusy}
+                >
+                  {walkInBusy ? "Registering & Checking in…" : "Register + Check in"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

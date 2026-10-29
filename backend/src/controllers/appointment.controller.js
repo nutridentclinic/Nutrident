@@ -3,6 +3,8 @@ const Dentist = require('../models/Dentist');
 const User = require('../models/User');
 const ClinicSettings = require('../models/ClinicSettings');
 const Payment = require('../models/Payment');
+const Invoice = require('../models/Invoice');
+const escapeRegex = require('../utils/escapeRegex');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/appError');
 const logger = require('../utils/logger');
@@ -294,7 +296,8 @@ exports.getDentistAppointments = catchAsync(async (req, res, next) => {
 exports.getAppointmentById = catchAsync(async (req, res, next) => {
   const appointment = await Appointment.findById(req.params.id)
     .populate('patient', 'name phone email profilePhoto')
-    .populate({ path: 'dentist', populate: { path: 'user', select: 'name phone email profilePhoto' } });
+    .populate({ path: 'dentist', populate: { path: 'user', select: 'name phone email profilePhoto' } })
+    .populate('invoice', 'invoiceNumber status totalAmount paidAt items discount couponCode');
 
   if (!appointment) return next(new AppError('Appointment not found.', 404));
 
@@ -575,50 +578,102 @@ exports.joinVideoCall = catchAsync(async (req, res, next) => {
 });
 
 // @route GET /api/appointments (E3 - receptionist/admin appointment list)
-exports.getAllAppointments = catchAsync(async (req, res) => {
-  const { date, from, to, status, paymentStatus, mode, dentistId, patientId, search, page = 1, limit = 20 } = req.query;
-  const filter = {};
-  if (status) filter.status = status;
-  if (paymentStatus) filter.paymentStatus = paymentStatus;
-  if (mode) filter.mode = mode;
-  if (dentistId) filter.dentist = dentistId;
-  if (patientId) filter.patient = patientId;
+exports.getAllAppointments = catchAsync(async (req, res, next) => {
+  const { date, from, to, status, paymentStatus, mode, dentistId, patientId, search, sort, page = 1, limit = 20 } = req.query;
+
+  if (from && to) {
+    const fromDate = new Date(`${from}T00:00:00.000Z`);
+    const toDate = new Date(`${to}T00:00:00.000Z`);
+    if (fromDate > toDate) {
+      return next(new AppError('from date cannot be after to date', 400));
+    }
+  }
+
+  const baseFilter = {};
+  if (status) baseFilter.status = status;
+  if (paymentStatus) baseFilter.paymentStatus = paymentStatus;
+  if (mode) baseFilter.mode = mode;
+  if (dentistId) baseFilter.dentist = dentistId;
+  if (patientId) baseFilter.patient = patientId;
+
   if (date) {
     const start = new Date(`${date}T00:00:00.000Z`);
     const end = new Date(start);
     end.setUTCDate(end.getUTCDate() + 1);
-    filter.date = { $gte: start, $lt: end };
+    baseFilter.date = { $gte: start, $lt: end };
   } else if (from || to) {
-    filter.date = {};
-    if (from) filter.date.$gte = new Date(`${from}T00:00:00.000Z`);
+    baseFilter.date = {};
+    if (from) baseFilter.date.$gte = new Date(`${from}T00:00:00.000Z`);
     if (to) {
       const end = new Date(`${to}T00:00:00.000Z`);
       end.setUTCDate(end.getUTCDate() + 1);
-      filter.date.$lt = end;
+      baseFilter.date.$lt = end;
     }
   }
-  if (search) {
-    const users = await User.find({
-      role: 'patient',
-      $or: [
-        { name: new RegExp(escapeRegex(search), 'i') },
-        { email: new RegExp(escapeRegex(search), 'i') },
-        { phone: new RegExp(escapeRegex(search), 'i') },
-      ],
-    }).select('_id');
-    filter.patient = { $in: users.map((user) => user._id) };
+
+  const andConditions = [];
+  if (Object.keys(baseFilter).length > 0) {
+    andConditions.push(baseFilter);
   }
+
+  if (search && search.trim()) {
+    const term = search.trim();
+    const regex = new RegExp(escapeRegex(term), 'i');
+    const orSearch = [];
+
+    if (/^[0-9a-fA-F]{24}$/.test(term)) {
+      orSearch.push({ _id: term });
+    }
+
+    const matchingUsers = await User.find({
+      role: 'patient',
+      $or: [{ name: regex }, { email: regex }, { phone: regex }],
+    }).select('_id');
+    if (matchingUsers.length > 0) {
+      orSearch.push({ patient: { $in: matchingUsers.map((u) => u._id) } });
+    }
+
+    const matchingDentists = await User.find({
+      role: 'dentist',
+      $or: [{ name: regex }, { email: regex }],
+    }).select('_id');
+    if (matchingDentists.length > 0) {
+      const dentists = await Dentist.find({ user: { $in: matchingDentists.map((u) => u._id) } }).select('_id');
+      if (dentists.length > 0) {
+        orSearch.push({ dentist: { $in: dentists.map((d) => d._id) } });
+      }
+    }
+
+    orSearch.push({ reasonForVisit: regex });
+    orSearch.push({ mode: regex });
+
+    const matchingInvoices = await Invoice.find({
+      invoiceNumber: regex,
+      appointment: { $ne: null },
+    }).select('appointment');
+    if (matchingInvoices.length > 0) {
+      orSearch.push({ _id: { $in: matchingInvoices.map((inv) => inv.appointment) } });
+    }
+
+    andConditions.push({ $or: orSearch });
+  }
+
+  const finalFilter = andConditions.length > 1 ? { $and: andConditions } : (andConditions[0] || {});
 
   const currentPage = Math.max(1, Number(page) || 1);
   const pageSize = Math.min(100, Math.max(1, Number(limit) || 20));
+  const sortOption = sort || '-date -startTime';
+
   const [appointments, total] = await Promise.all([
-    Appointment.find(filter)
+    Appointment.find(finalFilter)
       .populate('patient', 'name phone email profilePhoto')
       .populate({ path: 'dentist', populate: { path: 'user', select: 'name profilePhoto' } })
-      .sort('date startTime')
+      .populate('invoice', 'invoiceNumber status totalAmount paidAt items discount couponCode')
+      .sort(sortOption)
       .skip((currentPage - 1) * pageSize)
       .limit(pageSize),
-    Appointment.countDocuments(filter),
+    Appointment.countDocuments(finalFilter),
   ]);
+
   success(res, 200, 'Appointments fetched.', appointments, { total, page: currentPage, limit: pageSize });
 });

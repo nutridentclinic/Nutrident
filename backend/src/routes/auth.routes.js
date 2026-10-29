@@ -34,6 +34,7 @@ router.post('/verify-reset-otp', authLimiter, verifyResetOtpRules, validate, ctr
 router.post('/reset-password', authLimiter, checkLegacyResetShape, resetPasswordRules, validate, ctrl.resetPassword);
 
 router.get('/me', protect, ctrl.getMe);
+router.patch('/me', protect, ctrl.updateMe);
 router.patch('/me/photo', protect, upload('profile-photos').single('photo'), ctrl.updateProfilePhoto);
 router.patch('/update-password', protect, ctrl.updatePassword);
 

@@ -2,73 +2,96 @@ const Notification = require('../models/Notification');
 const User = require('../models/User');
 const logger = require('../utils/logger');
 const { messaging, isConfigured } = require('../config/firebase');
+const { sendEmail } = require('../config/email');
 
-/**
- * Central notification service.
- *
- * Channels:
- *  - IN-APP (always active) -> saved to DB, fetched via /api/notifications
- *  - PUSH (Firebase Cloud Messaging) -> active once FIREBASE_* env vars are set;
- *    automatically looks up the user's saved fcmToken (set via PUT /api/notifications/fcm-token)
- *  - SMS -> intentionally NOT a separate channel here. OTP-by-SMS and phone verification
- *           are handled by Firebase Phone Authentication client-side (the mobile app talks
- *           to Firebase directly and Google sends the SMS); the backend only verifies the
- *           resulting Firebase ID token via verifyFirebaseIdToken() in auth.controller.js.
- */
+function resolveNotificationLink(type, relatedId, role = 'receptionist') {
+  const defaultPath = role === 'patient' ? '/app/notifications' : (role === 'receptionist' ? '/reception/notifications' : `/${role}/notifications`);
+  if (!relatedId) {
+    return defaultPath;
+  }
+  const idStr = String(relatedId);
+  if (role === 'receptionist') {
+    if (type.startsWith('appointment_') || type === 'new_booking' || type === 'patient_checked_in') {
+      return `/reception/appointments?open=${idStr}`;
+    }
+    if (type.startsWith('payment_') || type.startsWith('invoice_')) {
+      return `/reception/invoices?open=${idStr}`;
+    }
+    if (type === 'queue_update') {
+      return '/reception/queue';
+    }
+    if (type === 'new_patient_registered') {
+      return `/reception/patients/${idStr}`;
+    }
+    return '/reception/notifications';
+  }
+  if (role === 'dentist') {
+    if (type.startsWith('appointment_') || type === 'new_booking') return `/dentist/appointments?open=${idStr}`;
+    if (type === 'queue_update' || type === 'patient_checked_in') return '/dentist/queue';
+    return '/dentist/notifications';
+  }
+  if (role === 'admin') {
+    if (type.startsWith('appointment_') || type === 'new_booking') return `/admin/appointments?open=${idStr}`;
+    if (type.startsWith('payment_') || type.startsWith('invoice_')) return `/admin/payments?open=${idStr}`;
+    return '/admin/notifications';
+  }
+  if (type.startsWith('appointment_') || type === 'new_booking') return `/app/appointments?open=${idStr}`;
+  if (type.startsWith('payment_') || type.startsWith('invoice_')) return `/app/billing?open=${idStr}`;
+  if (type === 'queue_update') return '/app';
+  return '/app/notifications';
+}
 
-const createInApp = async ({ userId, title, message, type, relatedId = null }) => {
-  return Notification.create({ user: userId, title, message, type, relatedId });
+const createInApp = async ({ userId, title, message, type, relatedId = null, link = null }) => {
+  return Notification.create({ user: userId, title, message, type, relatedId, link });
 };
 
-const sendPush = async ({ fcmToken, title, message }) => {
+const sendPush = async ({ fcmToken, title, message, url = null }) => {
   if (!isConfigured() || !fcmToken) return null;
   try {
-    return await messaging().send({
+    const payload = {
       token: fcmToken,
       notification: { title, body: message },
-    });
+    };
+    if (url) {
+      payload.data = { url };
+      payload.webpush = { fcmOptions: { link: url } };
+    }
+    return await messaging().send(payload);
   } catch (err) {
     logger.error(`FCM push failed: ${err.message}`);
     return null;
   }
 };
 
-const { sendEmail } = require('../config/email');
+const notify = async ({ userId, title, message, type, relatedId = null, link = null }) => {
+  let resolvedLink = link;
+  const user = await User.findById(userId).select('email name role fcmToken notificationPreferences');
+  if (user && !resolvedLink) {
+    resolvedLink = resolveNotificationLink(type, relatedId, user.role);
+  }
 
-/**
- * Main entry point used by controllers/services throughout the app.
- * Always creates the in-app record; also sends a Firebase push and Brevo email
- * if configured and enabled in user preferences.
- */
-const notify = async ({ userId, title, message, type, relatedId = null }) => {
-  const inApp = await createInApp({ userId, title, message, type, relatedId });
+  const inApp = await createInApp({ userId, title, message, type, relatedId, link: resolvedLink });
 
-  // Fire and forget - don't block the main request on notification delivery
-  User.findById(userId)
-    .select('email name fcmToken notificationPreferences')
-    .then(async (user) => {
-      if (!user) return;
+  if (!user) return inApp;
 
-      // 1. Firebase push
-      if (isConfigured() && user.fcmToken && user.notificationPreferences?.push !== false) {
-        sendPush({ fcmToken: user.fcmToken, title, message });
-      }
+  // 1. Firebase push
+  if (isConfigured() && user.fcmToken && user.notificationPreferences?.push !== false) {
+    sendPush({ fcmToken: user.fcmToken, title, message, url: resolvedLink });
+  }
 
-      // 2. Email notification (via Brevo)
-      if (process.env.BREVO_API_KEY && user.email && user.notificationPreferences?.email !== false) {
-        try {
-          await sendEmail({
-            to: user.email,
-            subject: title,
-            html: `<div style="font-family:sans-serif;line-height:1.5;"><h3>${title}</h3><p>${message}</p></div>`,
-            text: `${title}\n\n${message}`,
-          });
-        } catch (emailErr) {
-          logger.info(`Email sending failed or unconfigured: ${emailErr.message}`);
-        }
-      }
-    })
-    .catch((e) => logger.error(`Notification delivery error: ${e.message}`));
+  // 2. Email notification
+  if (process.env.BREVO_API_KEY && user.email && user.notificationPreferences?.email !== false) {
+    try {
+      await sendEmail({
+        to: user.email,
+        subject: title,
+        html: `<div style="font-family:sans-serif;line-height:1.5;"><h3>${title}</h3><p>${message}</p></div>`,
+        text: `${title}\n\n${message}`,
+      });
+    } catch (emailErr) {
+      logger.info(`Email sending failed or unconfigured: ${emailErr.message}`);
+    }
+  }
 
   return inApp;
 };
@@ -79,10 +102,13 @@ const notifyUser = async (userId, payload) => {
 
 const notifyRoles = async (roles, payload) => {
   const roleList = Array.isArray(roles) ? roles : [roles];
-  const users = await User.find({ role: { $in: roleList } }).select('_id');
+  const users = await User.find({ role: { $in: roleList } }).select('_id role');
   return Promise.all(
-    users.map((u) => notify({ userId: u._id, ...payload }))
+    users.map((u) => {
+      const link = payload.link || resolveNotificationLink(payload.type, payload.relatedId, u.role);
+      return notify({ userId: u._id, ...payload, link });
+    })
   );
 };
 
-module.exports = { notify, sendPush, notifyUser, notifyRoles };
+module.exports = { notify, sendPush, notifyUser, notifyRoles, resolveNotificationLink };

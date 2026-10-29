@@ -11,6 +11,7 @@ const { generateInvoicePDF } = require('../services/pdf.service');
 const { checkCoupon, recordCouponUsage } = require('../services/coupon.service');
 const { dayRange, parseDateOnly } = require('../utils/clinicDate');
 const escapeRegex = require('../utils/escapeRegex');
+const { resolvePrimaryDentist } = require('../utils/clinicDentist');
 
 // @route POST /api/invoices  (receptionist/dentist generates an invoice, e.g. after in-clinic treatment)
 exports.createInvoice = catchAsync(async (req, res, next) => {
@@ -18,14 +19,25 @@ exports.createInvoice = catchAsync(async (req, res, next) => {
   const patient = await User.findOne({ _id: patientId, role: 'patient' }).select('_id');
   if (!patient) return next(new AppError('Patient not found.', 404));
 
-  const primaryDentist = await Dentist.findOne();
-  let resolvedDentistId = null;
-  if (primaryDentist) {
-    if (dentistId && String(primaryDentist._id) !== String(dentistId)) {
-      return next(new AppError('The specified dentist is not the clinic doctor.', 400));
+  if (appointmentId) {
+    const existing = await Invoice.findOne({ appointment: appointmentId });
+    if (existing) {
+      return res.status(409).json({
+        success: false,
+        message: 'An invoice already exists for this appointment.',
+        data: existing,
+      });
     }
-    resolvedDentistId = primaryDentist._id;
   }
+
+  let resolvedDentistId = null;
+  try {
+    const primaryDentist = await resolvePrimaryDentist(dentistId);
+    if (primaryDentist) resolvedDentistId = primaryDentist._id;
+  } catch (err) {
+    return next(err);
+  }
+
   if (!Array.isArray(items) || items.length === 0 || items.some((item) => !item.description?.trim() || !Number.isFinite(Number(item.unitPrice)) || Number(item.unitPrice) < 0 || Number(item.quantity ?? 1) <= 0)) {
     return next(new AppError('Invoice items must include a description, a non-negative unit price, and a positive quantity.', 400));
   }
@@ -40,7 +52,7 @@ exports.createInvoice = catchAsync(async (req, res, next) => {
       discount = result.discount;
       appliedCoupon = result.coupon;
     } catch (err) {
-      return next(err); // AppError from checkCoupon (invalid/expired/limit reached etc.)
+      return next(err);
     }
   }
 
@@ -51,20 +63,35 @@ exports.createInvoice = catchAsync(async (req, res, next) => {
 
   const invoiceNumber = await generateInvoiceNumber();
 
-  const invoice = await Invoice.create({
-    invoiceNumber,
-    patient: patientId,
-    dentist: resolvedDentistId || null,
-    appointment: appointmentId || null,
-    items: items.map((i) => ({ ...i, amount: i.unitPrice * (i.quantity || 1) })),
-    subTotal,
-    discount,
-    couponCode: couponCode || null,
-    tax,
-    totalAmount,
-  });
+  let invoice;
+  try {
+    invoice = await Invoice.create({
+      invoiceNumber,
+      patient: patientId,
+      dentist: resolvedDentistId || null,
+      appointment: appointmentId || null,
+      items: items.map((i) => ({ ...i, amount: i.unitPrice * (i.quantity || 1) })),
+      subTotal,
+      discount,
+      couponCode: couponCode || null,
+      tax,
+      totalAmount,
+      status: 'unpaid',
+      paidAmount: 0,
+      payments: [],
+    });
+  } catch (err) {
+    if (err.code === 11000 && appointmentId) {
+      const existing = await Invoice.findOne({ appointment: appointmentId });
+      return res.status(409).json({
+        success: false,
+        message: 'An invoice already exists for this appointment.',
+        data: existing,
+      });
+    }
+    throw err;
+  }
 
-  // Only record usage now that the invoice has actually been created successfully
   if (appliedCoupon) await recordCouponUsage(appliedCoupon._id, patientId);
 
   success(res, 201, 'Invoice created.', invoice);
@@ -193,19 +220,42 @@ exports.updateInvoiceItems = catchAsync(async (req, res, next) => {
   success(res, 200, 'Invoice items updated.', invoice);
 });
 
-// @route PATCH /api/invoices/:id/mark-paid (staff records an externally settled invoice)
+// @route PATCH /api/invoices/:id/mark-paid (staff records payment)
 exports.markInvoicePaid = catchAsync(async (req, res, next) => {
   const invoice = await Invoice.findById(req.params.id);
   if (!invoice) return next(new AppError('Invoice not found.', 404));
-  if (invoice.status !== 'unpaid') return next(new AppError('Only unpaid invoices can be marked as paid.', 400));
-  invoice.status = 'paid';
-  invoice.paymentMethod = (req.body.method || 'cash').trim();
-  invoice.paidAt = new Date();
-  await invoice.save();
+  if (invoice.status === 'paid') return next(new AppError('Invoice is already marked as paid.', 400));
 
-  if (invoice.appointment) {
-    await Appointment.findByIdAndUpdate(invoice.appointment, { paymentStatus: 'paid' });
+  const method = (req.body.method || 'cash').trim();
+  const paymentAmount = req.body.amount !== undefined ? Number(req.body.amount) : (invoice.totalAmount - (invoice.paidAmount || 0));
+  const reference = (req.body.reference || '').trim();
+
+  if (!Number.isFinite(paymentAmount) || paymentAmount <= 0) {
+    return next(new AppError('Payment amount must be greater than zero.', 400));
   }
 
-  success(res, 200, 'Invoice marked as paid.', invoice);
+  const currentPaid = Number(invoice.paidAmount || 0);
+  const newPaid = currentPaid + paymentAmount;
+  invoice.paidAmount = newPaid;
+  if (!invoice.payments) invoice.payments = [];
+  invoice.payments.push({
+    amount: paymentAmount,
+    method,
+    reference,
+    paidAt: new Date(),
+  });
+
+  if (newPaid >= invoice.totalAmount) {
+    invoice.status = 'paid';
+    invoice.paidAt = new Date();
+    invoice.paymentMethod = method;
+    if (invoice.appointment) {
+      await Appointment.findByIdAndUpdate(invoice.appointment, { paymentStatus: 'paid' });
+    }
+  } else {
+    invoice.paymentMethod = method;
+  }
+
+  await invoice.save();
+  success(res, 200, invoice.status === 'paid' ? 'Invoice marked as paid.' : 'Partial payment recorded.', invoice);
 });

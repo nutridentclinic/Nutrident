@@ -17,9 +17,10 @@ const appointmentSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ['pending', 'confirmed', 'cancelled', 'rescheduled', 'completed', 'no-show'],
+      enum: ['pending', 'confirmed', 'checked-in', 'cancelled', 'rescheduled', 'completed', 'no-show'],
       default: 'pending',
     },
+    checkedInAt: { type: Date, default: null },
     cancelledBy: { type: String, enum: ['patient', 'dentist', 'admin', 'receptionist', 'system', null], default: null },
     cancellationReason: { type: String, default: '' },
 
@@ -48,8 +49,19 @@ const appointmentSchema = new mongoose.Schema(
 
     reminderSent: { type: Boolean, default: false },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true },
+  }
 );
+
+appointmentSchema.virtual('invoice', {
+  ref: 'Invoice',
+  localField: '_id',
+  foreignField: 'appointment',
+  justOne: true,
+});
 
 // Regular lookup index (fast queries for slot generation / dentist schedule)
 appointmentSchema.index({ dentist: 1, date: 1, startTime: 1, status: 1 });
@@ -58,11 +70,9 @@ appointmentSchema.index({ patient: 1, date: -1 });
 // HARD double-booking guard at the database level. This is a *partial* unique index:
 // it only enforces uniqueness among documents where status is pending/confirmed, so
 // cancelled/completed/rescheduled appointments never block the same slot being reused.
-// Even if two requests race past the application-level assertSlotIsFree() check at the
-// exact same instant, MongoDB itself will reject the second insert with an E11000 error.
 appointmentSchema.index(
   { dentist: 1, date: 1, startTime: 1 },
-  { unique: true, partialFilterExpression: { status: { $in: ['pending', 'confirmed'] } } }
+  { unique: true, partialFilterExpression: { status: { $in: ['pending', 'confirmed', 'checked-in'] } } }
 );
 
 appointmentSchema.index({ clinic: 1, date: -1 });

@@ -1,6 +1,7 @@
 const Notification = require('../models/Notification');
 const User = require('../models/User');
 const catchAsync = require('../utils/catchAsync');
+const AppError = require('../utils/appError');
 const { success } = require('../utils/response');
 
 // @route GET /api/notifications/me
@@ -9,19 +10,28 @@ exports.getMyNotifications = catchAsync(async (req, res) => {
   const filter = { user: req.user._id };
   if (unreadOnly === 'true') filter.isRead = false;
 
-  const skip = (Number(page) - 1) * Number(limit);
-  const [notifications, unreadCount] = await Promise.all([
-    Notification.find(filter).sort('-createdAt').skip(skip).limit(Number(limit)),
+  const currentPage = Math.max(1, Number(page) || 1);
+  const pageSize = Math.min(100, Math.max(1, Number(limit) || 20));
+  const skip = (currentPage - 1) * pageSize;
+
+  const [notifications, unreadCount, total] = await Promise.all([
+    Notification.find(filter).sort('-createdAt').skip(skip).limit(pageSize),
     Notification.countDocuments({ user: req.user._id, isRead: false }),
+    Notification.countDocuments(filter),
   ]);
 
-  success(res, 200, 'Notifications fetched.', notifications, { unreadCount });
+  success(res, 200, 'Notifications fetched.', notifications, { unreadCount, total, page: currentPage, limit: pageSize });
 });
 
 // @route PATCH /api/notifications/:id/read
-exports.markAsRead = catchAsync(async (req, res) => {
-  await Notification.findOneAndUpdate({ _id: req.params.id, user: req.user._id }, { isRead: true });
-  success(res, 200, 'Notification marked as read.');
+exports.markAsRead = catchAsync(async (req, res, next) => {
+  const notif = await Notification.findOne({ _id: req.params.id, user: req.user._id });
+  if (!notif) return next(new AppError('Notification not found.', 404));
+  if (!notif.isRead) {
+    notif.isRead = true;
+    await notif.save();
+  }
+  success(res, 200, 'Notification marked as read.', notif);
 });
 
 // @route PATCH /api/notifications/read-all
@@ -42,14 +52,12 @@ exports.getPreferences = catchAsync(async (req, res) => {
 });
 
 // @route PATCH /api/notifications/preferences
-// Body: { push?: boolean, email?: boolean }  - in-app notifications can't be disabled,
-// they're the source of truth the notification list is built from.
 exports.updatePreferences = catchAsync(async (req, res) => {
   const updates = {};
   if (typeof req.body.push === 'boolean') updates['notificationPreferences.push'] = req.body.push;
   if (typeof req.body.email === 'boolean') updates['notificationPreferences.email'] = req.body.email;
 
-  const user = await User.findByIdAndUpdate(req.user._id, updates, { new: true }).select(
+  const user = await User.findByIdAndUpdate(req.user._id, { $set: updates }, { returnDocument: 'after' }).select(
     'notificationPreferences'
   );
   success(res, 200, 'Preferences updated.', user.notificationPreferences);

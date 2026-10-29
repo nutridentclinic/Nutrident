@@ -35,6 +35,7 @@ const notificationSchema = new mongoose.Schema(
       required: true,
     },
     relatedId: { type: mongoose.Schema.Types.ObjectId, default: null }, // appointment/payment/etc id
+    link: { type: String, default: null },
     isRead: { type: Boolean, default: false },
 
     // Delivery tracking - useful once push/SMS channels are added

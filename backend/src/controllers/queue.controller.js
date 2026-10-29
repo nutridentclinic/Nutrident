@@ -4,19 +4,28 @@ const Appointment = require('../models/Appointment');
 const User = require('../models/User');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/appError');
+const logger = require('../utils/logger');
 const { success } = require('../utils/response');
 const { notify, notifyUser, notifyRoles } = require('../services/notification.service');
+const { createInvoiceForAppointment } = require('../services/invoice.service');
 const canAccessDentistQueue = require('../utils/queueAccess');
 const { todayInClinic, parseDateOnly } = require('../utils/clinicDate');
+const { resolvePrimaryDentist } = require('../utils/clinicDentist');
 
 const startOfDay = (date) => {
-  if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
-    return parseDateOnly(date);
+  if (date instanceof Date && !isNaN(date.getTime())) {
+    return parseDateOnly(date.toISOString().slice(0, 10));
+  }
+  if (typeof date === 'string') {
+    const clean = date.trim().slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) {
+      return parseDateOnly(clean);
+    }
   }
   return parseDateOnly(todayInClinic());
 };
 
-// @route POST /api/queue/check-in  (receptionist checks in an arriving registered patient)
+// @route POST /api/queue/check-in  (receptionist checks in an arriving patient)
 exports.checkIn = catchAsync(async (req, res, next) => {
   const { dentistId, patientId, walkInName, appointmentId, date } = req.body;
 
@@ -38,23 +47,53 @@ exports.checkIn = catchAsync(async (req, res, next) => {
     return next(new AppError('patientId or appointmentId is required for check-in.', 400));
   }
 
+  const day = startOfDay(date);
+
+  // Validate appointment if provided
+  if (resolvedAppointmentId) {
+    const appt = await Appointment.findById(resolvedAppointmentId);
+    if (!appt) return next(new AppError('Appointment not found.', 404));
+    if (['cancelled', 'completed'].includes(appt.status)) {
+      return next(new AppError(`Cannot check in an appointment that is already ${appt.status}.`, 400));
+    }
+    const apptDay = startOfDay(appt.date);
+    if (apptDay.getTime() !== day.getTime()) {
+      return next(new AppError('Appointment is scheduled for a different date.', 400));
+    }
+    appt.status = 'checked-in';
+    appt.checkedInAt = new Date();
+    await appt.save();
+    resolvedPatientId = appt.patient;
+  }
+
   const patientUser = await User.findById(resolvedPatientId);
   if (!patientUser) {
     return next(new AppError('Patient account not found.', 404));
   }
 
-  const primaryDentist = await Dentist.findOne().populate('user');
-  if (!primaryDentist) {
-    return next(new AppError('No dentist is configured for this clinic.', 404));
+  let dentist;
+  try {
+    dentist = await resolvePrimaryDentist(dentistId);
+  } catch (err) {
+    return next(err);
   }
-  if (dentistId && String(primaryDentist._id) !== String(dentistId)) {
-    return next(new AppError('The specified dentist is not the clinic doctor.', 400));
-  }
-  const resolvedDentistId = primaryDentist._id;
-  const dentist = primaryDentist;
+  const resolvedDentistId = dentist._id;
 
-  const day = startOfDay(date);
-  const avgConsultMinutes = dentist?.slotDurationMinutes || 15;
+  // Single active entry per patient per day guard
+  if (resolvedPatientId) {
+    const existingActive = await Queue.findOne({
+      dentist: resolvedDentistId,
+      patient: resolvedPatientId,
+      date: day,
+      status: { $in: ['waiting', 'in-progress'] },
+    }).populate('patient', 'name phone');
+
+    if (existingActive) {
+      return success(res, 200, `Patient is already checked in. Token number is ${existingActive.tokenNumber}.`, existingActive);
+    }
+  }
+
+  const avgConsultMinutes = dentist.slotDurationMinutes || 15;
   const waitingCount = await Queue.countDocuments({ dentist: resolvedDentistId, date: day, status: 'waiting' });
   let entry;
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -63,8 +102,8 @@ exports.checkIn = catchAsync(async (req, res, next) => {
     try {
       entry = await Queue.create({
         dentist: resolvedDentistId,
-        patient: resolvedPatientId,
-        walkInName: null,
+        patient: resolvedPatientId || null,
+        walkInName: walkInName ? String(walkInName).trim() : null,
         appointment: resolvedAppointmentId,
         tokenNumber,
         date: day,
@@ -78,18 +117,22 @@ exports.checkIn = catchAsync(async (req, res, next) => {
 
   req.app.get('io')?.to(`queue_${resolvedDentistId}`).emit('queue:updated', { action: 'check-in', entry });
 
-  await notifyUser(resolvedPatientId, {
-    title: 'Checked In',
-    message: `You're checked in. Your token number is ${entry.tokenNumber}. Estimated wait: ${entry.estimatedWaitMinutes} min.`,
-    type: 'queue_update',
-    relatedId: entry._id,
-  });
+  const displayName = patientUser?.name || walkInName || 'Patient';
+
+  if (resolvedPatientId) {
+    await notifyUser(resolvedPatientId, {
+      title: 'Checked In',
+      message: `You're checked in. Your token number is ${entry.tokenNumber}. Estimated wait: ${entry.estimatedWaitMinutes} min.`,
+      type: 'queue_update',
+      relatedId: entry._id,
+    });
+  }
 
   if (dentist?.user) {
     const dentistUserId = dentist.user._id || dentist.user;
     await notifyUser(dentistUserId, {
       title: 'Patient Checked In',
-      message: `${patientUser.name || 'Patient'} has checked in (Token ${entry.tokenNumber}).`,
+      message: `${displayName} has checked in (Token ${entry.tokenNumber}).`,
       type: 'patient_checked_in',
       relatedId: entry._id,
     });
@@ -97,7 +140,7 @@ exports.checkIn = catchAsync(async (req, res, next) => {
 
   await notifyRoles(['receptionist'], {
     title: 'Patient Checked In',
-    message: `${patientUser.name || 'Patient'} checked in (Token ${entry.tokenNumber}).`,
+    message: `${displayName} checked in (Token ${entry.tokenNumber}).`,
     type: 'patient_checked_in',
     relatedId: entry._id,
   });
@@ -123,15 +166,15 @@ exports.callNext = catchAsync(async (req, res, next) => {
   const entry = await Queue.findByIdAndUpdate(
     req.params.id,
     { status: 'in-progress', calledAt: new Date() },
-    { new: true }
-  );
+    { returnDocument: 'after' }
+  ).populate('patient', 'name phone');
   if (!entry) return next(new AppError('Queue entry not found.', 404));
 
   req.app.get('io')?.to(`queue_${entry.dentist}`).emit('queue:updated', { action: 'called', entry });
 
   if (entry.patient) {
     await notify({
-      userId: entry.patient,
+      userId: entry.patient._id || entry.patient,
       title: "It's your turn",
       message: `Token ${entry.tokenNumber}, please proceed to the consultation room.`,
       type: 'queue_update',
@@ -147,17 +190,51 @@ exports.completeEntry = catchAsync(async (req, res, next) => {
   const entry = await Queue.findByIdAndUpdate(
     req.params.id,
     { status: 'completed', completedAt: new Date() },
-    { new: true }
-  );
+    { returnDocument: 'after' }
+  ).populate('patient', 'name phone');
   if (!entry) return next(new AppError('Queue entry not found.', 404));
-  req.app.get('io')?.to(`queue_${entry.dentist}`).emit('queue:updated', { action: 'completed', entry });
-  success(res, 200, 'Marked as completed.', entry);
+
+  let invoice = null;
+  if (entry.appointment) {
+    const appt = await Appointment.findById(entry.appointment);
+    if (appt && appt.status !== 'completed') {
+      appt.status = 'completed';
+      await appt.save();
+      try {
+        invoice = await createInvoiceForAppointment(appt);
+      } catch (err) {
+        logger.error(`Failed creating invoice on queue complete for appt ${appt._id}: ${err.message}`);
+      }
+    } else if (appt) {
+      const Invoice = require('../models/Invoice');
+      invoice = await Invoice.findOne({ appointment: appt._id });
+    }
+  }
+
+  req.app.get('io')?.to(`queue_${entry.dentist}`).emit('queue:updated', { action: 'completed', entry, invoice });
+  success(res, 200, 'Marked as completed.', { entry, invoice });
 });
 
 // @route PATCH /api/queue/:id/skip
 exports.skipEntry = catchAsync(async (req, res, next) => {
-  const entry = await Queue.findByIdAndUpdate(req.params.id, { status: 'skipped' }, { new: true });
+  const entry = await Queue.findByIdAndUpdate(
+    req.params.id,
+    { status: 'skipped' },
+    { returnDocument: 'after' }
+  ).populate('patient', 'name phone');
   if (!entry) return next(new AppError('Queue entry not found.', 404));
   req.app.get('io')?.to(`queue_${entry.dentist}`).emit('queue:updated', { action: 'skipped', entry });
   success(res, 200, 'Patient skipped.', entry);
+});
+
+// @route DELETE /api/queue/:id or PATCH /api/queue/:id/remove
+exports.removeEntry = catchAsync(async (req, res, next) => {
+  const entry = await Queue.findByIdAndUpdate(
+    req.params.id,
+    { status: 'cancelled' },
+    { returnDocument: 'after' }
+  ).populate('patient', 'name phone');
+  if (!entry) return next(new AppError('Queue entry not found.', 404));
+  req.app.get('io')?.to(`queue_${entry.dentist}`).emit('queue:updated', { action: 'removed', entry });
+  success(res, 200, 'Entry removed from queue.', entry);
 });

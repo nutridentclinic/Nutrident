@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { Link, useSearchParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
@@ -152,15 +152,35 @@ export function ReceptionDashboard() {
 }
 
 export function AppointmentLookup() {
-  const [id, setId] = useState("");
-  const [lookup, setLookup] = useState("");
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [searchParams, setSearchParams] = useSearchParams();
+  const openIdParam = searchParams.get("open") || "";
+  const [id, setId] = useState(openIdParam);
+  const [lookup, setLookup] = useState(openIdParam);
+
+  // Filters state
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [status, setStatus] = useState("");
+  const [paymentStatus, setPaymentStatus] = useState("");
+  const [mode, setMode] = useState("");
   const [search, setSearch] = useState("");
+  const [sortOrder, setSortOrder] = useState("-date -startTime");
+  const [page, setPage] = useState(1);
+  const [activeChip, setActiveChip] = useState("all");
+
   const queryClient = useQueryClient();
   const notify = useToast();
   const { confirm, dialog } = useConfirm();
-
   const primary = usePrimaryDentist();
+
+  // Sync openParam
+  useEffect(() => {
+    const openParam = searchParams.get("open");
+    if (openParam && openParam !== lookup) {
+      setLookup(openParam);
+      setId(openParam);
+    }
+  }, [searchParams]);
 
   // Staff booking modal state
   const [showBookingModal, setShowBookingModal] = useState(false);
@@ -184,29 +204,77 @@ export function AppointmentLookup() {
     dateOfBirth: "",
     gender: "other",
     address: "",
-    emergencyContactName: "",
-    emergencyContactPhone: "",
-    emergencyContactRelation: "Family",
-    allergies: "",
-    chronicConditions: "",
   });
 
   const query = useQuery({
     queryKey: ["appointment", "lookup", lookup],
     queryFn: () => api.appointments.detail(lookup),
     enabled: !!lookup,
+    retry: false,
   });
+
   const listQuery = useQuery({
-    queryKey: ["appointments", "reception", date, search],
+    queryKey: ["appointments", "reception", from, to, status, paymentStatus, mode, search, sortOrder, page],
     queryFn: async () => {
       try {
-        return await api.appointments.all({ date, search, page: 1, limit: 50 });
+        return await api.appointments.all({
+          from: from || undefined,
+          to: to || undefined,
+          status: status || undefined,
+          paymentStatus: paymentStatus || undefined,
+          mode: mode || undefined,
+          search: search.trim() || undefined,
+          sort: sortOrder,
+          page,
+          limit: 20,
+        });
       } catch (error) {
-        if (error.status === 404) return { data: [], limited: true };
+        if (error.status === 404) return { data: [], meta: { total: 0 } };
         throw error;
       }
     },
   });
+
+  const settingsQuery = useQuery({
+    queryKey: ["clinic-settings"],
+    queryFn: () => api.settings.get(),
+  });
+  const cancellationHours = settingsQuery.data?.data?.cancellationFullRefundHours ?? 24;
+  const refundPolicyText = "Full refund is available up to " + cancellationHours + " hours before the appointment per clinic policy.";
+
+  const applyChip = (chip) => {
+    setActiveChip(chip);
+    setPage(1);
+    const now = new Date();
+    const todayStr = now.toISOString().slice(0, 10);
+    if (chip === "all") {
+      setFrom("");
+      setTo("");
+    } else if (chip === "today") {
+      setFrom(todayStr);
+      setTo(todayStr);
+    } else if (chip === "tomorrow") {
+      const tom = new Date(now);
+      tom.setDate(tom.getDate() + 1);
+      const tomStr = tom.toISOString().slice(0, 10);
+      setFrom(tomStr);
+      setTo(tomStr);
+    } else if (chip === "this-week") {
+      const day = now.getDay();
+      const diffToMonday = (day === 0 ? -6 : 1) - day;
+      const mon = new Date(now);
+      mon.setDate(now.getDate() + diffToMonday);
+      const sun = new Date(mon);
+      sun.setDate(mon.getDate() + 6);
+      setFrom(mon.toISOString().slice(0, 10));
+      setTo(sun.toISOString().slice(0, 10));
+    } else if (chip === "past") {
+      const yest = new Date(now);
+      yest.setDate(now.getDate() - 1);
+      setFrom("");
+      setTo(yest.toISOString().slice(0, 10));
+    }
+  };
 
   // Slots for staff booking modal
   const staffSlotsQuery = useQuery({
@@ -218,7 +286,6 @@ export function AppointmentLookup() {
     (slot) => !isPastSlot(bookingDate, slot.startTime),
   );
 
-  // Patient search for staff booking
   const patientSearchResults = useQuery({
     queryKey: ["patient-search", patientSearchTerm],
     queryFn: () => api.patients.list({ search: patientSearchTerm, limit: 8 }),
@@ -237,13 +304,6 @@ export function AppointmentLookup() {
         dateOfBirth: walkInForm.dateOfBirth || undefined,
         gender: walkInForm.gender || "other",
         address: walkInForm.address.trim() || undefined,
-        emergencyContact: walkInForm.emergencyContactName ? {
-          name: walkInForm.emergencyContactName.trim(),
-          phone: walkInForm.emergencyContactPhone.trim(),
-          relation: walkInForm.emergencyContactRelation.trim(),
-        } : undefined,
-        allergies: walkInForm.allergies ? walkInForm.allergies.split(",").map((s) => s.trim()).filter(Boolean) : [],
-        chronicConditions: walkInForm.chronicConditions ? walkInForm.chronicConditions.split(",").map((s) => s.trim()).filter(Boolean) : [],
       };
       const res = await api.patients.createByStaff(payload);
       notify(res.message || "Walk-in patient registered.");
@@ -257,11 +317,6 @@ export function AppointmentLookup() {
         dateOfBirth: "",
         gender: "other",
         address: "",
-        emergencyContactName: "",
-        emergencyContactPhone: "",
-        emergencyContactRelation: "Family",
-        allergies: "",
-        chronicConditions: "",
       });
       queryClient.invalidateQueries({ queryKey: ["patient-search"] });
       queryClient.invalidateQueries({ queryKey: ["patients"] });
@@ -299,27 +354,8 @@ export function AppointmentLookup() {
         paymentChoice,
       };
 
-      try {
-        const res = await api.appointments.createStaff(payload);
-        notify(res.message || "Appointment booked and confirmed.", "success");
-      } catch (err) {
-        if (err.status === 404) {
-          // Graceful fallback on live backend before redeployment
-          const created = await api.appointments.create({
-            dentistId: primary.dentistId || undefined,
-            date: bookingDate,
-            startTime: bookingSlot,
-            mode: bookingMode,
-            reasonForVisit: bookingReason,
-          });
-          if (created.data?._id) {
-            await api.appointments.confirm(created.data._id, { staffOverride: true });
-          }
-          notify("Appointment booked and confirmed by staff override.", "success");
-        } else {
-          throw err;
-        }
-      }
+      const res = await api.appointments.createStaff(payload);
+      notify(res.message || "Appointment booked and confirmed.", "success");
       setShowBookingModal(false);
       setSelectedPatient(null);
       setBookingSlot("");
@@ -335,164 +371,348 @@ export function AppointmentLookup() {
 
   const item = query.data?.data;
   const appointments = listQuery.data?.data || [];
+  const totalCount = listQuery.data?.meta?.total ?? appointments.length;
+
+  const handleExportFilteredCsv = async () => {
+    try {
+      const res = await api.appointments.all({
+        from: from || undefined,
+        to: to || undefined,
+        status: status || undefined,
+        paymentStatus: paymentStatus || undefined,
+        mode: mode || undefined,
+        search: search.trim() || undefined,
+        sort: sortOrder,
+        page: 1,
+        limit: 1000,
+      });
+      const items = res.data || [];
+      const headers = [
+        "Appointment ID",
+        "Date",
+        "Time",
+        "Patient Name",
+        "Phone",
+        "Doctor",
+        "Mode",
+        "Status",
+        "Payment",
+        "Amount (Rs.)",
+        "Reason",
+      ];
+      const rows = items.map((a) => [
+        a._id,
+        fmtDate(a.date),
+        a.startTime,
+        a.patient?.name || "Patient",
+        a.patient?.phone || "",
+        a.dentist?.user?.name ? ("Dr. " + a.dentist.user.name) : "Clinic Doctor",
+        a.mode,
+        a.status,
+        a.paymentStatus,
+        a.fees?.totalAmount || 0,
+        a.reasonForVisit || "",
+      ]);
+      exportToCsv("appointments-" + (new Date().toISOString().slice(0, 10)) + ".csv", headers, rows);
+      notify("Exported " + items.length + " appointments to CSV.");
+    } catch (err) {
+      notify(err.message || "Failed to export CSV.", "error");
+    }
+  };
+
   const act = async (name) => {
     if (name === "confirm" && item?.paymentStatus !== "paid") {
       const approved = await confirm({
         title: "Confirm an unpaid appointment?",
         description: "This uses the explicit staff override and does not mark payment as paid.",
         confirmLabel: "Override and confirm",
+        cancelLabel: "Keep appointment",
       });
       if (!approved) return;
     }
-    if (name === "noShow" || name === "cancel") {
+    if (name === "noShow") {
       const approved = await confirm({
-        title: name === "noShow" ? "Mark this visit as no-show?" : "Cancel this appointment?",
-        description: name === "noShow" ? "This appointment will be recorded as a no-show." : "Refund eligibility depends on the clinic cancellation policy.",
-        confirmLabel: name === "noShow" ? "Mark no-show" : "Cancel appointment",
+        title: "Mark this visit as no-show?",
+        description: "This appointment for " + (item?.patient?.name || "Patient") + " on " + fmtDate(item?.date) + " at " + item?.startTime + " will be recorded as a no-show.",
+        confirmLabel: "Mark no-show",
+        cancelLabel: "Keep appointment",
         danger: true,
       });
       if (!approved) return;
     }
+    if (name === "cancel") {
+      let cancelReason = "Cancelled by clinic staff";
+      const approved = await confirm({
+        title: "Cancel this appointment?",
+        description: "Patient: " + (item?.patient?.name || "Patient") + " · " + fmtDate(item?.date) + " at " + item?.startTime + ". " + refundPolicyText,
+        confirmLabel: "Yes, cancel appointment",
+        cancelLabel: "Keep appointment",
+        danger: true,
+        children: (
+          <div style={{ marginTop: "1rem" }}>
+            <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 600, marginBottom: "0.3rem" }}>
+              Cancellation reason (optional)
+            </label>
+            <textarea
+              className="input"
+              rows={2}
+              defaultValue="Cancelled by clinic staff"
+              onChange={(e) => {
+                cancelReason = e.target.value;
+              }}
+              placeholder="Reason for cancellation…"
+            />
+          </div>
+        ),
+      });
+      if (!approved) return;
+      try {
+        const result = await api.appointments.cancel(lookup, cancelReason);
+        notify(result.message);
+        queryClient.invalidateQueries({ queryKey: ["appointment", "lookup", lookup] });
+        queryClient.invalidateQueries({ queryKey: ["appointments"] });
+        listQuery.refetch();
+      } catch (error) {
+        notify(error.message, "error");
+      }
+      return;
+    }
+
     try {
       const result = name === "confirm"
         ? await api.appointments.confirm(lookup, { staffOverride: item?.paymentStatus !== "paid" })
-        : name === "cancel"
-          ? await api.appointments.cancel(lookup, "Cancelled by clinic staff")
-          : await api.appointments[name](lookup);
+        : await api.appointments[name](lookup);
       notify(result.message);
-      queryClient.invalidateQueries({
-        queryKey: ["appointment", "lookup", lookup],
-      });
+      queryClient.invalidateQueries({ queryKey: ["appointment", "lookup", lookup] });
+      queryClient.invalidateQueries({ queryKey: ["appointments"] });
+      listQuery.refetch();
     } catch (error) {
       notify(error.message, "error");
     }
   };
+
   return (
     <div>
       <PageTitle
-        eyebrow="Appointment support"
-        title="Appointment lookup"
-        description="Review appointments for a clinic date or open a specific visit by ID."
+        eyebrow="Front desk support"
+        title="Appointments lookup"
+        description="Search and manage all clinic visits across all dates, review details, or book staff appointments."
         actions={
-          <button
-            type="button"
-            className="button button-primary"
-            onClick={() => setShowBookingModal(true)}
-          >
-            <Plus size={15} /> New appointment
-          </button>
-        }
-      />
-      <div className="filter-bar">
-        <Field label="Date">
-          <TextInput
-            type="date"
-            value={date}
-            onChange={(event) => setDate(event.target.value)}
-          />
-        </Field>
-        <Field label="Patient search">
-          <TextInput
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Name, email or phone"
-          />
-        </Field>
-      </div>
-      {listQuery.data?.limited && (
-        <div className="notice notice-warn">
-          The appointment-list endpoint is unavailable. Use the appointment ID
-          lookup below.
-        </div>
-      )}
-      <AsyncView
-        query={listQuery}
-        empty={
-          !listQuery.isLoading &&
-          !listQuery.isError &&
-          !appointments.length &&
-          !listQuery.data?.limited
-        }
-        emptyTitle="No appointments for this date"
-      >
-        <div className="appointment-list">
-          {appointments.map((visit) => (
+          <div style={{ display: "flex", gap: "0.5rem" }}>
             <button
               type="button"
-              className="appointment-row lookup-row"
-              key={visit._id}
-              onClick={() => {
-                setId(visit._id);
-                setLookup(visit._id);
+              className="button button-outline"
+              onClick={handleExportFilteredCsv}
+            >
+              <Download size={15} /> Export CSV
+            </button>
+            <button
+              type="button"
+              className="button button-primary"
+              onClick={() => setShowBookingModal(true)}
+            >
+              <Plus size={15} /> New appointment
+            </button>
+          </div>
+        }
+      />
+
+      {/* Unified Search & Quick Filter Chips */}
+      <div style={{ marginBottom: "1rem" }}>
+        <div className="filter-bar" style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "0.6rem", alignItems: "flex-end" }}>
+          <Field label="Unified search">
+            <TextInput
+              value={search}
+              onChange={(event) => {
+                setSearch(event.target.value);
+                setPage(1);
+                const term = event.target.value.trim();
+                if (/^[0-9a-fA-F]{24}$/.test(term)) {
+                  setLookup(term);
+                  setId(term);
+                }
+              }}
+              placeholder="Search by patient name, phone, email, appointment ID, reason, or invoice #…"
+            />
+          </Field>
+          <Field label="Sort order">
+            <select
+              className="input"
+              value={sortOrder}
+              onChange={(e) => {
+                setSortOrder(e.target.value);
+                setPage(1);
               }}
             >
-              <div className="appointment-date">
-                <CalendarDays size={17} />
-                <span>
-                  {visit.startTime}
-                  <small>{fmtDate(visit.date)}</small>
-                </span>
-              </div>
-              <div className="appointment-main">
-                <h3>{visit.patient?.name || "Patient"}</h3>
-                <p>
-                  Dr. {visit.dentist?.user?.name || "Dentist"} ·{" "}
-                  {visit.reasonForVisit || visit.mode}
-                </p>
-              </div>
-              <StatusBadge value={visit.status} />
-              <span className="row-arrow">
-                <ArrowRight size={15} />
-              </span>
+              <option value="-date -startTime">Upcoming / Newest first</option>
+              <option value="date startTime">Oldest first</option>
+            </select>
+          </Field>
+        </div>
+
+        {/* Date chips */}
+        <div className="filter-chips" style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap", marginTop: "0.6rem" }}>
+          {[
+            { id: "all", label: "All dates" },
+            { id: "today", label: "Today" },
+            { id: "tomorrow", label: "Tomorrow" },
+            { id: "this-week", label: "This week" },
+            { id: "past", label: "Past" },
+          ].map((chip) => (
+            <button
+              key={chip.id}
+              type="button"
+              className={"button button-small " + (activeChip === chip.id ? "button-primary" : "button-outline")}
+              onClick={() => applyChip(chip.id)}
+            >
+              {chip.label}
             </button>
           ))}
         </div>
-      </AsyncView>
-      <form
-        className="lookup-form"
-        onSubmit={(event) => {
-          event.preventDefault();
-          setLookup(id.trim());
-        }}
-      >
-        <Field label="Appointment ID">
+      </div>
+
+      {/* Multi-parameter Filters */}
+      <div className="filter-bar" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "0.6rem", marginBottom: "1.2rem" }}>
+        <Field label="From date">
           <TextInput
-            value={id}
-            onChange={(event) => setId(event.target.value)}
-            placeholder="Paste the appointment ID"
-            required
+            type="date"
+            value={from}
+            onChange={(e) => {
+              setFrom(e.target.value);
+              setActiveChip("custom");
+              setPage(1);
+            }}
           />
         </Field>
-        <button className="button button-primary">
-          Look up <Search size={15} />
-        </button>
-      </form>
+        <Field label="To date">
+          <TextInput
+            type="date"
+            value={to}
+            onChange={(e) => {
+              setTo(e.target.value);
+              setActiveChip("custom");
+              setPage(1);
+            }}
+          />
+        </Field>
+        <Field label="Status">
+          <select
+            className="input"
+            value={status}
+            onChange={(e) => {
+              setStatus(e.target.value);
+              setPage(1);
+            }}
+          >
+            <option value="">All statuses</option>
+            <option value="pending">Pending</option>
+            <option value="confirmed">Confirmed</option>
+            <option value="checked-in">Checked In</option>
+            <option value="completed">Completed</option>
+            <option value="cancelled">Cancelled</option>
+            <option value="no-show">No-Show</option>
+          </select>
+        </Field>
+        <Field label="Payment">
+          <select
+            className="input"
+            value={paymentStatus}
+            onChange={(e) => {
+              setPaymentStatus(e.target.value);
+              setPage(1);
+            }}
+          >
+            <option value="">All payment statuses</option>
+            <option value="pending">Pending</option>
+            <option value="paid">Paid</option>
+            <option value="failed">Failed</option>
+            <option value="refunded">Refunded</option>
+          </select>
+        </Field>
+        <Field label="Mode">
+          <select
+            className="input"
+            value={mode}
+            onChange={(e) => {
+              setMode(e.target.value);
+              setPage(1);
+            }}
+          >
+            <option value="">All modes</option>
+            <option value="in-clinic">In-clinic</option>
+            <option value="video">Video</option>
+            <option value="audio">Audio</option>
+          </select>
+        </Field>
+      </div>
+
+      {/* Appointment Detail Panel (if selected) */}
       {lookup && (
-        <AsyncView
-          query={query}
-          empty={!query.isLoading && !query.isError && !item}
-          emptyTitle="Appointment not found"
-        >
-          {item && (
+        <div style={{ marginBottom: "1.5rem" }}>
+          {query.isLoading ? (
+            <div className="section-panel" style={{ padding: "1.5rem", textAlign: "center" }}>
+              Loading appointment details…
+            </div>
+          ) : query.isError || !item ? (
+            <div className="notice notice-warn" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>This appointment ({lookup}) is no longer available or was not found.</div>
+              <button
+                type="button"
+                className="button button-quiet button-small"
+                onClick={() => {
+                  setLookup("");
+                  setId("");
+                  setSearchParams({});
+                }}
+              >
+                Dismiss
+              </button>
+            </div>
+          ) : (
             <SectionPanel
-              title={`Visit with Dr. ${item.dentist?.user?.name || "dentist"}`}
-              description={`${fmtDate(item.date)} · ${item.startTime} · ${item.patient?.name || "Patient"}`}
+              title={"Visit with Dr. " + (item.dentist?.user?.name || "Dentist")}
+              description={fmtDate(item.date) + " · " + item.startTime + " · " + (item.patient?.name || "Patient") + " (" + (item.patient?.phone || "No phone") + ")"}
+              actions={
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label="Close details"
+                  onClick={() => {
+                    setLookup("");
+                    setId("");
+                    setSearchParams({});
+                  }}
+                >
+                  <X size={18} />
+                </button>
+              }
             >
-              <div className="appointment-lookup-details">
-                <span>
-                  Visit type <strong>{item.mode}</strong>
-                </span>
-                <span>
-                  Payment <StatusBadge value={item.paymentStatus} />
-                </span>
-                <span>
-                  Status <StatusBadge value={item.status} />
-                </span>
-                <span>
-                  Total <strong>{rupees(item.fees?.totalAmount)}</strong>
-                </span>
+              <div className="appointment-lookup-details" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "0.8rem", padding: "0.8rem 0" }}>
+                <div>
+                  <small style={{ color: "#666", display: "block" }}>Visit type</small>
+                  <strong>{item.mode}</strong>
+                </div>
+                <div>
+                  <small style={{ color: "#666", display: "block" }}>Payment</small>
+                  <StatusBadge value={item.paymentStatus} />
+                </div>
+                <div>
+                  <small style={{ color: "#666", display: "block" }}>Status</small>
+                  <StatusBadge value={item.status} />
+                </div>
+                <div>
+                  <small style={{ color: "#666", display: "block" }}>Fee</small>
+                  <strong>{rupees(item.fees?.totalAmount)}</strong>
+                </div>
+                {item.reasonForVisit && (
+                  <div style={{ gridColumn: "1 / -1" }}>
+                    <small style={{ color: "#666", display: "block" }}>Reason for visit</small>
+                    <span>{item.reasonForVisit}</span>
+                  </div>
+                )}
               </div>
-              <div className="inline-actions">
+
+              <div className="inline-actions" style={{ marginTop: "1rem", display: "flex", gap: "0.6rem", flexWrap: "wrap", alignItems: "center" }}>
                 {item.status === "pending" && (
                   <button
                     className="button button-outline"
@@ -501,27 +721,121 @@ export function AppointmentLookup() {
                     {item.paymentStatus === "paid" ? "Confirm visit" : "Staff override"} <Check size={15} />
                   </button>
                 )}
-                {["pending", "confirmed"].includes(item.status) && (
+                {["pending", "confirmed", "checked-in"].includes(item.status) && (
                   <button
                     className="button button-quiet"
-                      onClick={() => act("noShow")}
+                    onClick={() => act("noShow")}
                   >
                     Mark no-show
                   </button>
                 )}
-                {["pending", "confirmed"].includes(item.status) && (
+                {["pending", "confirmed", "checked-in"].includes(item.status) && (
                   <button
-                    className="button button-quiet"
-                      onClick={() => act("cancel")}
+                    className="button button-quiet button-danger"
+                    onClick={() => act("cancel")}
                   >
                     Cancel appointment
                   </button>
                 )}
+
+                {/* Invoice Link */}
+                {item.invoice ? (
+                  <Link
+                    to={"/reception/invoices?open=" + (item.invoice._id || item.invoice.id || item.invoice)}
+                    className="button button-outline button-small"
+                  >
+                    View Invoice #{item.invoice.invoiceNumber || ""} <ArrowRight size={14} />
+                  </Link>
+                ) : ["confirmed", "checked-in", "completed"].includes(item.status) ? (
+                  <Link
+                    to={"/reception/invoices?appointmentId=" + item._id}
+                    className="button button-primary button-small"
+                  >
+                    <Plus size={14} /> Create invoice
+                  </Link>
+                ) : null}
               </div>
             </SectionPanel>
           )}
-        </AsyncView>
+        </div>
       )}
+
+      {/* Appointments List View */}
+      <SectionPanel
+        title="Appointments directory"
+        description={"Showing " + appointments.length + " of " + totalCount + " appointments"}
+      >
+        <AsyncView
+          query={listQuery}
+          empty={!listQuery.isLoading && !listQuery.isError && !appointments.length}
+          emptyTitle="No appointments match the current filters"
+          emptyDescription="Try clearing your search query or selecting a broader date range."
+        >
+          <div className="appointment-list">
+            {appointments.map((visit) => (
+              <button
+                type="button"
+                className={"appointment-row lookup-row " + (lookup === visit._id ? "appointment-selected" : "")}
+                key={visit._id}
+                onClick={() => {
+                  setId(visit._id);
+                  setLookup(visit._id);
+                  setSearchParams({ open: visit._id });
+                }}
+                style={{ textAlign: "left", width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0.8rem 1rem", borderBottom: "1px solid #eef2f0", background: lookup === visit._id ? "#f0fdf4" : "transparent" }}
+              >
+                <div className="appointment-date" style={{ minWidth: "120px" }}>
+                  <CalendarDays size={17} />
+                  <span>
+                    <strong>{visit.startTime}</strong>
+                    <small style={{ display: "block", color: "#666" }}>{fmtDate(visit.date)}</small>
+                  </span>
+                </div>
+                <div className="appointment-main" style={{ flex: 1, padding: "0 1rem" }}>
+                  <h3 style={{ margin: 0, fontSize: "1rem" }}>{visit.patient?.name || "Patient"}</h3>
+                  <p style={{ margin: "0.2rem 0 0", fontSize: "0.85rem", color: "#666" }}>
+                    {visit.patient?.phone ? (visit.patient.phone + " · ") : ""}
+                    Dr. {visit.dentist?.user?.name || "Dentist"} · {visit.reasonForVisit || visit.mode}
+                  </p>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: "0.8rem" }}>
+                  <StatusBadge value={visit.paymentStatus} />
+                  <StatusBadge value={visit.status} />
+                  <strong style={{ minWidth: "60px", textAlign: "right" }}>{rupees(visit.fees?.totalAmount)}</strong>
+                  <span className="row-arrow">
+                    <ArrowRight size={15} />
+                  </span>
+                </div>
+              </button>
+            ))}
+          </div>
+        </AsyncView>
+
+        {/* Server Pagination */}
+        {totalCount > 20 && (
+          <div className="pagination" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "1.2rem", padding: "0.5rem 0" }}>
+            <button
+              type="button"
+              className="button button-outline button-small"
+              disabled={page <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              Previous
+            </button>
+            <span>
+              Page {page} of {Math.ceil(totalCount / 20)}
+            </span>
+            <button
+              type="button"
+              className="button button-outline button-small"
+              disabled={page >= Math.ceil(totalCount / 20)}
+              onClick={() => setPage((p) => p + 1)}
+            >
+              Next
+            </button>
+          </div>
+        )}
+      </SectionPanel>
 
       {/* Staff appointment booking modal */}
       {showBookingModal && (
@@ -855,21 +1169,39 @@ export function InvoiceCreator() {
   const notify = useToast();
   const { confirm, dialog } = useConfirm();
   const primary = usePrimaryDentist();
+  const [searchParams, setSearchParams] = useSearchParams();
 
-  // Filters and table state
-  const [status, setStatus] = useState("unpaid");
-  const [filterDate, setFilterDate] = useState("");
+  const openParam = searchParams.get("open") || "";
+  const appointmentIdParam = searchParams.get("appointmentId") || "";
+
+  // Filters and table state - DEFAULT STATUS IS ALL ("")
+  const [status, setStatus] = useState("");
+  const [filterFrom, setFilterFrom] = useState("");
+  const [filterTo, setFilterTo] = useState("");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
-  const [paidMethod, setPaidMethod] = useState("cash");
 
   // Selected invoice modal state
   const [selectedInvoice, setSelectedInvoice] = useState(null);
+  const [selectedInvoiceError, setSelectedInvoiceError] = useState(false);
   const [extraItems, setExtraItems] = useState([
     { description: "", quantity: 1, unitPrice: 0 },
   ]);
   const [extraCoupon, setExtraCoupon] = useState("");
   const [updatingItems, setUpdatingItems] = useState(false);
+
+  // Payment recording modal state
+  const [paymentModalInvoice, setPaymentModalInvoice] = useState(null);
+  const [paymentForm, setPaymentForm] = useState({
+    method: "cash",
+    amount: "",
+    reference: "",
+  });
+  const [paymentBusy, setPaymentBusy] = useState(false);
+
+  // Visit invoice modal state (create for completed visit)
+  const [showVisitInvoiceModal, setShowVisitInvoiceModal] = useState(!!appointmentIdParam);
+  const [creatingVisitInvoice, setCreatingVisitInvoice] = useState(false);
 
   // Manual non-visit invoice form state
   const [showManualInvoice, setShowManualInvoice] = useState(false);
@@ -887,19 +1219,61 @@ export function InvoiceCreator() {
   const [preview, setPreview] = useState(null);
   const [previewBusy, setPreviewBusy] = useState(false);
 
+  // Invoices list query
   const invoices = useQuery({
-    queryKey: ["staff-invoices", status, filterDate, search, page],
+    queryKey: ["staff-invoices", status, filterFrom, filterTo, search, page],
     queryFn: () =>
       api.invoices.all({
         status: status || undefined,
-        from: filterDate || undefined,
-        to: filterDate || undefined,
+        from: filterFrom || undefined,
+        to: filterTo || undefined,
         search: search.trim() || undefined,
         page,
         limit: 20,
       }),
   });
   const invoiceRows = invoices.data?.data || [];
+  const metaTotal = invoices.data?.meta?.total ?? invoiceRows.length;
+
+  // Query completed / confirmed visits eligible for invoice creation
+  const visitsForInvoice = useQuery({
+    queryKey: ["visits-for-invoice"],
+    queryFn: () =>
+      api.appointments.all({
+        page: 1,
+        limit: 50,
+        sort: "-date -startTime",
+      }),
+    enabled: showVisitInvoiceModal,
+  });
+  const eligibleVisits = (visitsForInvoice.data?.data || []).filter(
+    (v) => ["confirmed", "checked-in", "completed"].includes(v.status) && !v.invoice
+  );
+
+  // Load deep linked invoice if ?open=<id>
+  useEffect(() => {
+    if (openParam) {
+      const match = (invoices.data?.data || []).find((i) => i._id === openParam);
+      if (match) setSelectedInvoice(match);
+      if (typeof api.invoices?.detail === "function") {
+        try {
+          const promise = api.invoices.detail(openParam);
+          if (promise && typeof promise.then === "function") {
+            promise
+              .then((res) => {
+                if (res?.data) setSelectedInvoice(res.data);
+                setSelectedInvoiceError(false);
+              })
+              .catch(() => {
+                if (!match) setSelectedInvoiceError(true);
+              });
+          }
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }, [openParam, invoices.data]);
 
   const treatmentsQuery = useQuery({
     queryKey: ["treatments"],
@@ -907,13 +1281,22 @@ export function InvoiceCreator() {
   });
   const treatmentCatalog = treatmentsQuery.data?.data || [];
 
+  // Totals bar calculations
+  const totalBilled = invoiceRows.reduce((sum, inv) => sum + Number(inv.totalAmount || 0), 0);
+  const totalCollected = invoiceRows.reduce((sum, inv) => {
+    if (inv.status === "paid") return sum + Number(inv.totalAmount || 0);
+    return sum + Number(inv.paidAmount || 0);
+  }, 0);
+  const totalOutstanding = Math.max(0, totalBilled - totalCollected);
+
+  // Daily collection summary
   const todayIso = new Date().toISOString().slice(0, 10);
   const dailySummary = invoiceRows.reduce(
     (acc, inv) => {
-      const isMatchDay = (inv.createdAt || "").startsWith(filterDate || todayIso);
-      if (isMatchDay && inv.status === "paid") {
+      const isMatchDay = (inv.createdAt || "").startsWith(filterFrom || todayIso);
+      if (isMatchDay && (inv.status === "paid" || (inv.paidAmount && inv.paidAmount > 0))) {
         const m = (inv.paymentMethod || "cash").toLowerCase();
-        const amt = Number(inv.paidAmount || inv.totalAmount || 0);
+        const amt = Number(inv.status === "paid" ? (inv.paidAmount || inv.totalAmount) : (inv.paidAmount || 0));
         acc.total += amt;
         if (m.includes("cash")) acc.cash += amt;
         else if (m.includes("card")) acc.card += amt;
@@ -932,21 +1315,22 @@ export function InvoiceCreator() {
       "Patient Phone",
       "Date",
       "Payment Method",
-      "Total Collected",
+      "Total Amount",
+      "Paid Amount",
       "Status",
     ];
-    const rows = invoiceRows
-      .filter((inv) => (inv.createdAt || "").startsWith(filterDate || todayIso))
-      .map((inv) => [
-        inv.invoiceNumber || inv._id,
-        inv.patient?.name || "Patient",
-        inv.patient?.phone || "",
-        fmtDate(inv.createdAt),
-        (inv.paymentMethod || "N/A").toUpperCase(),
-        inv.paidAmount || inv.totalAmount || 0,
-        inv.status,
-      ]);
-    exportToCsv(`daily-collection-${filterDate || todayIso}.csv`, headers, rows);
+    const rows = invoiceRows.map((inv) => [
+      inv.invoiceNumber || inv._id,
+      inv.patient?.name || "Patient",
+      inv.patient?.phone || "",
+      fmtDate(inv.createdAt),
+      (inv.paymentMethod || "N/A").toUpperCase(),
+      inv.totalAmount || 0,
+      inv.paidAmount || (inv.status === "paid" ? inv.totalAmount : 0),
+      inv.status,
+    ]);
+    exportToCsv("invoices-" + (filterFrom || todayIso) + ".csv", headers, rows);
+    notify("Exported " + rows.length + " invoices to CSV.");
   };
 
   const subtotal = items.reduce(
@@ -973,13 +1357,53 @@ export function InvoiceCreator() {
       });
       setInvoice(result.data);
       setPreview(null);
-      notify(result.message);
+      notify(result.message || "Invoice created.");
       queryClient.invalidateQueries({ queryKey: ["invoices"] });
       queryClient.invalidateQueries({ queryKey: ["staff-invoices"] });
+      setShowManualInvoice(false);
     } catch (error) {
-      notify(error.message, "error");
+      if (error.status === 409 && error.data?.data) {
+        notify("An invoice already exists for this appointment.", "error");
+        setSelectedInvoice(error.data.data);
+      } else {
+        notify(error.message, "error");
+      }
     } finally {
       setBusy(false);
+    }
+  };
+
+  const handleCreateForVisit = async (visit) => {
+    setCreatingVisitInvoice(true);
+    try {
+      const consultFee = visit.fees?.consultationFee || 500;
+      const res = await api.invoices.create({
+        patientId: visit.patient?._id || visit.patient,
+        appointmentId: visit._id,
+        dentistId: visit.dentist?._id || visit.dentist,
+        items: [
+          {
+            description: "Dental Consultation (" + visit.mode + ")",
+            quantity: 1,
+            unitPrice: consultFee,
+          },
+        ],
+      });
+      notify(res.message || "Invoice created for appointment.", "success");
+      setShowVisitInvoiceModal(false);
+      queryClient.invalidateQueries({ queryKey: ["staff-invoices"] });
+      queryClient.invalidateQueries({ queryKey: ["appointments"] });
+      setSelectedInvoice(res.data);
+    } catch (err) {
+      if (err.status === 409 && err.data?.data) {
+        notify("An invoice already exists for this appointment.", "error");
+        setShowVisitInvoiceModal(false);
+        setSelectedInvoice(err.data.data);
+      } else {
+        notify(err.message || "Failed to create invoice for visit.", "error");
+      }
+    } finally {
+      setCreatingVisitInvoice(false);
     }
   };
 
@@ -1004,22 +1428,42 @@ export function InvoiceCreator() {
     }
   };
 
-  const markPaid = async (entry) => {
-    const accepted = await confirm({
-      title: `Mark invoice ${entry.invoiceNumber} as paid?`,
-      description: "Only use this after confirming that payment was collected by the clinic counter.",
-      confirmLabel: "Record payment",
+  const openPaymentModal = (inv) => {
+    const outstanding = Math.max(0, Number(inv.totalAmount || 0) - Number(inv.paidAmount || 0));
+    setPaymentModalInvoice(inv);
+    setPaymentForm({
+      method: "cash",
+      amount: outstanding,
+      reference: "",
     });
-    if (!accepted) return;
+  };
+
+  const handleRecordPaymentSubmit = async (e) => {
+    e.preventDefault();
+    if (!paymentModalInvoice) return;
+    const amountNum = Number(paymentForm.amount);
+    if (!amountNum || amountNum <= 0) {
+      notify("Enter a valid payment amount.", "error");
+      return;
+    }
+
+    setPaymentBusy(true);
     try {
-      const result = await api.invoices.markPaid(entry._id, paidMethod);
-      notify(result.message);
+      const res = await api.invoices.markPaid(paymentModalInvoice._id, {
+        method: paymentForm.method,
+        amount: amountNum,
+        reference: paymentForm.reference,
+      });
+      notify(res.message || "Payment recorded.");
       queryClient.invalidateQueries({ queryKey: ["staff-invoices"] });
-      if (selectedInvoice && selectedInvoice._id === entry._id) {
-        setSelectedInvoice({ ...selectedInvoice, status: "paid", paymentMethod: paidMethod });
+      if (selectedInvoice && selectedInvoice._id === paymentModalInvoice._id) {
+        setSelectedInvoice(res.data);
       }
-    } catch (error) {
-      notify(error.message, "error");
+      setPaymentModalInvoice(null);
+    } catch (err) {
+      notify(err.message || "Failed to record payment.", "error");
+    } finally {
+      setPaymentBusy(false);
     }
   };
 
@@ -1028,80 +1472,117 @@ export function InvoiceCreator() {
       <PageTitle
         eyebrow="Billing desk"
         title="Invoices & Payments"
-        description="Review auto-generated visit invoices, collect payments at counter, add extra procedure items, or issue manual invoices for non-visit charges."
+        description="Review visit invoices, collect counter payments (Cash, Card, UPI), add extra procedures, or issue manual invoices."
         actions={
-          <button
-            type="button"
-            className="button button-outline"
-            onClick={handleExportDailyCsv}
-          >
-            <Download size={15} /> Export Daily Collection CSV
-          </button>
+          <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+            <button
+              type="button"
+              className="button button-outline"
+              onClick={handleExportDailyCsv}
+            >
+              <Download size={15} /> Export CSV
+            </button>
+            <button
+              type="button"
+              className="button button-outline"
+              onClick={() => setShowVisitInvoiceModal(true)}
+            >
+              <Plus size={15} /> Create invoice for a visit
+            </button>
+            <button
+              type="button"
+              className="button button-primary"
+              onClick={() => setShowManualInvoice(!showManualInvoice)}
+            >
+              {showManualInvoice ? "Hide manual form" : "+ Create manual invoice"}
+            </button>
+          </div>
         }
       />
 
-      {/* Daily Collection Summary Card */}
+      {/* Totals Summary Bar */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "0.8rem", marginBottom: "1.2rem" }}>
+        <div style={{ background: "#f8faf9", border: "1px solid #dbe5e1", padding: "0.9rem", borderRadius: "8px" }}>
+          <small style={{ color: "#64748b", fontSize: "0.75rem", textTransform: "uppercase", fontWeight: 700 }}>Total Billed</small>
+          <strong style={{ display: "block", fontSize: "1.25rem", color: "#1e293b", marginTop: "0.2rem" }}>{rupees(totalBilled)}</strong>
+        </div>
         <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", padding: "0.9rem", borderRadius: "8px" }}>
-          <small style={{ color: "#166534", fontSize: "0.75rem", textTransform: "uppercase", fontWeight: 700 }}>Total Collected ({filterDate || "Today"})</small>
-          <strong style={{ display: "block", fontSize: "1.25rem", color: "#15803d", marginTop: "0.2rem" }}>{rupees(dailySummary.total)}</strong>
+          <small style={{ color: "#166534", fontSize: "0.75rem", textTransform: "uppercase", fontWeight: 700 }}>Total Collected</small>
+          <strong style={{ display: "block", fontSize: "1.25rem", color: "#15803d", marginTop: "0.2rem" }}>{rupees(totalCollected)}</strong>
         </div>
-        <div style={{ background: "#fff", border: "1px solid #e2e8f0", padding: "0.9rem", borderRadius: "8px" }}>
-          <small style={{ color: "#64748b", fontSize: "0.75rem", textTransform: "uppercase", fontWeight: 700 }}>Cash</small>
-          <strong style={{ display: "block", fontSize: "1.1rem", color: "#1e293b", marginTop: "0.2rem" }}>{rupees(dailySummary.cash)}</strong>
-        </div>
-        <div style={{ background: "#fff", border: "1px solid #e2e8f0", padding: "0.9rem", borderRadius: "8px" }}>
-          <small style={{ color: "#64748b", fontSize: "0.75rem", textTransform: "uppercase", fontWeight: 700 }}>Card (POS)</small>
-          <strong style={{ display: "block", fontSize: "1.1rem", color: "#1e293b", marginTop: "0.2rem" }}>{rupees(dailySummary.card)}</strong>
-        </div>
-        <div style={{ background: "#fff", border: "1px solid #e2e8f0", padding: "0.9rem", borderRadius: "8px" }}>
-          <small style={{ color: "#64748b", fontSize: "0.75rem", textTransform: "uppercase", fontWeight: 700 }}>UPI / QR</small>
-          <strong style={{ display: "block", fontSize: "1.1rem", color: "#1e293b", marginTop: "0.2rem" }}>{rupees(dailySummary.upi)}</strong>
+        <div style={{ background: "#fffbeb", border: "1px solid #fde68a", padding: "0.9rem", borderRadius: "8px" }}>
+          <small style={{ color: "#92400e", fontSize: "0.75rem", textTransform: "uppercase", fontWeight: 700 }}>Total Outstanding</small>
+          <strong style={{ display: "block", fontSize: "1.25rem", color: "#b45309", marginTop: "0.2rem" }}>{rupees(totalOutstanding)}</strong>
         </div>
       </div>
 
-      {invoice && (
-        <div className="notice notice-success">
-          <Check size={17} /> Invoice {invoice.invoiceNumber} created. Server
-          total:{" "}
-          <strong>{` ₹${Number(invoice.totalAmount || 0).toLocaleString("en-IN")}`}</strong>
+      {selectedInvoiceError && (
+        <div className="notice notice-warn" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>This invoice is no longer available or was not found.</div>
+          <button
+            type="button"
+            className="button button-quiet button-small"
+            onClick={() => {
+              setSelectedInvoiceError(false);
+              setSearchParams({});
+            }}
+          >
+            Dismiss
+          </button>
         </div>
       )}
 
       {/* Main invoices list with multi-parameter filter */}
       <SectionPanel
         title="Clinic invoices"
-        description="Consultation invoices are auto-created when appointments are completed. Filter by payment status, date, or patient."
+        description="Filter invoices across all payment statuses or search by patient name, phone, or invoice number."
       >
-        <div className="filter-bar">
-          <Field label="Status">
-            <TextInput
-              as="select"
-              value={status}
-              onChange={(event) => {
-                setStatus(event.target.value);
+        {/* Status Tabs */}
+        <div className="filter-chips" style={{ display: "flex", gap: "0.4rem", marginBottom: "1rem" }}>
+          {[
+            { id: "", label: "All invoices" },
+            { id: "unpaid", label: "Unpaid" },
+            { id: "paid", label: "Paid" },
+            { id: "refunded", label: "Refunded" },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              className={"button button-small " + (status === tab.id ? "button-primary" : "button-outline")}
+              onClick={() => {
+                setStatus(tab.id);
                 setPage(1);
               }}
             >
-              <option value="">All statuses</option>
-              <option value="unpaid">Unpaid</option>
-              <option value="paid">Paid</option>
-              <option value="refunded">Refunded</option>
-            </TextInput>
-          </Field>
-          <Field label="Date">
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="filter-bar" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "0.6rem" }}>
+          <Field label="From date">
             <TextInput
               type="date"
-              value={filterDate}
-              onChange={(event) => {
-                setFilterDate(event.target.value);
+              value={filterFrom}
+              onChange={(e) => {
+                setFilterFrom(e.target.value);
+                setPage(1);
+              }}
+            />
+          </Field>
+          <Field label="To date">
+            <TextInput
+              type="date"
+              value={filterTo}
+              onChange={(e) => {
+                setFilterTo(e.target.value);
                 setPage(1);
               }}
             />
           </Field>
           <Field label="Patient / Invoice search">
             <TextInput
-              placeholder="Search by patient name, phone, or invoice #"
+              placeholder="Search by patient name, phone, or invoice #…"
               value={search}
               onChange={(event) => {
                 setSearch(event.target.value);
@@ -1109,78 +1590,93 @@ export function InvoiceCreator() {
               }}
             />
           </Field>
-          <Field label="Counter payment method">
-            <TextInput
-              as="select"
-              value={paidMethod}
-              onChange={(event) => setPaidMethod(event.target.value)}
-            >
-              <option value="cash">Cash</option>
-              <option value="card">Card</option>
-              <option value="upi">UPI</option>
-              <option value="bank-transfer">Bank transfer</option>
-            </TextInput>
-          </Field>
         </div>
 
         <AsyncView
           query={invoices}
-          empty={!invoices.isLoading && !invoices.isError && !invoiceRows.length}
-          emptyTitle="No invoices found for this filter"
+          empty={false}
         >
-          <div className="record-list">
-            {invoiceRows.map((entry) => (
-              <article className="record-row" key={entry._id}>
-                <span className="record-type-icon">
-                  <FileText size={17} />
-                </span>
-                <div className="record-row-content">
-                  <strong>
-                    {entry.invoiceNumber} · {entry.patient?.name || "Patient"}
-                  </strong>
-                  <span>
-                    {fmtDate(entry.createdAt)} · {entry.items?.length || 0} items
-                    {entry.patient?.phone ? ` · ${entry.patient.phone}` : ""}
+          {invoiceRows.length === 0 && !invoices.isLoading ? (
+            <div className="section-panel" style={{ textAlign: "center", padding: "2.5rem 1.5rem", border: "1px dashed #cbd5e1" }}>
+              <h3 style={{ fontSize: "1.2rem", marginBottom: "0.5rem" }}>No invoices yet</h3>
+              <p style={{ color: "#64748b", maxWidth: "520px", margin: "0 auto 1.5rem", lineHeight: 1.5 }}>
+                No invoices yet. An invoice is created when a visit is completed. You can also create one now.
+              </p>
+              <div style={{ display: "flex", justifyContent: "center", gap: "0.8rem", flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  className="button button-primary"
+                  onClick={() => setShowVisitInvoiceModal(true)}
+                >
+                  <Plus size={15} /> Create invoice for a visit
+                </button>
+                <button
+                  type="button"
+                  className="button button-outline"
+                  onClick={() => setShowManualInvoice(true)}
+                >
+                  <Plus size={15} /> Create manual invoice
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="record-list">
+              {invoiceRows.map((entry) => (
+                <article className="record-row" key={entry._id}>
+                  <span className="record-type-icon">
+                    <FileText size={17} />
                   </span>
-                </div>
-                <div className="record-row-actions">
-                  <StatusBadge value={entry.status} />
-                  <strong>{rupees(entry.totalAmount)}</strong>
-                  <button
-                    type="button"
-                    className="button button-quiet button-small"
-                    onClick={() => setSelectedInvoice(entry)}
-                  >
-                    View / Edit
-                  </button>
-                  <button
-                    type="button"
-                    className="button button-quiet button-small"
-                    onClick={() =>
-                      downloadPdf(`/invoices/${entry._id}/pdf`, `${entry.invoiceNumber}.pdf`).catch((error) =>
-                        notify(error.message, "error")
-                      )
-                    }
-                  >
-                    <Download size={14} /> PDF
-                  </button>
-                  {entry.status === "unpaid" && (
+                  <div className="record-row-content">
+                    <strong>
+                      {entry.invoiceNumber} · {entry.patient?.name || "Patient"}
+                    </strong>
+                    <span>
+                      {fmtDate(entry.createdAt)} · {entry.items?.length || 0} items
+                      {entry.patient?.phone ? (" · " + entry.patient.phone) : ""}
+                    </span>
+                  </div>
+                  <div className="record-row-actions" style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                    <StatusBadge value={entry.status} />
+                    <strong>{rupees(entry.totalAmount)}</strong>
                     <button
                       type="button"
-                      className="button button-outline button-small"
-                      onClick={() => markPaid(entry)}
+                      className="button button-quiet button-small"
+                      onClick={() => {
+                        setSelectedInvoice(entry);
+                        setSearchParams({ open: entry._id });
+                      }}
                     >
-                      Collect payment
+                      View / Edit
                     </button>
-                  )}
-                </div>
-              </article>
-            ))}
-          </div>
+                    <button
+                      type="button"
+                      className="button button-quiet button-small"
+                      onClick={() =>
+                        downloadPdf("/invoices/" + entry._id + "/pdf", entry.invoiceNumber + ".pdf").catch((error) =>
+                          notify(error.message, "error")
+                        )
+                      }
+                    >
+                      <Download size={14} /> PDF
+                    </button>
+                    {entry.status === "unpaid" && (
+                      <button
+                        type="button"
+                        className="button button-primary button-small"
+                        onClick={() => openPaymentModal(entry)}
+                      >
+                        Record payment
+                      </button>
+                    )}
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
         </AsyncView>
 
-        {invoices.data?.meta?.total > 20 && (
-          <div className="pagination">
+        {metaTotal > 20 && (
+          <div className="pagination" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "1rem" }}>
             <button
               type="button"
               className="button button-outline button-small"
@@ -1190,12 +1686,12 @@ export function InvoiceCreator() {
               Previous
             </button>
             <span>
-              Page {page} of {Math.ceil(invoices.data.meta.total / 20)}
+              Page {page} of {Math.ceil(metaTotal / 20)}
             </span>
             <button
               type="button"
               className="button button-outline button-small"
-              disabled={page >= Math.ceil(invoices.data.meta.total / 20)}
+              disabled={page >= Math.ceil(metaTotal / 20)}
               onClick={() => setPage((value) => value + 1)}
             >
               Next
@@ -1204,9 +1700,148 @@ export function InvoiceCreator() {
         )}
       </SectionPanel>
 
+      {/* Modal: Create invoice for a visit */}
+      {showVisitInvoiceModal && (
+        <div className="modal-backdrop" onClick={() => setShowVisitInvoiceModal(false)}>
+          <div className="modal-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "620px", width: "92%" }}>
+            <div className="modal-header">
+              <h2>Create Invoice for Patient Visit</h2>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="Close"
+                onClick={() => setShowVisitInvoiceModal(false)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div style={{ padding: "1.2rem" }}>
+              <p style={{ color: "#64748b", fontSize: "0.9rem", marginBottom: "1rem" }}>
+                Select a completed or confirmed patient appointment to generate an itemized consultation invoice.
+              </p>
+
+              {visitsForInvoice.isLoading ? (
+                <div style={{ textAlign: "center", padding: "1.5rem" }}>Loading appointments…</div>
+              ) : eligibleVisits.length === 0 ? (
+                <div className="notice notice-info">
+                  No completed or confirmed visits without invoices were found. You can create a manual invoice instead.
+                </div>
+              ) : (
+                <div className="record-list" style={{ maxHeight: "320px", overflowY: "auto" }}>
+                  {eligibleVisits.map((v) => (
+                    <div
+                      key={v._id}
+                      style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.8rem", borderBottom: "1px solid #eef2f0" }}
+                    >
+                      <div>
+                        <strong>{v.patient?.name || "Patient"}</strong>
+                        <div style={{ fontSize: "0.85rem", color: "#666" }}>
+                          {fmtDate(v.date)} at {v.startTime} · {v.mode} · Status: {v.status}
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: "0.8rem" }}>
+                        <strong>{rupees(v.fees?.totalAmount)}</strong>
+                        <button
+                          type="button"
+                          className="button button-primary button-small"
+                          disabled={creatingVisitInvoice}
+                          onClick={() => handleCreateForVisit(v)}
+                        >
+                          {creatingVisitInvoice ? "Creating…" : "Generate Invoice"}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Record Payment (supports partial payments) */}
+      {paymentModalInvoice && (
+        <div className="modal-backdrop" onClick={() => setPaymentModalInvoice(null)}>
+          <div className="modal-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "480px", width: "90%" }}>
+            <div className="modal-header">
+              <h2>Record Payment · {paymentModalInvoice.invoiceNumber}</h2>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="Close"
+                onClick={() => setPaymentModalInvoice(null)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <form onSubmit={handleRecordPaymentSubmit} className="stack-form" style={{ padding: "1.2rem" }}>
+              <div style={{ background: "#f8faf9", padding: "0.8rem", borderRadius: "6px", marginBottom: "0.8rem" }}>
+                <div>Patient: <strong>{paymentModalInvoice.patient?.name || "Patient"}</strong></div>
+                <div>Total invoice amount: <strong>{rupees(paymentModalInvoice.totalAmount)}</strong></div>
+                <div>Already paid: <strong>{rupees(paymentModalInvoice.paidAmount || 0)}</strong></div>
+                <div style={{ color: "#b45309" }}>
+                  Remaining balance: <strong>{rupees(Math.max(0, paymentModalInvoice.totalAmount - (paymentModalInvoice.paidAmount || 0)))}</strong>
+                </div>
+              </div>
+
+              <Field label="Payment method *">
+                <select
+                  className="input"
+                  value={paymentForm.method}
+                  onChange={(e) => setPaymentForm({ ...paymentForm, method: e.target.value })}
+                >
+                  <option value="cash">Cash</option>
+                  <option value="card">Card (POS Terminal)</option>
+                  <option value="upi">UPI / QR Code</option>
+                  <option value="bank-transfer">Bank Transfer</option>
+                </select>
+              </Field>
+
+              <Field label="Amount to collect (Rs.) *">
+                <TextInput
+                  type="number"
+                  min="1"
+                  max={paymentModalInvoice.totalAmount}
+                  step="any"
+                  required
+                  value={paymentForm.amount}
+                  onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })}
+                />
+              </Field>
+
+              <Field label="Payment reference / Note (optional)">
+                <TextInput
+                  placeholder="e.g. UPI Ref #, POS slip number"
+                  value={paymentForm.reference}
+                  onChange={(e) => setPaymentForm({ ...paymentForm, reference: e.target.value })}
+                />
+              </Field>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.8rem", marginTop: "1rem" }}>
+                <button
+                  type="button"
+                  className="button button-quiet"
+                  onClick={() => setPaymentModalInvoice(null)}
+                  disabled={paymentBusy}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="button button-primary"
+                  disabled={paymentBusy}
+                >
+                  {paymentBusy ? "Recording…" : "Confirm payment"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Invoice Detail / Edit Modal */}
       {selectedInvoice && (
-        <div className="modal-backdrop" onClick={() => setSelectedInvoice(null)}>
+        <div className="modal-backdrop" onClick={() => { setSelectedInvoice(null); setSearchParams({}); }}>
           <div
             className="modal-dialog"
             onClick={(e) => e.stopPropagation()}
@@ -1223,26 +1858,44 @@ export function InvoiceCreator() {
                 type="button"
                 className="icon-button"
                 aria-label="Close"
-                onClick={() => setSelectedInvoice(null)}
+                onClick={() => { setSelectedInvoice(null); setSearchParams({}); }}
               >
                 <X size={18} />
               </button>
             </div>
             <div style={{ padding: "1.2rem", display: "grid", gap: "1rem" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <StatusBadge value={selectedInvoice.status} />
-                <button
-                  type="button"
-                  className="button button-outline button-small"
-                  onClick={() =>
-                    downloadPdf(
-                      `/invoices/${selectedInvoice._id}/pdf`,
-                      `${selectedInvoice.invoiceNumber}.pdf`
-                    ).catch((err) => notify(err.message, "error"))
-                  }
-                >
-                  <Download size={14} /> Download PDF
-                </button>
+                <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                  <StatusBadge value={selectedInvoice.status} />
+                  {selectedInvoice.paidAmount > 0 && selectedInvoice.status !== "paid" && (
+                    <span style={{ fontSize: "0.85rem", color: "#b45309" }}>
+                      (Partial: {rupees(selectedInvoice.paidAmount)} paid)
+                    </span>
+                  )}
+                </div>
+                <div style={{ display: "flex", gap: "0.5rem" }}>
+                  <button
+                    type="button"
+                    className="button button-outline button-small"
+                    onClick={() =>
+                      downloadPdf(
+                        "/invoices/" + selectedInvoice._id + "/pdf",
+                        selectedInvoice.invoiceNumber + ".pdf"
+                      ).catch((err) => notify(err.message, "error"))
+                    }
+                  >
+                    <Download size={14} /> Download PDF
+                  </button>
+                  {selectedInvoice.status === "unpaid" && (
+                    <button
+                      type="button"
+                      className="button button-primary button-small"
+                      onClick={() => openPaymentModal(selectedInvoice)}
+                    >
+                      Record payment
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* Line items table */}
@@ -1281,41 +1934,17 @@ export function InvoiceCreator() {
                 )}
                 {selectedInvoice.tax > 0 && <div>Tax: <strong>{rupees(selectedInvoice.tax)}</strong></div>}
                 <div style={{ fontSize: "1.1rem" }}>Total Amount: <strong>{rupees(selectedInvoice.totalAmount)}</strong></div>
+                {selectedInvoice.paidAmount > 0 && (
+                  <div>Paid to date: <strong>{rupees(selectedInvoice.paidAmount)}</strong></div>
+                )}
               </div>
 
-              {/* If unpaid, allow payment collection or adding extra items */}
+              {/* If unpaid, allow editing items */}
               {selectedInvoice.status === "unpaid" && (
-                <div style={{ borderTop: "1px solid #e2ece9", paddingTop: "1rem", display: "grid", gap: "1rem" }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#f8faf9", padding: "0.8rem", borderRadius: "6px" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "0.8rem" }}>
-                      <label style={{ fontSize: "0.85rem", fontWeight: 600 }}>Collect via:</label>
-                      <TextInput
-                        as="select"
-                        value={paidMethod}
-                        onChange={(e) => setPaidMethod(e.target.value)}
-                        style={{ width: "auto" }}
-                      >
-                        <option value="cash">Cash</option>
-                        <option value="card">Card</option>
-                        <option value="upi">UPI</option>
-                        <option value="bank-transfer">Bank transfer</option>
-                      </TextInput>
-                    </div>
-                    <button
-                      type="button"
-                      className="button button-primary"
-                      onClick={async () => {
-                        await markPaid(selectedInvoice);
-                        setSelectedInvoice(null);
-                      }}
-                    >
-                      Record payment
-                    </button>
-                  </div>
-
+                <div style={{ borderTop: "1px solid #e2ece9", paddingTop: "1rem" }}>
                   <div style={{ background: "#fff", border: "1px solid #dbe5e1", borderRadius: "6px", padding: "0.8rem" }}>
                     <strong style={{ display: "block", marginBottom: "0.5rem" }}>
-                      Add extra procedure line items or coupon (PATCH /invoices/:id/items)
+                      Add extra procedure line items or coupon
                     </strong>
                     {extraItems.map((item, idx) => (
                       <div key={idx} style={{ display: "grid", gridTemplateColumns: "3fr 1fr 1fr auto", gap: "0.4rem", marginBottom: "0.4rem" }}>
@@ -1371,7 +2000,7 @@ export function InvoiceCreator() {
                       </button>
                       {treatmentCatalog.length > 0 && (
                         <select
-                          className="text-input"
+                          className="input"
                           style={{ maxWidth: "240px", fontSize: "0.85rem", padding: "0.3rem 0.6rem" }}
                           onChange={(e) => {
                             const t = treatmentCatalog.find((x) => x._id === e.target.value);
@@ -1402,6 +2031,14 @@ export function InvoiceCreator() {
                         className="button button-outline"
                         disabled={updatingItems || (!extraItems.some((i) => i.description.trim()) && !extraCoupon)}
                         onClick={async () => {
+                          const approved = await confirm({
+                            title: "Save changes to invoice line items?",
+                            description: "New procedures and discounts will be added and totals recalculated.",
+                            confirmLabel: "Update invoice",
+                            cancelLabel: "Keep current items",
+                          });
+                          if (!approved) return;
+
                           setUpdatingItems(true);
                           try {
                             const payload = {};
@@ -1432,31 +2069,22 @@ export function InvoiceCreator() {
         </div>
       )}
 
-      {/* Manual invoice creation for non-visit charges */}
-      <SectionPanel
-        title="Manual invoice for non-visit charges"
-        description="Visit consultations and procedures are automatically invoiced when completed. Use this form only for manual, non-appointment charges such as dental hygiene products or external diagnostic services."
-        actions={
-          <button
-            type="button"
-            className="button button-outline button-small"
-            onClick={() => setShowManualInvoice(!showManualInvoice)}
-          >
-            {showManualInvoice ? "Hide form" : "Create non-visit invoice"}
-          </button>
-        }
-      >
-        {showManualInvoice && (
+      {/* Manual invoice form */}
+      {showManualInvoice && (
+        <SectionPanel
+          title="Manual invoice for non-visit charges"
+          description="Use this form for non-visit charges such as dental hygiene products or external diagnostic services."
+        >
           <form className="stack-form" onSubmit={create}>
-            <div className="admin-form-grid">
-              <Field label="Patient account ID">
+            <div className="admin-form-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "0.8rem" }}>
+              <Field label="Patient account ID *">
                 <TextInput
                   required
                   value={form.patientId}
                   onChange={(event) =>
                     setForm({ ...form, patientId: event.target.value })
                   }
-                  placeholder="Patient user ID"
+                  placeholder="Paste patient User ID"
                 />
               </Field>
               <Field label="Doctor">
@@ -1464,21 +2092,13 @@ export function InvoiceCreator() {
                   disabled
                   value={
                     primary.dentist
-                      ? `Dr. ${primary.dentist.user?.name || "Doctor"} (${primary.dentist.specialization || "Dental Care"})`
-                      : "Primary Clinic Doctor"
-                  }
-                />
-              </Field>
-              <Field label="Appointment ID (optional)">
-                <TextInput
-                  value={form.appointmentId}
-                  onChange={(event) =>
-                    setForm({ ...form, appointmentId: event.target.value })
+                      ? ("Dr. " + (primary.dentist.user?.name || "Doctor"))
+                      : "Clinic Doctor"
                   }
                 />
               </Field>
               <Field label="Coupon code (optional)">
-                <div className="inline-form">
+                <div style={{ display: "flex", gap: "0.4rem" }}>
                   <TextInput
                     value={form.couponCode}
                     onChange={(event) => {
@@ -1492,18 +2112,19 @@ export function InvoiceCreator() {
                     onClick={previewCoupon}
                     disabled={previewBusy || !form.couponCode}
                   >
-                    {previewBusy ? "Checking…" : "Preview"}
+                    {previewBusy ? "…" : "Preview"}
                   </button>
                 </div>
               </Field>
             </div>
-            <div className="invoice-items-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.8rem", flexWrap: "wrap", gap: "0.5rem" }}>
+
+            <div className="invoice-items-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "1rem 0 0.5rem" }}>
               <h3>Line items</h3>
-              <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+              <div style={{ display: "flex", gap: "0.5rem" }}>
                 {treatmentCatalog.length > 0 && (
                   <select
-                    className="text-input"
-                    style={{ maxWidth: "240px", fontSize: "0.85rem", padding: "0.3rem 0.6rem" }}
+                    className="input"
+                    style={{ maxWidth: "240px", fontSize: "0.85rem" }}
                     onChange={(e) => {
                       const t = treatmentCatalog.find((x) => x._id === e.target.value);
                       if (t) {
@@ -1534,95 +2155,68 @@ export function InvoiceCreator() {
                 </button>
               </div>
             </div>
+
             {items.map((item, index) => (
-              <div className="invoice-item-row" key={index}>
-                <Field label="Description">
-                  <TextInput
-                    required
-                    value={item.description}
-                    onChange={(event) =>
-                      setItems((all) =>
-                        all.map((entry, ix) =>
-                          ix === index
-                            ? { ...entry, description: event.target.value }
-                            : entry,
-                        ),
+              <div key={index} style={{ display: "grid", gridTemplateColumns: "3fr 1fr 1fr auto", gap: "0.4rem", marginBottom: "0.4rem" }}>
+                <TextInput
+                  required
+                  placeholder="Item description"
+                  value={item.description}
+                  onChange={(e) =>
+                    setItems((all) =>
+                      all.map((entry, ix) =>
+                        ix === index ? { ...entry, description: e.target.value } : entry
                       )
-                    }
-                  />
-                </Field>
-                <Field label="Quantity">
-                  <TextInput
-                    type="number"
-                    min="1"
-                    required
-                    value={item.quantity}
-                    onChange={(event) =>
-                      setItems((all) =>
-                        all.map((entry, ix) =>
-                          ix === index
-                            ? { ...entry, quantity: event.target.value }
-                            : entry,
-                        ),
+                    )
+                  }
+                />
+                <TextInput
+                  type="number"
+                  min="1"
+                  placeholder="Qty"
+                  value={item.quantity}
+                  onChange={(e) =>
+                    setItems((all) =>
+                      all.map((entry, ix) =>
+                        ix === index ? { ...entry, quantity: Number(e.target.value) } : entry
                       )
-                    }
-                  />
-                </Field>
-                <Field label="Unit price (INR)">
-                  <TextInput
-                    type="number"
-                    min="0"
-                    required
-                    value={item.unitPrice}
-                    onChange={(event) =>
-                      setItems((all) =>
-                        all.map((entry, ix) =>
-                          ix === index
-                            ? { ...entry, unitPrice: event.target.value }
-                            : entry,
-                        ),
+                    )
+                  }
+                />
+                <TextInput
+                  type="number"
+                  min="0"
+                  placeholder="Unit price"
+                  value={item.unitPrice}
+                  onChange={(e) =>
+                    setItems((all) =>
+                      all.map((entry, ix) =>
+                        ix === index ? { ...entry, unitPrice: Number(e.target.value) } : entry
                       )
-                    }
-                  />
-                </Field>
-                <strong>
-                  {rupees(Number(item.quantity) * Number(item.unitPrice))}
-                </strong>
+                    )
+                  }
+                />
                 {items.length > 1 && (
                   <button
-                    className="button button-quiet button-small"
                     type="button"
-                    onClick={() =>
-                      setItems((all) => all.filter((_, ix) => ix !== index))
-                    }
+                    className="button button-quiet button-small"
+                    onClick={() => setItems((all) => all.filter((_, ix) => ix !== index))}
                   >
-                    Remove
+                    ✕
                   </button>
                 )}
               </div>
             ))}
-            <div className="invoice-preview">
-              <span>
-                Line-item estimate <strong>{rupees(subtotal)}</strong>
-              </span>
-              {preview && (
-                <span>
-                  Coupon estimate <strong>-{rupees(preview.discount)}</strong>
-                </span>
-              )}
-              <small>
-                Final tax, coupon discount and invoice amount will be calculated
-                by the clinic server.
-              </small>
-            </div>
-            <button disabled={busy} className="button button-primary">
-              {busy ? "Creating invoice…" : "Create invoice"}{" "}
-              <FileText size={16} />
-            </button>
-          </form>
-        )}
-      </SectionPanel>
 
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "1rem" }}>
+              <div>Estimated subtotal: <strong>{rupees(subtotal)}</strong></div>
+              <button className="button button-primary" type="submit" disabled={busy}>
+                {busy ? "Creating…" : "Create invoice"}
+              </button>
+            </div>
+          </form>
+        </SectionPanel>
+      )}
       {dialog}
     </div>
   );
@@ -1639,19 +2233,34 @@ export function ReceptionPage({ page }) {
 export function NotificationsPage() {
   const queryClient = useQueryClient();
   const notify = useToast();
+  const navigate = useNavigate();
+
+  const [filterMode, setFilterMode] = useState("all"); // 'all' or 'unread'
+  const [page, setPage] = useState(1);
+
   const notifications = useQuery({
-    queryKey: ["notifications"],
-    queryFn: () => api.notifications.mine({ limit: 50 }),
+    queryKey: ["notifications", filterMode, page],
+    queryFn: () =>
+      api.notifications.mine({
+        unreadOnly: filterMode === "unread" ? "true" : undefined,
+        page,
+        limit: 20,
+      }),
     refetchInterval: 30000,
     refetchIntervalInBackground: false,
   });
+
   const preferences = useQuery({
     queryKey: ["notification-preferences"],
     queryFn: api.notifications.preferences,
   });
+
   const rows = notifications.data?.data || [];
   const unread = notifications.data?.meta?.unreadCount || 0;
-  const markRead = async (id) => {
+  const total = notifications.data?.meta?.total ?? rows.length;
+
+  const markRead = async (id, e) => {
+    if (e) e.stopPropagation();
     try {
       const result = await api.notifications.read(id);
       notify(result.message);
@@ -1660,6 +2269,21 @@ export function NotificationsPage() {
       notify(error.message, "error");
     }
   };
+
+  const handleRowClick = async (entry) => {
+    if (!entry.isRead) {
+      try {
+        await api.notifications.read(entry._id);
+        queryClient.invalidateQueries({ queryKey: ["notifications"] });
+      } catch {
+        // ignore
+      }
+    }
+    if (entry.link) {
+      navigate(entry.link);
+    }
+  };
+
   const markAll = async () => {
     try {
       const result = await api.notifications.readAll();
@@ -1669,6 +2293,7 @@ export function NotificationsPage() {
       notify(error.message, "error");
     }
   };
+
   const updateEmail = async (value) => {
     try {
       const result = await api.notifications.updatePreferences({
@@ -1680,65 +2305,78 @@ export function NotificationsPage() {
       notify(error.message, "error");
     }
   };
+
   return (
     <div>
       <PageTitle
         eyebrow="Stay informed"
         title="Notifications"
-        description={`${unread} unread update${unread === 1 ? "" : "s"} · refreshes every 30 seconds.`}
+        description={unread + " unread update" + (unread === 1 ? "" : "s") + " · refreshes automatically every 30 seconds."}
         actions={
-          unread > 0 && (
-            <button
-              className="button button-outline button-small"
-              onClick={markAll}
-            >
-              Mark all read <Check size={14} />
-            </button>
-          )
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            {unread > 0 && (
+              <button
+                className="button button-outline button-small"
+                onClick={markAll}
+              >
+                Mark all read <Check size={14} />
+              </button>
+            )}
+          </div>
         }
       />
-      <SectionPanel title="Preferences">
-        <div className="preference-row">
-          <span>
-            <strong>Email notifications</strong>
-            <small>
-              Email preference is saved by the backend but email delivery
-              preference is not enforced yet.
-            </small>
-          </span>
-          <input
-            aria-label="Email notifications"
-            type="checkbox"
-            checked={preferences.data?.data?.email ?? true}
-            onChange={(event) => updateEmail(event.target.checked)}
-          />
-        </div>
-      </SectionPanel>
+
+      <div className="filter-chips" style={{ display: "flex", gap: "0.4rem", marginBottom: "1rem" }}>
+        <button
+          type="button"
+          className={"button button-small " + (filterMode === "all" ? "button-primary" : "button-outline")}
+          onClick={() => {
+            setFilterMode("all");
+            setPage(1);
+          }}
+        >
+          All ({total})
+        </button>
+        <button
+          type="button"
+          className={"button button-small " + (filterMode === "unread" ? "button-primary" : "button-outline")}
+          onClick={() => {
+            setFilterMode("unread");
+            setPage(1);
+          }}
+        >
+          Unread only ({unread})
+        </button>
+      </div>
+
       <AsyncView
         query={notifications}
-        empty={
-          !notifications.isLoading && !notifications.isError && !rows.length
-        }
+        empty={!notifications.isLoading && !notifications.isError && !rows.length}
         emptyTitle="No notifications"
+        emptyDescription="You're all caught up with clinic notices and updates."
       >
         <div className="notification-list">
           {rows.map((entry) => (
             <article
-              className={`notification-row ${entry.isRead ? "" : "notification-unread"}`}
+              className={"notification-row " + (entry.isRead ? "" : "notification-unread")}
               key={entry._id}
+              onClick={() => handleRowClick(entry)}
+              style={{ cursor: entry.link ? "pointer" : "default" }}
             >
               <span className="notification-dot" />
-              <div>
+              <div style={{ flex: 1 }}>
                 <strong>{entry.title}</strong>
                 <p>{entry.message}</p>
                 <small>
                   {new Date(entry.createdAt).toLocaleString("en-IN")}
+                  {entry.link ? " · Click to view details →" : ""}
                 </small>
               </div>
               {!entry.isRead && (
                 <button
+                  type="button"
                   className="button button-quiet button-small"
-                  onClick={() => markRead(entry._id)}
+                  onClick={(e) => markRead(entry._id, e)}
                 >
                   Mark read
                 </button>
@@ -1747,6 +2385,30 @@ export function NotificationsPage() {
           ))}
         </div>
       </AsyncView>
+
+      {total > 20 && (
+        <div className="pagination" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "1rem" }}>
+          <button
+            type="button"
+            className="button button-outline button-small"
+            disabled={page <= 1}
+            onClick={() => setPage((p) => p - 1)}
+          >
+            Previous
+          </button>
+          <span>
+            Page {page} of {Math.ceil(total / 20)}
+          </span>
+          <button
+            type="button"
+            className="button button-outline button-small"
+            disabled={page >= Math.ceil(total / 20)}
+            onClick={() => setPage((p) => p + 1)}
+          >
+            Next
+          </button>
+        </div>
+      )}
     </div>
   );
 }

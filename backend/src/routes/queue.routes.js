@@ -9,5 +9,7 @@ router.get('/dentist/:dentistId', ctrl.getQueueForDentist);
 router.patch('/:id/call', restrictTo('receptionist', 'dentist', 'admin'), ctrl.callNext);
 router.patch('/:id/complete', restrictTo('receptionist', 'dentist', 'admin'), ctrl.completeEntry);
 router.patch('/:id/skip', restrictTo('receptionist', 'dentist', 'admin'), ctrl.skipEntry);
+router.patch('/:id/cancel', restrictTo('receptionist', 'dentist', 'admin'), ctrl.removeEntry);
+router.delete('/:id', restrictTo('receptionist', 'dentist', 'admin'), ctrl.removeEntry);
 
 module.exports = router;

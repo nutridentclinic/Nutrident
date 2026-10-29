@@ -166,6 +166,21 @@ function Landing() {
   return <PublicHome />
 }
 
+export function PortalNotFound({ homePath = '/reception', portalName = 'Reception' }) {
+  return (
+    <div className="section-panel" style={{ textAlign: 'center', padding: '3rem 1.5rem', margin: '2rem auto', maxWidth: '540px' }}>
+      <span className="eyebrow" style={{ color: '#d97706' }}>Page not found</span>
+      <h2 style={{ fontSize: '1.5rem', margin: '0.5rem 0 1rem' }}>This {portalName} page does not exist.</h2>
+      <p style={{ color: '#64748b', marginBottom: '1.5rem' }}>
+        The reception view or tool you are looking for may have been moved, removed, or is temporarily unavailable.
+      </p>
+      <Link to={homePath} className="button button-primary">
+        Return to {portalName} overview <ArrowRight size={16} />
+      </Link>
+    </div>
+  )
+}
+
 function NotFound() {
   return <main className="not-found"><span className="eyebrow">404 / Page not found</span><h1>This page isn’t here.</h1><Link className="button button-primary" to="/">Return home <ArrowRight size={16} /></Link></main>
 }
@@ -225,6 +240,7 @@ export default function App() {
         <Route path="patients/:patientId" element={<Patient360 readOnly />} /><Route path="queue" element={<QueuePage role="receptionist" />} /><Route path="invoices" element={<InvoiceCreator />} />
         <Route path="settings" element={<SharedSettingsPage />} />
         <Route path="notifications" element={<NotificationsPage />} />
+        <Route path="*" element={<PortalNotFound />} />
       </Route>
     </Route>
     <Route element={<RequireRole roles={['admin']} />}>

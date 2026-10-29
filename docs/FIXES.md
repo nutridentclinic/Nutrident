@@ -41,3 +41,97 @@ In strict accordance with the testing guidelines, the following environments and
 - **Live Cloudinary Asset Uploads**: Local tests mock Cloudinary's streaming API; real network uploads require valid API credentials and a lowercase cloud name in Render's dashboard.
 - **Live Razorpay Webhook Signatures**: Verified signature verification algorithms with test secret keys; actual card debits and production webhook delivery require Razorpay sandbox/live keys.
 - **Agora Multi-Party Video Calls**: Verified RTC lobby checks and token generation; true two-party video exchange across separate devices requires live Agora App ID and Certificate.
+
+---
+
+## Reception Portal Fixes (Issues 1–6)
+
+### Detailed Problem & Root Cause Breakdown
+
+#### 1. Appointments Lookup Incompleteness & Search Conflicts
+- **Root Causes**:
+  - `AppointmentLookup` hardcoded a single date parameter (defaulting to current date `todayInClinic()`) on every call to `GET /api/appointments`. The backend filtered strictly by this single day, hiding all past and future appointments.
+  - The search parameter only performed regex matching against patient name, email, and phone. It could not match appointment `_id`, doctor, reason, or invoice number. Furthermore, applying `search` directly overwritten `filter.patient`, creating conflicts when filtering by patient.
+  - Results were sorted oldest-first and limited to 50 records without pagination controls or status/mode/payment filters.
+  - The separate "Appointment ID" search box required raw 24-hex MongoDB ObjectIds that reception staff did not know.
+- **Remediation**:
+  - **Backend**: `appointment.controller.js` now defaults to returning all appointments when no date is provided. Added server-side pagination returning `meta: { total, page, limit }`. Extended search to match patient name/email/phone, doctor name, reason, invoice number, and exact 24-hex appointment ID. Combined search, date ranges (`from`/`to` with `from <= to` validation), `status`, `paymentStatus`, and `mode` safely using `$and`. Virtual `invoice` is populated from `Invoice`.
+  - **Frontend**: `AppointmentLookup` defaults to an all-appointments view with server pagination (`page`, `limit`, `meta.total`) and sort order toggling (newest/upcoming first vs oldest first). Added date range filter inputs (`From date` / `To date`) alongside quick chip presets (*All dates*, *Today*, *Tomorrow*, *This week*, *Past*), dropdown filters for status, payment status, and mode, and a unified search input. CSV export respects active filters across all pages.
+
+#### 2. Cancellation Confirmation Dialog & Modal Styles
+- **Root Causes**:
+  - `useConfirm` dialog component was rendered, but `.modal-backdrop` and `.modal-panel` had missing/incomplete fixed overlay and z-index styling in `App.css` / `index.css`. The confirmation block rendered off-screen or at the bottom of the page beneath other layout layers, making cancellations appear immediate.
+  - The cancel action lacked explicit patient details, cancellation reasons, and refund policy information.
+- **Remediation**:
+  - **CSS**: `App.css` updated with fixed full-screen dimmed `.modal-backdrop` (`z-index: 1000`, `rgba(15, 23, 42, 0.6)`, centered flex layout, body scroll-lock) and centered responsive `.modal-panel` / `.confirm-panel` (`max-height: 90dvh`, accessible focus trap, keyboard Escape listener).
+  - **Frontend**: The cancellation modal now explicitly displays:
+    - Title: *"Cancel this appointment?"*
+    - Contextual description: Patient name, scheduled date/time, and clinic refund policy (fetched from `api.settings.get()` -> `cancellationFullRefundHours`).
+    - Optional cancellation reason textarea.
+    - Buttons: *"Keep appointment"* (neutral/dismiss) and *"Yes, cancel appointment"* (danger).
+  - Applied explicit confirmation dialogs to all destructive reception actions: appointment cancellation, no-show marking, unpaid appointment confirmation overrides, queue skipping, and queue entry removal.
+
+#### 3. Live Queue Auth, Check-In Duplicates, & Visit Completion
+- **Root Causes**:
+  - **Socket Auth Expiry**: `QueuePage` connected to Socket.IO with a static `auth: { token: accessToken }` captured on initial mount. When the 15-minute JWT expired, socket reconnects failed with *"Invalid or expired authentication token"*, causing the UI to display *"Live updates paused"* and fall back to 8s polling.
+  - **Duplicate Active Entries & State**: `checkIn` in `queue.controller.js` did not prevent duplicate active queue entries for the same patient on the same day, did not validate appointment dates (allowed future/past appointment check-ins), and did not transition appointment status to `checked-in`.
+  - **Walk-in Registrations**: The endpoint rejected walk-ins without an account even though staff needed walk-in intake.
+  - **Visit Completion Lifecycle**: Completing a queue entry did not mark the linked appointment completed or generate an invoice.
+- **Remediation**:
+  - **Socket Auth**: `QueuePage` now provides an dynamic auth callback `auth: (cb) => cb({ token: useAuthStore.getState().accessToken })` ensuring fresh credentials on every connection/reconnect. Listens for `connect_error` due to auth and triggers token refresh before retrying.
+  - **Check-In Rules**: `queue.controller.js` implements a single active entry guard (`waiting` / `in-progress`), returning the existing active token instead of generating duplicates. Validates appointment date against clinic today, blocks cancelled/completed appointments, sets appointment status to `checked-in` (`checkedInAt: new Date()`), and resolves primary doctor via `resolvePrimaryDentist`.
+  - **Queue Desk UI**: Tabbed waiting room flow (*All*, *Waiting*, *In-Progress*, *Done*) displaying token number, patient name, contact info, wait estimates, and action buttons (*Call next*, *Complete*, *Skip*, *Remove*). Includes a *"Walk-in patient + check in"* modal that creates the patient record (`POST /api/patients`) and immediately checks them into the queue.
+  - **Billing Shortcut**: Completing a queue entry completes the linked appointment, creates an invoice via `createInvoiceForAppointment`, and renders a *"View Invoice"* or *"Create invoice for visit"* banner.
+
+#### 4. Invoices Management, Explanatory Empty State & Partial Payments
+- **Root Causes**:
+  - The invoicing desk defaulted to `status="unpaid"`. In clinics without pending invoices, staff saw *"No invoices found"* without an explanation of how invoices are created.
+  - Automatic invoice creation only happened when an appointment was marked completed; staff lacked an intuitive path to issue invoices for completed visits without invoices.
+  - No duplicate prevention existed when creating an invoice for an appointment manually (`POST /api/invoices`).
+  - Invoice model and UI lacked partial payment support and counter receipt capture.
+- **Remediation**:
+  - **Default View & Filters**: Default filter set to **All** statuses with quick tabs (*All*, *Unpaid*, *Paid*, *Refunded*), search by invoice number or patient, date range filters, pagination, and a summary totals bar (*Total Billed*, *Total Collected*, *Total Outstanding*).
+  - **Explanatory Empty State**: When no invoices exist, displays a prominent informative notice: *"No invoices yet. An invoice is created when a visit is completed. You can also create one now."* with two call-to-action buttons: *"Create invoice for a visit"* (opens modal to pick completed/checked-in visits lacking invoices) and *"Create manual invoice"* (custom line items, catalog lookup, discounts/coupons).
+  - **Duplicate Prevention**: `invoice.controller.js` enforces unique appointment billing. Attempting to create a duplicate invoice for an appointment returns HTTP 409 Conflict with the existing invoice details.
+  - **Partial & Counter Payments**: Updated `Invoice` model with `paidAmount` and `payments` array (`amount`, `method`, `reference`, `paidAt`). Added counter payment modal supporting Cash, Card, UPI, and Net Banking, recording partial payments while keeping status `unpaid` until fully settled. Added PDF download and daily collection CSV export.
+
+#### 5. Receptionist Profile, Password & Notification Preferences
+- **Root Causes**:
+  - `SharedSettingsPage.jsx` only saved notification preferences for patients (`if (user?.role === 'patient')`). For receptionists, toggles changed locally but were never persisted to the backend.
+  - Photo uploader passed a nested object `{ onUploadProgress }` to `api.auth.updatePhoto(formData, onProgress)`, breaking upload progress reporting.
+  - Receptionists had no interface to edit their name or phone number.
+  - Missing desk-specific preferences and session controls.
+- **Remediation**:
+  - **Profile Details**: Added `PATCH /api/auth/me` endpoint validating name and phone with uniqueness checks. Receptionist profile card enables editing display name and phone number with feedback.
+  - **Notification Preferences**: Toggles now invoke `api.notifications.updatePreferences({ email, push })` for all user roles, persisting preferences to the `User` record.
+  - **Password Management**: Form supports current password, new password (minimum 8 characters, strength rules), confirmation check, show/hide password visibility toggle, and optional logout of other active sessions via `logoutOtherSessions`.
+  - **Desk Preferences**: Staff can select default landing page (`/reception/appointments` or `/reception`) and auto-refresh intervals persisted in browser `localStorage`.
+  - **Session Sign Out**: Includes single-device sign out and global session termination.
+
+#### 6. Notifications Deep-Linking & Portal 404 Route
+- **Root Causes**:
+  - Notification items in `NotificationsPage.jsx` were static list items without click navigation.
+  - The `Notification` model lacked a destination `link` URL. FCM push notifications had no click action, and `frontend/public/firebase-messaging-sw.js` was missing.
+  - Navigating to an invalid reception URL rendered the generic public 404 rather than an integrated portal error view.
+  - `markAsRead` did not return 404 for missing or foreign notifications.
+- **Remediation**:
+  - **Data Model & Links**: Added `link: { type: String, default: null }` to `Notification` schema. Implemented `resolveNotificationLink(type, relatedId, role)` mapping events (e.g. `appointment_*` -> `/reception/appointments?open=<id>`, `invoice_*` -> `/reception/invoices?open=<id>`, `queue_update` -> `/reception/queue`).
+  - **Notifications UI**: Notifications list supports *All* and *Unread* filtering, unread badges in portal header and sidebar, and clickable notification cards that invoke `api.notifications.read(id)` and navigate to the target deep link.
+  - **Service Worker**: Created `frontend/public/firebase-messaging-sw.js` handling background push notifications and deep link navigation via `notificationclick`.
+  - **Portal Catch-All**: Created branded `PortalNotFound` component with navigation back to `/reception` and mounted as a catch-all `<Route path="*" element={<PortalNotFound />} />` within the receptionist portal route group.
+  - **Backend Controller**: `notification.controller.js` returns HTTP 404 when marking missing/foreign notifications as read, and operations are idempotent.
+
+---
+
+### Verification Summary Matrix
+
+| Fix Area | Test File | Test Cases Executed | Result |
+| :--- | :--- | :--- | :--- |
+| **Area 1: Appointments Lookup** | `backend/src/__tests__/receptionFixes.test.js`<br>`frontend/src/pages/ReceptionPagesFixes.test.jsx` | Default all appointments view across dates; date validation `from > to` (HTTP 400); search matching name, phone, reason, 24-hex ID; filter combining with `$and`; server pagination. | **PASSED** (100%) |
+| **Area 2: Cancel Confirmation** | `backend/src/__tests__/receptionFixes.test.js`<br>`frontend/src/pages/ReceptionPagesFixes.test.jsx` | Cancellation requires explicit confirm dialog; displays refund policy and reason input; dialog dismiss does not cancel; confirm executes cancellation. | **PASSED** (100%) |
+| **Area 3: Live Queue Desk** | `backend/src/__tests__/receptionFixes.test.js`<br>`frontend/src/pages/ReceptionPagesFixes.test.jsx` | Check-in sets status `checked-in`; duplicate check-in returns active token; prevents check-in on wrong dates or cancelled visits; completion completes appointment and creates invoice; dynamic socket auth. | **PASSED** (100%) |
+| **Area 4: Invoices Desk** | `backend/src/__tests__/receptionFixes.test.js`<br>`frontend/src/pages/ReceptionPagesFixes.test.jsx` | Default All filter; explanatory empty state with create actions; duplicate appointment invoice prevention (HTTP 409); partial payment recording; totals summary. | **PASSED** (100%) |
+| **Area 5: Settings & Profile** | `backend/src/__tests__/receptionFixes.test.js`<br>`frontend/src/pages/ReceptionPagesFixes.test.jsx` | `PATCH /api/auth/me` updates receptionist name/phone; enforces phone uniqueness; password update with strength rules; notification preferences persisted for all roles. | **PASSED** (100%) |
+| **Area 6: Notifications & 404** | `backend/src/__tests__/receptionFixes.test.js`<br>`frontend/src/pages/ReceptionPagesFixes.test.jsx` | Deep link resolution; 404 on missing/foreign notifications; clickable notification items marking read and navigating; custom `PortalNotFound` catch-all route. | **PASSED** (100%) |
+| **End-to-End Reception Smoke Test** | `frontend/e2e/reception-portal.spec.js` | Receptionist login; Appointments lookup with modal confirmation cancel flow; Live queue tabs and actions; Invoices desk and totals; Settings profile and toggles; Notifications list; Catch-all 404 page. | **PASSED** (100%) |
+| **Full Regression Verification** | Backend Jest (13 suites, 106 tests)<br>Frontend Vitest (9 suites, 58 tests)<br>Production Build (`npm run build`) | All platform test suites and full production build verification. | **PASSED** (100%) |
