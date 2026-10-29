@@ -20,6 +20,8 @@ import { api, downloadPdf } from "../api/domains.js";
 import { apiBaseUrl, executeTokenRefresh } from "../api/client.js";
 import { useAuthStore } from "../store/auth.js";
 import { usePrimaryDentist } from "../hooks/usePrimaryDentist.js";
+import { fetchPrimarySlotsWithFallback } from "../api/capabilities.js";
+import { clinicDate, isPastSlot } from "../utils/booking.js";
 import { FileUpload } from "../components/FileUpload.jsx";
 import {
   AsyncView,
@@ -247,21 +249,110 @@ export function DentistSchedule() {
   const [status, setStatus] = useState("");
   const action = useAction();
   const { confirm, dialog } = useConfirm();
+  const notify = useToast();
+  const queryClient = useQueryClient();
+  const primary = usePrimaryDentist();
+
+  const [rescheduleTarget, setRescheduleTarget] = useState(null);
+  const [rescheduleDate, setRescheduleDate] = useState(dateToday());
+  const [rescheduleSlot, setRescheduleSlot] = useState("");
+  const [rescheduleReason, setRescheduleReason] = useState("");
+  const [rescheduleBusy, setRescheduleBusy] = useState(false);
+
   const query = useQuery({
     queryKey: ["appointments", "dentist", date, status],
     queryFn: () =>
       api.appointments.dentistMine({ date, ...(status ? { status } : {}) }),
   });
   const items = query.data?.data || [];
+
+  // Slots for reschedule modal
+  const dentistId = rescheduleTarget?.dentist?._id || rescheduleTarget?.dentist || primary.dentistId;
+  const reschedSlotsQuery = useQuery({
+    queryKey: ["dentist-resched-slots", rescheduleDate, dentistId],
+    queryFn: () => fetchPrimarySlotsWithFallback(rescheduleDate, dentistId),
+    enabled: !!rescheduleTarget && !!rescheduleDate,
+  });
+  const reschedAvailableSlots = (reschedSlotsQuery.data || []).filter(
+    (slot) => !isPastSlot(rescheduleDate, slot.startTime)
+  );
+
   const cancelAppointment = async (item) => {
     const accepted = await confirm({
       title: "Cancel this appointment?",
-      description: "The patient will be notified. Refund handling follows the clinic policy.",
-      confirmLabel: "Cancel appointment",
+      message: "The patient will be notified. Refund handling follows the clinic policy.",
+      confirmText: "Cancel appointment",
+      cancelText: "Keep appointment",
       danger: true,
     });
     if (accepted) action.mutate({ action: api.appointments.cancel, args: [item._id, "Cancelled by dentist"] });
   };
+
+  const handleComplete = async (item) => {
+    const accepted = await confirm({
+      title: "Complete this visit?",
+      message: `Are you sure you want to mark ${item.patient?.name || "patient"}'s visit as completed?`,
+      confirmText: "Complete visit",
+      cancelText: "Cancel",
+    });
+    if (accepted) {
+      action.mutate({
+        action: api.appointments.complete,
+        args: [item._id],
+      });
+    }
+  };
+
+  const handleNoShow = async (item) => {
+    const accepted = await confirm({
+      title: "Mark as no-show?",
+      message: `Mark ${item.patient?.name || "patient"} as a no-show? This records the absence.`,
+      confirmText: "Yes, mark no-show",
+      cancelText: "Cancel",
+      danger: true,
+    });
+    if (accepted) {
+      action.mutate({
+        action: api.appointments.noShow,
+        args: [item._id],
+      });
+    }
+  };
+
+  const openRescheduleModal = (item) => {
+    setRescheduleTarget(item);
+    setRescheduleDate(item.date >= dateToday() ? item.date : dateToday());
+    setRescheduleSlot("");
+    setRescheduleReason("");
+  };
+
+  const handleRescheduleSubmit = async (e) => {
+    e.preventDefault();
+    if (!rescheduleTarget || !rescheduleSlot) {
+      notify("Select a new time slot.", "error");
+      return;
+    }
+    setRescheduleBusy(true);
+    try {
+      const res = await api.appointments.reschedule(rescheduleTarget._id, {
+        date: rescheduleDate,
+        startTime: rescheduleSlot,
+        reason: rescheduleReason.trim() || undefined,
+      });
+      notify(res.message || "Appointment rescheduled successfully.");
+      setRescheduleTarget(null);
+      setRescheduleSlot("");
+      setRescheduleReason("");
+      queryClient.invalidateQueries({ queryKey: ["appointments", "dentist"] });
+      queryClient.invalidateQueries({ queryKey: ["queue"] });
+      setDate(rescheduleDate);
+    } catch (err) {
+      notify(err.message, "error");
+    } finally {
+      setRescheduleBusy(false);
+    }
+  };
+
   return (
     <div>
       <PageTitle
@@ -284,7 +375,7 @@ export function DentistSchedule() {
             onChange={(event) => setStatus(event.target.value)}
           >
             <option value="">All statuses</option>
-            {["pending", "confirmed", "completed", "cancelled", "no-show"].map(
+            {["pending", "confirmed", "completed", "cancelled", "no-show", "rescheduled"].map(
               (s) => (
                 <option key={s}>{s}</option>
               ),
@@ -317,6 +408,11 @@ export function DentistSchedule() {
                 </p>
                 <span className="appointment-fees">
                   {item.mode} · payment {item.paymentStatus}
+                  {item.status === "rescheduled" && item.rescheduledTo && (
+                    <span style={{ marginLeft: "0.5rem", color: "#6366f1" }}>
+                      · Rescheduled to {fmtDate(item.rescheduledTo?.date || item.rescheduledTo)}
+                    </span>
+                  )}
                 </span>
               </div>
               <div className="appointment-status">
@@ -324,23 +420,32 @@ export function DentistSchedule() {
               </div>
               <div className="appointment-actions">
                 {item.status === "pending" && (
-                  <button
-                    className="button button-outline button-small"
-                    disabled={item.paymentStatus !== "paid"}
-                    title={
-                      item.paymentStatus !== "paid"
-                        ? "Payment is required before confirming."
-                        : undefined
-                    }
-                    onClick={() =>
-                      action.mutate({
-                        action: api.appointments.confirm,
-                        args: [item._id],
-                      })
-                    }
-                  >
-                    Confirm
-                  </button>
+                  <>
+                    <button
+                      className="button button-outline button-small"
+                      disabled={item.paymentStatus !== "paid"}
+                      title={
+                        item.paymentStatus !== "paid"
+                          ? "Payment is required before confirming."
+                          : undefined
+                      }
+                      onClick={() =>
+                        action.mutate({
+                          action: api.appointments.confirm,
+                          args: [item._id],
+                        })
+                      }
+                    >
+                      Confirm
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-outline button-small"
+                      onClick={() => openRescheduleModal(item)}
+                    >
+                      Reschedule
+                    </button>
+                  </>
                 )}
                 {item.status === "confirmed" && (
                   <>
@@ -351,27 +456,30 @@ export function DentistSchedule() {
                       Patient record
                     </Link>
                     <button
+                      type="button"
+                      className="button button-outline button-small"
+                      onClick={() => openRescheduleModal(item)}
+                    >
+                      Reschedule
+                    </button>
+                    <button
                       className="button button-primary button-small"
-                      onClick={() =>
-                        action.mutate({
-                          action: api.appointments.complete,
-                          args: [item._id],
-                        })
-                      }
+                      onClick={() => handleComplete(item)}
                     >
                       Complete
                     </button>
                     <button
                       className="button button-quiet button-small"
-                      onClick={() =>
-                        action.mutate({
-                          action: api.appointments.noShow,
-                          args: [item._id],
-                        })
-                      }
+                      onClick={() => handleNoShow(item)}
                     >
                       No-show
                     </button>
+                    <Link
+                      className="button button-outline button-small"
+                      to={`/dentist/patients/${item.patient?._id || item.patient}?tab=prescriptions&appointmentId=${item._id}`}
+                    >
+                      Write Rx
+                    </Link>
                     {item.mode === "video" && (
                       <Link
                         className="button button-outline button-small"
@@ -392,6 +500,75 @@ export function DentistSchedule() {
           ))}
         </div>
       </AsyncView>
+
+      {/* Reschedule Modal */}
+      {rescheduleTarget && (
+        <div className="modal-backdrop" onClick={() => setRescheduleTarget(null)}>
+          <div className="modal-dialog modal-panel" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "480px", width: "95%" }}>
+            <div className="modal-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "1rem 1.2rem", borderBottom: "1px solid var(--border-color, #e2e8f0)" }}>
+              <h2 style={{ fontSize: "1.2rem", margin: 0 }}>Reschedule Appointment</h2>
+              <button type="button" className="icon-button" onClick={() => setRescheduleTarget(null)}>
+                <X size={18} />
+              </button>
+            </div>
+            <form onSubmit={handleRescheduleSubmit} className="stack-form" style={{ padding: "1.2rem" }}>
+              <p style={{ fontSize: "0.9rem", color: "#475569", marginTop: 0 }}>
+                Rescheduling <strong>{rescheduleTarget.patient?.name || "Patient"}</strong> from {fmtDate(rescheduleTarget.date)} at {rescheduleTarget.startTime} ({rescheduleTarget.mode}).
+              </p>
+              <Field label="New Appointment Date *">
+                <TextInput
+                  type="date"
+                  min={clinicDate()}
+                  value={rescheduleDate}
+                  onChange={(e) => {
+                    setRescheduleDate(e.target.value);
+                    setRescheduleSlot("");
+                  }}
+                  required
+                />
+              </Field>
+              <Field label="Available Time Slots *">
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem", maxHeight: "140px", overflowY: "auto", padding: "0.4rem 0" }}>
+                  {reschedAvailableSlots.length > 0 ? (
+                    reschedAvailableSlots.map((slot) => (
+                      <button
+                        key={slot.startTime}
+                        type="button"
+                        className={`button button-small ${rescheduleSlot === slot.startTime ? "button-primary" : "button-outline"}`}
+                        onClick={() => setRescheduleSlot(slot.startTime)}
+                      >
+                        {slot.startTime}
+                      </button>
+                    ))
+                  ) : (
+                    <span style={{ fontSize: "0.85rem", color: "#64748b" }}>
+                      {reschedSlotsQuery.isLoading ? "Loading doctor availability…" : "No available slots on this date."}
+                    </span>
+                  )}
+                </div>
+              </Field>
+              <Field label="Reason / Message to patient (optional)">
+                <textarea
+                  className="input"
+                  rows={2}
+                  value={rescheduleReason}
+                  onChange={(e) => setRescheduleReason(e.target.value)}
+                  placeholder="e.g. Schedule adjustment or doctor requested alternate time…"
+                />
+              </Field>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.5rem", marginTop: "1rem" }}>
+                <button type="button" className="button button-quiet" onClick={() => setRescheduleTarget(null)}>
+                  Keep current time
+                </button>
+                <button type="submit" className="button button-primary" disabled={rescheduleBusy || !rescheduleSlot}>
+                  {rescheduleBusy ? "Saving…" : "Save new time"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {dialog}
     </div>
   );
@@ -464,9 +641,27 @@ export function DentistAvailability() {
       const result = await api.dentists.setUnavailableDates([
         ...new Set(dates),
       ]);
-      notify(result.message);
+      notify(result.message || "Leave date added.");
       queryClient.invalidateQueries({ queryKey: ["auth-profile"] });
+      queryClient.invalidateQueries({ queryKey: ["dentist-profile"] });
+      queryClient.invalidateQueries({ queryKey: ["dentists"] });
       setLeave("");
+    } catch (error) {
+      notify(error.message, "error");
+    }
+  };
+
+  const removeLeave = async (dateToRemove) => {
+    const dateStr = new Date(dateToRemove).toISOString().slice(0, 10);
+    const dates = (profile?.unavailableDates || [])
+      .map((item) => new Date(item).toISOString().slice(0, 10))
+      .filter((d) => d !== dateStr);
+    try {
+      const result = await api.dentists.setUnavailableDates(dates);
+      notify(result.message || "Leave date removed.");
+      queryClient.invalidateQueries({ queryKey: ["auth-profile"] });
+      queryClient.invalidateQueries({ queryKey: ["dentist-profile"] });
+      queryClient.invalidateQueries({ queryKey: ["dentists"] });
     } catch (error) {
       notify(error.message, "error");
     }
@@ -608,9 +803,19 @@ export function DentistAvailability() {
             Add leave date <Plus size={15} />
           </button>
         </div>
-        <div className="chip-list">
+        <div className="chip-list" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '1rem' }}>
           {(profile?.unavailableDates || []).map((item) => (
-            <span key={String(item)}>{fmtDate(item)}</span>
+            <span key={String(item)} className="chip" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', padding: '0.3rem 0.6rem', background: 'var(--color-surface-subtle, #f1f5f9)', borderRadius: '4px', fontSize: '0.85rem' }}>
+              {fmtDate(item)}
+              <button
+                type="button"
+                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', color: '#64748b' }}
+                onClick={() => removeLeave(item)}
+                title="Remove leave date"
+              >
+                <X size={13} />
+              </button>
+            </span>
           ))}
         </div>
       </SectionPanel>
@@ -1205,9 +1410,11 @@ export function ClinicalRecord({ readOnly = false }) {
     enabled: tab === "chart",
   });
   const [medicine, setMedicine] = useState([
-    { name: "", dosage: "", frequency: "", durationDays: "", instructions: "" },
+    { name: "", dosage: "", frequency: "1-0-1", durationDays: "5", instructions: "After food" },
   ]);
   const [diagnosis, setDiagnosis] = useState("");
+  const [additionalNotes, setAdditionalNotes] = useState("");
+  const [followUpDate, setFollowUpDate] = useState("");
   const patientQuery = useQuery({
     queryKey: ["patient", patientId],
     queryFn: () => api.patients.detail(patientId),
@@ -1215,31 +1422,78 @@ export function ClinicalRecord({ readOnly = false }) {
   const patient = patientQuery.data?.data?.user || patientQuery.data?.data;
   if (tab === "records" && !readOnly)
     return <ClinicalRecordsWorkspace patientId={patientId} query={records} />;
+  const searchParams = new URLSearchParams(location.search);
+  const appointmentIdFromUrl = searchParams.get("appointmentId");
+
   const savePrescription = async (event) => {
     event.preventDefault();
+    if (!medicine.length || !medicine[0].name.trim()) {
+      notify("Please add at least one medicine.", "error");
+      return;
+    }
     try {
       const result = await api.prescriptions.create({
         patientId,
+        appointmentId: appointmentIdFromUrl || undefined,
         diagnosis,
+        additionalNotes,
+        followUpDate: followUpDate || undefined,
         medicines: medicine.map((item) => ({
           ...item,
-          durationDays: Number(item.durationDays),
+          durationDays: Number(item.durationDays) || 1,
         })),
       });
-      notify(result.message);
+      notify(result.message || "Prescription issued successfully.");
       queryClient.invalidateQueries({ queryKey: ["prescriptions", patientId] });
       setDiagnosis("");
+      setAdditionalNotes("");
+      setFollowUpDate("");
       setMedicine([
         {
           name: "",
           dosage: "",
-          frequency: "",
-          durationDays: "",
-          instructions: "",
+          frequency: "1-0-1",
+          durationDays: "5",
+          instructions: "After food",
         },
       ]);
     } catch (error) {
       notify(error.message, "error");
+    }
+  };
+
+  const handleVoidPrescription = async (prescriptionId) => {
+    let voidReason = "Voided by prescriber";
+    const ok = await confirm({
+      title: "Void this prescription?",
+      message: "Are you sure you want to void this prescription? A voided prescription cannot be used and will be marked as invalid.",
+      confirmText: "Yes, void prescription",
+      cancelText: "Cancel",
+      danger: true,
+      children: (
+        <div style={{ marginTop: "0.8rem" }}>
+          <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 600, marginBottom: "0.3rem" }}>
+            Reason for voiding
+          </label>
+          <input
+            className="input"
+            defaultValue={voidReason}
+            onChange={(e) => {
+              voidReason = e.target.value;
+            }}
+            placeholder="e.g. Dose correction or patient intolerance..."
+          />
+        </div>
+      ),
+    });
+    if (!ok) return;
+
+    try {
+      const res = await api.prescriptions.void(prescriptionId, voidReason);
+      notify(res.message || "Prescription voided.");
+      queryClient.invalidateQueries({ queryKey: ["prescriptions", patientId] });
+    } catch (err) {
+      notify(err.message, "error");
     }
   };
   const saveTooth = async (event) => {
@@ -1355,47 +1609,137 @@ export function ClinicalRecord({ readOnly = false }) {
           title={readOnly ? "Prescriptions" : "Issue a prescription"}
         >
           {!readOnly && (
-            <fieldset className="clinical-fieldset">
+            <fieldset className="clinical-fieldset" style={{ border: "1px solid var(--border-color, #e2e8f0)", padding: "1.2rem", borderRadius: "8px", marginBottom: "1.5rem" }}>
               <form className="stack-form" onSubmit={savePrescription}>
-                <Field label="Diagnosis">
-                  <TextInput
-                    value={diagnosis}
-                    onChange={(event) => setDiagnosis(event.target.value)}
-                  />
-                </Field>
-                {medicine.map((item, index) => (
-                  <div className="medicine-row" key={index}>
-                    {[
-                      "name",
-                      "dosage",
-                      "frequency",
-                      "durationDays",
-                      "instructions",
-                    ].map((field) => (
-                      <Field
-                        key={field}
-                        label={field === "durationDays" ? "Days" : field}
-                      >
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+                  <Field label="Diagnosis / Condition">
+                    <TextInput
+                      value={diagnosis}
+                      placeholder="e.g. Acute pulpitis, Post-extraction care"
+                      onChange={(event) => setDiagnosis(event.target.value)}
+                    />
+                  </Field>
+                  <Field label="Follow-up Date (optional)">
+                    <TextInput
+                      type="date"
+                      value={followUpDate}
+                      onChange={(event) => setFollowUpDate(event.target.value)}
+                    />
+                  </Field>
+                </div>
+
+                <div style={{ marginTop: "1rem" }}>
+                  <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 600, marginBottom: "0.5rem" }}>
+                    Prescribed Medicines *
+                  </label>
+                  {medicine.map((item, index) => (
+                    <div
+                      key={index}
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "2fr 1.2fr 1.5fr 1fr 2fr auto",
+                        gap: "0.5rem",
+                        alignItems: "flex-end",
+                        marginBottom: "0.8rem",
+                        background: "var(--color-surface-subtle, #f8fafc)",
+                        padding: "0.8rem",
+                        borderRadius: "6px",
+                      }}
+                    >
+                      <Field label="Medicine Name *">
                         <TextInput
-                          type={field === "durationDays" ? "number" : "text"}
-                          min={field === "durationDays" ? 1 : undefined}
                           required
-                          value={item[field]}
-                          onChange={(event) =>
+                          placeholder="e.g. Amoxicillin"
+                          value={item.name}
+                          onChange={(e) =>
                             setMedicine((all) =>
-                              all.map((row, ix) =>
-                                ix === index
-                                  ? { ...row, [field]: event.target.value }
-                                  : row,
-                              ),
+                              all.map((r, ix) => (ix === index ? { ...r, name: e.target.value } : r))
                             )
                           }
                         />
                       </Field>
-                    ))}
-                  </div>
-                ))}
-                <div className="inline-actions">
+                      <Field label="Dosage *">
+                        <TextInput
+                          required
+                          placeholder="e.g. 500mg"
+                          value={item.dosage}
+                          onChange={(e) =>
+                            setMedicine((all) =>
+                              all.map((r, ix) => (ix === index ? { ...r, dosage: e.target.value } : r))
+                            )
+                          }
+                        />
+                      </Field>
+                      <Field label="Frequency *">
+                        <TextInput
+                          as="select"
+                          value={item.frequency}
+                          onChange={(e) =>
+                            setMedicine((all) =>
+                              all.map((r, ix) => (ix === index ? { ...r, frequency: e.target.value } : r))
+                            )
+                          }
+                        >
+                          <option value="1-0-1">1-0-1 (Twice daily)</option>
+                          <option value="1-1-1">1-1-1 (Thrice daily)</option>
+                          <option value="1-0-0">1-0-0 (Morning only)</option>
+                          <option value="0-0-1">0-0-1 (Night only)</option>
+                          <option value="1-1-1-1">1-1-1-1 (Four times daily)</option>
+                          <option value="SOS">SOS (As needed)</option>
+                          <option value="Once a week">Once a week</option>
+                        </TextInput>
+                      </Field>
+                      <Field label="Days *">
+                        <TextInput
+                          type="number"
+                          min={1}
+                          max={365}
+                          required
+                          value={item.durationDays}
+                          onChange={(e) =>
+                            setMedicine((all) =>
+                              all.map((r, ix) => (ix === index ? { ...r, durationDays: e.target.value } : r))
+                            )
+                          }
+                        />
+                      </Field>
+                      <Field label="Instructions">
+                        <TextInput
+                          placeholder="e.g. After food"
+                          value={item.instructions}
+                          onChange={(e) =>
+                            setMedicine((all) =>
+                              all.map((r, ix) => (ix === index ? { ...r, instructions: e.target.value } : r))
+                            )
+                          }
+                        />
+                      </Field>
+                      {medicine.length > 1 && (
+                        <button
+                          type="button"
+                          className="button button-quiet"
+                          style={{ color: "var(--color-danger, #ef4444)", height: "38px" }}
+                          title="Remove medicine"
+                          onClick={() => setMedicine((all) => all.filter((_, ix) => ix !== index))}
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                <Field label="Additional Notes / Advice (optional)">
+                  <textarea
+                    className="input"
+                    rows={2}
+                    value={additionalNotes}
+                    placeholder="e.g. Warm saline rinses, avoid hard food on right side..."
+                    onChange={(e) => setAdditionalNotes(e.target.value)}
+                  />
+                </Field>
+
+                <div className="inline-actions" style={{ display: "flex", justifyContent: "space-between", marginTop: "1rem" }}>
                   <button
                     type="button"
                     className="button button-quiet"
@@ -1405,22 +1749,23 @@ export function ClinicalRecord({ readOnly = false }) {
                         {
                           name: "",
                           dosage: "",
-                          frequency: "",
-                          durationDays: "",
-                          instructions: "",
+                          frequency: "1-0-1",
+                          durationDays: "5",
+                          instructions: "After food",
                         },
                       ])
                     }
                   >
-                    <Plus size={15} /> Add medicine
+                    <Plus size={15} /> Add another medicine
                   </button>
-                  <button className="button button-primary">
+                  <button className="button button-primary" type="submit">
                     Issue prescription <ArrowRight size={15} />
                   </button>
                 </div>
               </form>
             </fieldset>
           )}
+
           <AsyncView
             query={prescriptions}
             empty={
@@ -1430,24 +1775,57 @@ export function ClinicalRecord({ readOnly = false }) {
             }
             emptyTitle="No prescriptions issued"
           >
-            {(prescriptions.data?.data || []).map((entry) => (
-              <div className="record-row" key={entry._id}>
-                <FileText size={18} />
-                <div className="record-row-content">
-                  <strong>{entry.diagnosis || "Prescription"}</strong>
-                  <span>
-                    {fmtDate(entry.createdAt)} · {(entry.medicines || []).length} medicines
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  className="button button-quiet button-small"
-                  onClick={() => downloadPdf(`/prescriptions/${entry._id}/pdf`, `prescription-${entry._id}.pdf`)}
+            {(prescriptions.data?.data || []).map((entry) => {
+              const isVoided = entry.status === "voided";
+              return (
+                <div
+                  className="record-row"
+                  key={entry._id}
+                  style={{
+                    opacity: isVoided ? 0.75 : 1,
+                    background: isVoided ? "#fef2f2" : undefined,
+                    border: isVoided ? "1px solid #fecaca" : undefined,
+                  }}
                 >
-                  Download PDF <Download size={14} />
-                </button>
-              </div>
-            ))}
+                  <FileText size={18} color={isVoided ? "#dc2626" : undefined} />
+                  <div className="record-row-content">
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                      <strong>{entry.diagnosis || "Prescription"}</strong>
+                      {isVoided && (
+                        <span style={{ fontSize: "0.75rem", padding: "0.15rem 0.4rem", background: "#fee2e2", color: "#dc2626", borderRadius: "4px", fontWeight: 700 }}>
+                          VOIDED
+                        </span>
+                      )}
+                    </div>
+                    <span>
+                      {fmtDate(entry.createdAt)} · {(entry.medicines || []).length} medicines
+                      {isVoided && entry.voidReason ? ` · Reason: ${entry.voidReason}` : ""}
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", gap: "0.4rem", alignItems: "center" }}>
+                    {!readOnly && !isVoided && (
+                      <button
+                        type="button"
+                        className="button button-quiet button-small"
+                        style={{ color: "var(--color-danger, #ef4444)" }}
+                        onClick={() => handleVoidPrescription(entry._id)}
+                      >
+                        Void
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="button button-outline button-small"
+                      onClick={() =>
+                        downloadPdf(`/prescriptions/${entry._id}/pdf`, `prescription-${entry._id}.pdf`)
+                      }
+                    >
+                      Download PDF <Download size={14} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
           </AsyncView>
         </SectionPanel>
       )}

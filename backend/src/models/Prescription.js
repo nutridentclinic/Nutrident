@@ -16,7 +16,16 @@ const prescriptionSchema = new mongoose.Schema(
       },
     ],
     additionalNotes: { type: String, default: '' },
-    pdfUrl: { type: String, default: '' }, // generated/exported PDF stored on Cloudinary
+    followUpDate: { type: String, default: null },
+    status: {
+      type: String,
+      enum: ['active', 'voided'],
+      default: 'active',
+    },
+    voidedAt: { type: Date, default: null },
+    voidReason: { type: String, default: '' },
+    voidedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    pdfUrl: { type: String, default: '' },
   },
   { timestamps: true }
 );

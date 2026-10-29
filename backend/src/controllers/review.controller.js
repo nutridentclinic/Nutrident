@@ -128,3 +128,10 @@ exports.toggleHideReview = catchAsync(async (req, res, next) => {
 
   success(res, 200, review.isHidden ? 'Review hidden.' : 'Review unhidden.', review);
 });
+// @route GET /api/reviews/mine  (patient gets own submitted reviews)
+exports.getMyReviews = catchAsync(async (req, res) => {
+  const reviews = await Review.find({ patient: req.user._id })
+    .populate('dentist', 'name title')
+    .sort('-createdAt');
+  success(res, 200, 'My reviews fetched.', reviews);
+});

@@ -105,9 +105,26 @@ export function SectionPanel({ title, description, actions, children, className 
   return <section className={`section-panel ${className}`}><div className="section-panel-heading"><div>{title && <h2>{title}</h2>}{description && <p>{description}</p>}</div>{actions}</div>{children}</section>
 }
 
-export function ConfirmDialog({ open, title, description, confirmLabel = 'Confirm', cancelLabel = 'Keep', danger = false, busy = false, onConfirm, onCancel, children }) {
+export function ConfirmDialog({
+  open,
+  title,
+  description,
+  message,
+  confirmLabel = 'Confirm',
+  cancelLabel = 'Keep',
+  confirmText,
+  cancelText,
+  danger = false,
+  busy = false,
+  onConfirm,
+  onCancel,
+  children,
+}) {
   const cancelRef = useRef(null)
   const dialogRef = useRef(null)
+  const finalDescription = description || message
+  const finalConfirmLabel = confirmText || confirmLabel
+  const finalCancelLabel = cancelText || cancelLabel
 
   useEffect(() => {
     if (!open) return undefined
@@ -157,11 +174,11 @@ export function ConfirmDialog({ open, title, description, confirmLabel = 'Confir
         aria-describedby="confirm-description"
       >
         <h2 id="confirm-title">{title}</h2>
-        <p id="confirm-description">{description}</p>
+        <p id="confirm-description">{finalDescription}</p>
         {children}
         <div className="inline-actions">
-          <button ref={cancelRef} className="button button-quiet" onClick={onCancel} disabled={busy}>{cancelLabel}</button>
-          <button className={`button ${danger ? 'button-danger' : 'button-primary'}`} onClick={onConfirm} disabled={busy}>{busy ? 'Working…' : confirmLabel}</button>
+          <button ref={cancelRef} className="button button-quiet" onClick={onCancel} disabled={busy}>{finalCancelLabel}</button>
+          <button className={`button ${danger ? 'button-danger' : 'button-primary'}`} onClick={onConfirm} disabled={busy}>{busy ? 'Working…' : finalConfirmLabel}</button>
         </div>
       </section>
     </div>

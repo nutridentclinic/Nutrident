@@ -10,6 +10,7 @@ import {
   FileText,
   Plus,
   Search,
+  Trash2,
   Users,
   Wallet,
   X,
@@ -440,6 +441,26 @@ export function AppointmentLookup() {
       });
       if (!approved) return;
     }
+    if (name === "complete") {
+      const approved = await confirm({
+        title: "Complete appointment?",
+        message: `Mark ${item?.patient?.name || "patient"}'s visit as completed? This will generate the invoice and visit summary.`,
+        confirmText: "Yes, complete visit",
+        cancelText: "Cancel",
+      });
+      if (!approved) return;
+      try {
+        const result = await api.appointments.complete(lookup, { completionConfirmedByDentist: true });
+        notify(result.message || "Appointment completed.");
+        queryClient.invalidateQueries({ queryKey: ["appointment", "lookup", lookup] });
+        queryClient.invalidateQueries({ queryKey: ["appointments"] });
+        listQuery.refetch();
+      } catch (error) {
+        notify(error.message, "error");
+      }
+      return;
+    }
+
     if (name === "cancel") {
       let cancelReason = "Cancelled by clinic staff";
       const approved = await confirm({
@@ -2234,9 +2255,12 @@ export function NotificationsPage() {
   const queryClient = useQueryClient();
   const notify = useToast();
   const navigate = useNavigate();
+  const { confirm, dialog } = useConfirm();
 
   const [filterMode, setFilterMode] = useState("all"); // 'all' or 'unread'
   const [page, setPage] = useState(1);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [selectMode, setSelectMode] = useState(false);
 
   const notifications = useQuery({
     queryKey: ["notifications", filterMode, page],
@@ -2250,14 +2274,10 @@ export function NotificationsPage() {
     refetchIntervalInBackground: false,
   });
 
-  const preferences = useQuery({
-    queryKey: ["notification-preferences"],
-    queryFn: api.notifications.preferences,
-  });
-
   const rows = notifications.data?.data || [];
   const unread = notifications.data?.meta?.unreadCount || 0;
   const total = notifications.data?.meta?.total ?? rows.length;
+  const readCount = Math.max(0, total - unread);
 
   const markRead = async (id, e) => {
     if (e) e.stopPropagation();
@@ -2294,33 +2314,172 @@ export function NotificationsPage() {
     }
   };
 
-  const updateEmail = async (value) => {
+  const handleDelete = async (id, e) => {
+    if (e) e.stopPropagation();
     try {
-      const result = await api.notifications.updatePreferences({
-        email: value,
-      });
-      notify(result.message);
-      queryClient.invalidateQueries({ queryKey: ["notification-preferences"] });
+      const result = await api.notifications.remove(id);
+      notify(result.message || "Notification deleted.");
+      setSelectedIds((prev) => prev.filter((i) => i !== id));
+      queryClient.invalidateQueries({ queryKey: ["notifications"] });
     } catch (error) {
       notify(error.message, "error");
     }
   };
 
+  const handleDeleteSelected = async () => {
+    if (!selectedIds.length) return;
+    const ok = await confirm({
+      title: "Delete selected notifications?",
+      message: `Are you sure you want to delete ${selectedIds.length} notification(s)? This cannot be undone.`,
+      confirmText: "Delete selected",
+      cancelText: "Cancel",
+      danger: true,
+    });
+    if (!ok) return;
+
+    try {
+      const result = await api.notifications.removeMany(selectedIds);
+      notify(result.message || `${selectedIds.length} notification(s) deleted.`);
+      setSelectedIds([]);
+      setSelectMode(false);
+      queryClient.invalidateQueries({ queryKey: ["notifications"] });
+    } catch (error) {
+      notify(error.message, "error");
+    }
+  };
+
+  const handleClearRead = async () => {
+    const ok = await confirm({
+      title: "Clear all read notifications?",
+      message: "Are you sure you want to delete all read notifications? This cannot be undone.",
+      confirmText: "Clear read",
+      cancelText: "Cancel",
+      danger: true,
+    });
+    if (!ok) return;
+
+    try {
+      const result = await api.notifications.clear("read");
+      notify(result.message || "Read notifications cleared.");
+      setSelectedIds([]);
+      queryClient.invalidateQueries({ queryKey: ["notifications"] });
+    } catch (error) {
+      notify(error.message, "error");
+    }
+  };
+
+  const handleClearAll = async () => {
+    const ok = await confirm({
+      title: "Delete all notifications?",
+      message: `Are you sure you want to delete all ${total} notification(s)? This cannot be undone.`,
+      confirmText: "Delete all",
+      cancelText: "Cancel",
+      danger: true,
+    });
+    if (!ok) return;
+
+    try {
+      const result = await api.notifications.clear("all");
+      notify(result.message || "All notifications deleted.");
+      setSelectedIds([]);
+      queryClient.invalidateQueries({ queryKey: ["notifications"] });
+    } catch (error) {
+      notify(error.message, "error");
+    }
+  };
+
+  const toggleSelect = (id, e) => {
+    if (e) e.stopPropagation();
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
+    );
+  };
+
+  const toggleSelectAllPage = () => {
+    if (selectedIds.length === rows.length) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(rows.map((r) => r._id));
+    }
+  };
+
   return (
     <div>
+      {dialog}
       <PageTitle
         eyebrow="Stay informed"
         title="Notifications"
         description={unread + " unread update" + (unread === 1 ? "" : "s") + " · refreshes automatically every 30 seconds."}
         actions={
-          <div style={{ display: "flex", gap: "0.5rem" }}>
-            {unread > 0 && (
-              <button
-                className="button button-outline button-small"
-                onClick={markAll}
-              >
-                Mark all read <Check size={14} />
-              </button>
+          <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+            {selectMode ? (
+              <>
+                <button
+                  type="button"
+                  className="button button-outline button-small"
+                  onClick={toggleSelectAllPage}
+                >
+                  {selectedIds.length === rows.length && rows.length > 0 ? "Deselect all" : "Select page"}
+                </button>
+                <button
+                  type="button"
+                  className="button button-danger button-small"
+                  disabled={!selectedIds.length}
+                  onClick={handleDeleteSelected}
+                >
+                  <Trash2 size={14} /> Delete selected ({selectedIds.length})
+                </button>
+                <button
+                  type="button"
+                  className="button button-outline button-small"
+                  onClick={() => {
+                    setSelectMode(false);
+                    setSelectedIds([]);
+                  }}
+                >
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <>
+                {unread > 0 && (
+                  <button
+                    type="button"
+                    className="button button-outline button-small"
+                    onClick={markAll}
+                  >
+                    Mark all read <Check size={14} />
+                  </button>
+                )}
+                {readCount > 0 && (
+                  <button
+                    type="button"
+                    className="button button-outline button-small"
+                    onClick={handleClearRead}
+                  >
+                    Clear read ({readCount})
+                  </button>
+                )}
+                {total > 0 && (
+                  <>
+                    <button
+                      type="button"
+                      className="button button-outline button-small"
+                      onClick={() => setSelectMode(true)}
+                    >
+                      Select
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-outline button-small"
+                      style={{ color: "var(--color-danger, #ef4444)" }}
+                      onClick={handleClearAll}
+                    >
+                      Clear all
+                    </button>
+                  </>
+                )}
+              </>
             )}
           </div>
         }
@@ -2352,37 +2511,69 @@ export function NotificationsPage() {
       <AsyncView
         query={notifications}
         empty={!notifications.isLoading && !notifications.isError && !rows.length}
-        emptyTitle="No notifications"
-        emptyDescription="You're all caught up with clinic notices and updates."
+        emptyTitle={filterMode === "unread" ? "No unread notifications" : "No notifications yet"}
+        emptyDescription={
+          filterMode === "unread"
+            ? "You've read all your recent notifications. Switch to 'All' to review past updates."
+            : "You're all caught up with clinic notices and updates."
+        }
       >
         <div className="notification-list">
-          {rows.map((entry) => (
-            <article
-              className={"notification-row " + (entry.isRead ? "" : "notification-unread")}
-              key={entry._id}
-              onClick={() => handleRowClick(entry)}
-              style={{ cursor: entry.link ? "pointer" : "default" }}
-            >
-              <span className="notification-dot" />
-              <div style={{ flex: 1 }}>
-                <strong>{entry.title}</strong>
-                <p>{entry.message}</p>
-                <small>
-                  {new Date(entry.createdAt).toLocaleString("en-IN")}
-                  {entry.link ? " · Click to view details →" : ""}
-                </small>
-              </div>
-              {!entry.isRead && (
-                <button
-                  type="button"
-                  className="button button-quiet button-small"
-                  onClick={(e) => markRead(entry._id, e)}
-                >
-                  Mark read
-                </button>
-              )}
-            </article>
-          ))}
+          {rows.map((entry) => {
+            const isSelected = selectedIds.includes(entry._id);
+            return (
+              <article
+                className={"notification-row " + (entry.isRead ? "" : "notification-unread")}
+                key={entry._id}
+                onClick={() => {
+                  if (selectMode) {
+                    toggleSelect(entry._id);
+                  } else {
+                    handleRowClick(entry);
+                  }
+                }}
+                style={{ cursor: selectMode || entry.link ? "pointer" : "default" }}
+              >
+                {selectMode && (
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={(e) => toggleSelect(entry._id, e)}
+                    style={{ marginRight: "0.5rem" }}
+                  />
+                )}
+                <span className="notification-dot" />
+                <div style={{ flex: 1 }}>
+                  <strong>{entry.title}</strong>
+                  <p>{entry.message}</p>
+                  <small>
+                    {new Date(entry.createdAt).toLocaleString("en-IN")}
+                    {entry.link ? " · Click to view details →" : ""}
+                  </small>
+                </div>
+                <div style={{ display: "flex", gap: "0.4rem", alignItems: "center" }}>
+                  {!entry.isRead && (
+                    <button
+                      type="button"
+                      className="button button-quiet button-small"
+                      onClick={(e) => markRead(entry._id, e)}
+                    >
+                      Mark read
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="button button-quiet button-small"
+                    style={{ color: "var(--color-danger, #ef4444)" }}
+                    title="Delete notification"
+                    onClick={(e) => handleDelete(entry._id, e)}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              </article>
+            );
+          })}
         </div>
       </AsyncView>
 

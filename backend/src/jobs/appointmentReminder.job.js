@@ -72,6 +72,65 @@ const startReminderJob = () => {
     }
   });
 
+  
+const processReviewReminders = async (now = new Date()) => {
+  const nowMs = now.getTime();
+  const twoDaysAgo = new Date(nowMs - 48 * 60 * 60 * 1000);
+  const threeDaysAgo = new Date(nowMs - 72 * 60 * 60 * 1000);
+
+  const completedAppts = await Appointment.find({
+    status: 'completed',
+    reviewReminderSent: false,
+    $or: [
+      { completedAt: { $gte: threeDaysAgo, $lte: twoDaysAgo } },
+      { date: { $gte: threeDaysAgo, $lte: twoDaysAgo } },
+    ],
+  }).populate('patient', 'name email').populate({ path: 'dentist', populate: { path: 'user', select: 'name' } });
+
+  const Review = require('../models/Review');
+  const { sendTransactionalEmail } = require('../services/email.service');
+  const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
+
+  for (const appt of completedAppts) {
+    const existing = await Review.findOne({ appointment: appt._id });
+    if (!existing) {
+      const doctorName = appt.dentist?.user?.name || appt.dentist?.name || 'Your Doctor';
+      if (appt.patient?.email) {
+        await sendTransactionalEmail({
+          to: appt.patient.email,
+          template: 'reviewRequest',
+          data: {
+            patientName: appt.patient.name,
+            doctorName,
+            reviewUrl: `${clientUrl}/app/appointments?review=${appt._id}`,
+          },
+          relatedId: appt._id,
+        }).catch((err) => logger.error(`Review reminder email failed: ${err.message}`));
+      }
+
+      await notify({
+        userId: appt.patient._id || appt.patient,
+        title: 'How was your dental visit?',
+        message: `Please rate your consultation with Dr. ${doctorName}.`,
+        type: 'appointment_completed',
+        relatedId: appt._id,
+        link: `/app/appointments?review=${appt._id}`,
+      });
+    }
+
+    appt.reviewReminderSent = true;
+    await appt.save();
+  }
+};
+
+  cron.schedule('0 * * * *', async () => {
+    try {
+      await processReviewReminders();
+    } catch (err) {
+      logger.error(`Review reminder job failed: ${err.message}`);
+    }
+  });
+
   cron.schedule('*/30 * * * *', async () => {
     try {
       const dueAppointments = await processDueReminders();
@@ -83,4 +142,5 @@ const startReminderJob = () => {
 };
 
 module.exports = startReminderJob;
-module.exports.processDueReminders = processDueReminders;
+module.exports.processDueReminders = processDueReminders;
+module.exports.processReviewReminders = processReviewReminders;

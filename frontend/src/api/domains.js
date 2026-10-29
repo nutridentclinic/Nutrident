@@ -93,7 +93,7 @@ export const api = {
     upload: (data, onProgress) => request({ method: 'POST', url: '/medical-records', data, onUploadProgress: onProgress }),
     remove: (id) => remove(`/medical-records/${id}`),
   },
-  prescriptions: { mine: () => get('/prescriptions/me'), forPatient: (id) => get(`/prescriptions/patient/${id}`), create: (data) => post('/prescriptions', data) },
+  prescriptions: { mine: () => get('/prescriptions/me'), forPatient: (id) => get(`/prescriptions/patient/${id}`), detail: (id) => get(`/prescriptions/${id}`), create: (data) => post('/prescriptions', data), void: (id, reason) => patch(`/prescriptions/${id}/void`, { reason }) },
   plans: {
     mine: () => get('/treatment-plans/me'),
     forPatient: (id) => get(`/treatment-plans/patient/${id}`),
@@ -113,6 +113,9 @@ export const api = {
     mine: (params) => get('/notifications/me', params),
     read: (id) => patch(`/notifications/${id}/read`),
     readAll: () => patch('/notifications/read-all'),
+    remove: (id) => remove('/notifications/' + id),
+    removeMany: (ids) => request({ method: 'DELETE', url: '/notifications', data: { ids } }),
+    clear: (scope) => request({ method: 'DELETE', url: '/notifications', params: { scope } }),
     preferences: () => get('/notifications/preferences'),
     updatePreferences: (data) => patch('/notifications/preferences', data),
   },
@@ -125,6 +128,7 @@ export const api = {
     remove: (id) => request({ method: 'DELETE', url: `/queue/${id}` }),
   },
   reviews: {
+    mine: () => get('/reviews/mine'),
     forDentist: (id) => get(`/reviews/dentist/${id}`),
     all: (params) => get('/reviews', params),
     create: (data) => post('/reviews', data),

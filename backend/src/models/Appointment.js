@@ -27,6 +27,12 @@ const appointmentSchema = new mongoose.Schema(
     // If rescheduled, link to the new appointment doc
     rescheduledTo: { type: mongoose.Schema.Types.ObjectId, ref: 'Appointment', default: null },
     rescheduledFrom: { type: mongoose.Schema.Types.ObjectId, ref: 'Appointment', default: null },
+    rescheduledBy: { type: String, enum: ['patient', 'dentist', 'admin', 'receptionist', 'system', null], default: null },
+    rescheduleReason: { type: String, default: '' },
+    rescheduledAt: { type: Date, default: null },
+    completedBy: { type: String, enum: ['dentist', 'receptionist', 'admin', null], default: null },
+    completedAt: { type: Date, default: null },
+    reviewReminderSent: { type: Boolean, default: false },
 
     fees: {
       consultationFee: { type: Number, required: true },

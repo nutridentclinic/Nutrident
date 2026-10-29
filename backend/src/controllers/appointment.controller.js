@@ -413,7 +413,7 @@ exports.cancelAppointment = catchAsync(async (req, res, next) => {
 
 // @route PATCH /api/appointments/:id/reschedule
 exports.rescheduleAppointment = catchAsync(async (req, res, next) => {
-  const { date, startTime } = req.body;
+  const { date, startTime, reason } = req.body;
   const oldAppointment = await Appointment.findById(req.params.id);
   if (!oldAppointment) return next(new AppError('Appointment not found.', 404));
   const isPatientOwner = req.user.role === 'patient' && oldAppointment.patient.equals(req.user._id);
@@ -430,6 +430,20 @@ exports.rescheduleAppointment = catchAsync(async (req, res, next) => {
     return next(new AppError(`Cannot reschedule an appointment that is ${oldAppointment.status}.`, 400));
   }
 
+  // Reject slot equal to current
+  const oldDateStr = oldAppointment.date instanceof Date ? oldAppointment.date.toISOString().slice(0, 10) : String(oldAppointment.date);
+  if (oldDateStr === date && oldAppointment.startTime === startTime) {
+    return next(new AppError('New slot must be different from current slot.', 400));
+  }
+
+  // Reject past date or past time on current date
+  const now = new Date();
+  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const currentTimeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  if (date < todayStr || (date === todayStr && startTime <= currentTimeStr)) {
+    return next(new AppError('Cannot reschedule to a past date or time.', 400));
+  }
+
   const publishedSlots = await getAvailableSlots(oldAppointment.dentist, date);
   if (!publishedSlots.some((s) => s.startTime === startTime)) {
     return next(new AppError('This slot is not available for booking.', 400));
@@ -438,7 +452,7 @@ exports.rescheduleAppointment = catchAsync(async (req, res, next) => {
   await assertSlotIsFree(oldAppointment.dentist, date, startTime);
 
   const dentist = await Dentist.findById(oldAppointment.dentist);
-  const duration = dentist.slotDurationMinutes || 30;
+  const duration = dentist?.slotDurationMinutes || 30;
   const [h, m] = startTime.split(':').map(Number);
   const endMinutes = h * 60 + m + duration;
   const endTime = `${String(Math.floor(endMinutes / 60)).padStart(2, '0')}:${String(endMinutes % 60).padStart(2, '0')}`;
@@ -463,26 +477,56 @@ exports.rescheduleAppointment = catchAsync(async (req, res, next) => {
     payment: paymentId,
     status: newStatus,
     rescheduledFrom: oldAppointment._id,
+    rescheduledBy: req.user.role,
+    rescheduleReason: reason || '',
+    rescheduledAt: new Date(),
   });
 
   try {
     oldAppointment.status = 'rescheduled';
     oldAppointment.rescheduledTo = newAppointment._id;
+    oldAppointment.rescheduledBy = req.user.role;
+    oldAppointment.rescheduleReason = reason || '';
+    oldAppointment.rescheduledAt = new Date();
     await oldAppointment.save();
+
     if (paymentId) {
+      const Payment = require('../models/Payment');
       await Payment.findByIdAndUpdate(paymentId, { appointment: newAppointment._id });
     }
+    const Invoice = require('../models/Invoice');
+    await Invoice.updateMany({ appointment: oldAppointment._id }, { appointment: newAppointment._id });
+
+    const Queue = require('../models/Queue');
+    await Queue.deleteMany({ appointment: oldAppointment._id });
   } catch (err) {
     await Appointment.findByIdAndDelete(newAppointment._id);
     throw err;
   }
 
+  await newAppointment.populate('patient', 'name email phone avatar');
+  await newAppointment.populate('dentist', 'name title user');
+
+  const patientName = newAppointment.patient?.name || 'Patient';
+  const reasonText = reason ? ` Reason: ${reason}` : '';
+
+  // Notify Patient (in-app + email)
   await notify({
     userId: oldAppointment.patient,
     title: 'Appointment Rescheduled',
-    message: `Your appointment has been rescheduled to ${date} at ${startTime}.`,
+    message: `Your appointment has been rescheduled from ${oldAppointment.date} ${oldAppointment.startTime} to ${date} at ${startTime}.${reasonText}`,
     type: 'appointment_rescheduled',
     relatedId: newAppointment._id,
+    link: `/app/appointments?search=${newAppointment._id}`,
+  });
+
+  // Notify Receptionist(s)
+  await notifyRoles(['receptionist'], {
+    title: 'Appointment Rescheduled',
+    message: `Appointment for ${patientName} rescheduled to ${date} at ${startTime}.${reasonText}`,
+    type: 'appointment_rescheduled',
+    relatedId: newAppointment._id,
+    link: `/reception/appointments?open=${newAppointment._id}`,
   });
 
   success(res, 200, 'Appointment rescheduled.', newAppointment);
@@ -492,21 +536,49 @@ exports.rescheduleAppointment = catchAsync(async (req, res, next) => {
 exports.completeAppointment = catchAsync(async (req, res, next) => {
   const appointment = await Appointment.findById(req.params.id);
   if (!appointment) return next(new AppError('Appointment not found.', 404));
-  const dentist = await Dentist.findOne({ user: req.user._id });
-  if (!dentist || !appointment.dentist.equals(dentist._id)) {
-    return next(new AppError('You can only complete your own appointments.', 403));
+
+  if (req.user.role === 'dentist') {
+    const dentist = await Dentist.findOne({ user: req.user._id });
+    if (!dentist || !appointment.dentist.equals(dentist._id)) {
+      return next(new AppError('You can only complete your own appointments.', 403));
+    }
+  } else if (req.user.role === 'receptionist' || req.user.role === 'admin') {
+    const isCheckedIn = Boolean(appointment.checkedInAt || appointment.status === 'checked-in');
+    const isConfirmedByDentist = req.body.completionConfirmedByDentist === true;
+    if (!isCheckedIn && !isConfirmedByDentist) {
+      return next(new AppError('Front desk completion requires dentist confirmation or an active check-in.', 400));
+    }
+  } else {
+    return next(new AppError('You do not have permission to complete appointments.', 403));
   }
-  if (appointment.status !== 'confirmed') {
-    return next(new AppError('Only confirmed appointments can be completed.', 400));
+
+  if (!['confirmed', 'checked-in'].includes(appointment.status)) {
+    return next(new AppError('Only confirmed or checked-in appointments can be completed.', 400));
   }
+
   appointment.status = 'completed';
+  appointment.completedBy = req.user.role;
+  appointment.completedAt = new Date();
   await appointment.save();
 
   let invoice = null;
+  let invoiceError = null;
   try {
     invoice = await createInvoiceForAppointment(appointment);
   } catch (err) {
+    invoiceError = err.message;
     logger.error(`Auto-invoice creation error for appointment ${appointment._id}: ${err.message}`);
+  }
+
+  try {
+    const { getIO } = require('../sockets');
+    const io = getIO();
+    if (io) {
+      if (invoice) io.emit('invoice:created', { invoiceId: invoice._id, appointmentId: appointment._id });
+      io.emit('appointment:completed', { appointmentId: appointment._id });
+    }
+  } catch (socketErr) {
+    // Sockets optional
   }
 
   await notifyUser(appointment.patient, {
@@ -514,9 +586,59 @@ exports.completeAppointment = catchAsync(async (req, res, next) => {
     message: 'Your appointment has been marked as completed. You can now leave a review.',
     type: 'appointment_completed',
     relatedId: appointment._id,
+    link: `/app/appointments?review=${appointment._id}`,
   });
 
-  success(res, 200, 'Appointment marked as completed.', { appointment, invoice });
+  if (invoice) {
+    await notifyRoles(['receptionist'], {
+      title: 'Invoice Generated',
+      message: `Invoice #${invoice.invoiceNumber} generated for completed appointment.`,
+      type: 'invoice_ready',
+      relatedId: invoice._id,
+      link: `/reception/invoices?open=${invoice._id}`,
+    });
+  }
+
+  try {
+    const patientUser = await User.findById(appointment.patient);
+    const dentistDoc = await Dentist.findById(appointment.dentist).populate('user', 'name');
+    const doctorName = dentistDoc?.user?.name || dentistDoc?.name || 'Your Doctor';
+    const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
+
+    if (patientUser?.email) {
+      const { sendTransactionalEmail } = require('../services/email.service');
+      sendTransactionalEmail({
+        to: patientUser.email,
+        template: 'appointmentCompleted',
+        data: {
+          patientName: patientUser.name,
+          doctorName,
+          date: typeof appointment.date === 'string' ? appointment.date : new Date(appointment.date).toDateString(),
+          reviewUrl: `${clientUrl}/app/appointments?review=${appointment._id}`,
+        },
+        relatedId: appointment._id,
+      }).catch((e) => logger.error(`Email send failed: ${e.message}`));
+
+      if (invoice) {
+        sendTransactionalEmail({
+          to: patientUser.email,
+          template: 'invoiceReady',
+          data: {
+            patientName: patientUser.name,
+            invoiceNumber: invoice.invoiceNumber,
+            amount: invoice.totalAmount,
+            date: new Date(invoice.createdAt).toDateString(),
+            portalUrl: `${clientUrl}/app/billing?open=${invoice._id}`,
+          },
+          relatedId: invoice._id,
+        }).catch((e) => logger.error(`Invoice email send failed: ${e.message}`));
+      }
+    }
+  } catch (emailErr) {
+    logger.error(`Error sending completion emails: ${emailErr.message}`);
+  }
+
+  success(res, 200, 'Appointment marked as completed.', { appointment, invoice, invoiceError });
 });
 
 // @route PATCH /api/appointments/:id/no-show

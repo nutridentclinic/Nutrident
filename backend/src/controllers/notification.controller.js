@@ -62,3 +62,31 @@ exports.updatePreferences = catchAsync(async (req, res) => {
   );
   success(res, 200, 'Preferences updated.', user.notificationPreferences);
 });
+
+// @route DELETE /api/notifications/:id
+exports.deleteNotification = catchAsync(async (req, res, next) => {
+  const notif = await Notification.findOneAndDelete({ _id: req.params.id, user: req.user._id });
+  if (!notif) return next(new AppError('Notification not found.', 404));
+  success(res, 200, 'Notification deleted.');
+});
+
+// @route DELETE /api/notifications
+exports.deleteNotifications = catchAsync(async (req, res, next) => {
+  const { ids } = req.body || {};
+  const { scope } = req.query || {};
+
+  let filter = { user: req.user._id };
+
+  if (Array.isArray(ids) && ids.length > 0) {
+    filter._id = { $in: ids };
+  } else if (scope === 'read') {
+    filter.isRead = true;
+  } else if (scope === 'all') {
+    // all notifications for current user
+  } else {
+    return next(new AppError("Please provide an array of notification IDs or a valid scope ('read' or 'all').", 400));
+  }
+
+  const result = await Notification.deleteMany(filter);
+  success(res, 200, `${result.deletedCount} notification(s) deleted.`, { deletedCount: result.deletedCount });
+});

@@ -1,4 +1,4 @@
-import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { usePrimaryDentist } from "../hooks/usePrimaryDentist.js";
@@ -228,6 +228,62 @@ export function PatientAppointments() {
     ...queryOptions,
   });
   const items = query.data?.data || [];
+
+  const [searchParams, setSearchParams] = useSearchParams();
+  const queryClient = useQueryClient();
+  const notify = useToast();
+
+  const myReviewsQuery = useQuery({
+    queryKey: ["my-reviews"],
+    queryFn: api.reviews.mine,
+    ...queryOptions,
+  });
+  const myReviews = myReviewsQuery.data?.data || [];
+  const reviewedApptIds = new Set(myReviews.map((r) => String(r.appointment?._id || r.appointment)));
+
+  const [reviewTarget, setReviewTarget] = useState(null);
+  const [reviewRating, setReviewRating] = useState(5);
+  const [reviewComment, setReviewComment] = useState("");
+  const [reviewBusy, setReviewBusy] = useState(false);
+
+  // Check review param in URL on load
+  useEffect(() => {
+    const reviewId = searchParams.get("review");
+    if (reviewId && items.length > 0) {
+      const match = items.find((a) => String(a._id) === reviewId);
+      if (match && match.status === "completed" && !reviewedApptIds.has(String(match._id))) {
+        setReviewTarget(match);
+      }
+    }
+  }, [searchParams, items, reviewedApptIds]);
+
+  const handleReviewSubmit = async (e) => {
+    e.preventDefault();
+    if (!reviewTarget) return;
+    setReviewBusy(true);
+    try {
+      const res = await api.reviews.create({
+        appointmentId: reviewTarget._id,
+        rating: reviewRating,
+        comment: reviewComment.trim(),
+      });
+      notify(res.message || "Thank you for your review!");
+      setReviewTarget(null);
+      setReviewComment("");
+      setReviewRating(5);
+      // Remove review query param if present
+      if (searchParams.get("review")) {
+        searchParams.delete("review");
+        setSearchParams(searchParams);
+      }
+      queryClient.invalidateQueries({ queryKey: ["my-reviews"] });
+      queryClient.invalidateQueries({ queryKey: ["appointments", "patient"] });
+    } catch (err) {
+      notify(err.message, "error");
+    } finally {
+      setReviewBusy(false);
+    }
+  };
   return (
     <div>
       <PageTitle
@@ -296,6 +352,25 @@ export function PatientAppointments() {
                 >
                   Details
                 </Link>
+                {item.status === "completed" && (
+                  reviewedApptIds.has(String(item._id)) ? (
+                    <span style={{ fontSize: "0.8rem", color: "#16a34a", fontWeight: 600, padding: "0.2rem 0.5rem" }}>
+                      Reviewed ★
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="button button-outline button-small"
+                      onClick={() => {
+                        setReviewTarget(item);
+                        setReviewRating(5);
+                        setReviewComment("");
+                      }}
+                    >
+                      Leave Review ★
+                    </button>
+                  )
+                )}
                 {["pending", "confirmed"].includes(item.status) && (
                   <button
                     className="button button-quiet button-small"
@@ -338,6 +413,61 @@ export function PatientAppointments() {
           ))}
         </div>
       </AsyncView>
+      {/* Review Modal */}
+      {reviewTarget && (
+        <div className="modal-backdrop" onClick={() => setReviewTarget(null)}>
+          <div className="modal-panel" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "480px", width: "95%" }}>
+            <div className="section-panel-heading">
+              <div>
+                <span className="eyebrow">Patient feedback</span>
+                <h2>Rate your visit</h2>
+              </div>
+              <button className="icon-button" aria-label="Close" onClick={() => setReviewTarget(null)}>
+                <X size={18} />
+              </button>
+            </div>
+            <form onSubmit={handleReviewSubmit} className="stack-form" style={{ marginTop: "1rem" }}>
+              <p style={{ fontSize: "0.9rem", color: "#475569" }}>
+                How was your consultation with <strong>Dr. {reviewTarget.dentist?.user?.name || "your dentist"}</strong> on {fmtDate(reviewTarget.date)}?
+              </p>
+              <Field label="Rating *">
+                <div style={{ display: "flex", gap: "0.5rem", fontSize: "1.5rem", cursor: "pointer", margin: "0.3rem 0" }}>
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <span
+                      key={star}
+                      onClick={() => setReviewRating(star)}
+                      style={{ color: star <= reviewRating ? "#f59e0b" : "#cbd5e1" }}
+                    >
+                      ★
+                    </span>
+                  ))}
+                  <span style={{ fontSize: "0.9rem", color: "#64748b", alignSelf: "center", marginLeft: "0.5rem" }}>
+                    {reviewRating} of 5 stars
+                  </span>
+                </div>
+              </Field>
+              <Field label="Your feedback / review">
+                <textarea
+                  className="input"
+                  rows={3}
+                  value={reviewComment}
+                  placeholder="Share details about your experience, doctor bedside manner, treatment clarity..."
+                  onChange={(e) => setReviewComment(e.target.value)}
+                />
+              </Field>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.5rem", marginTop: "1rem" }}>
+                <button type="button" className="button button-quiet" onClick={() => setReviewTarget(null)}>
+                  Cancel
+                </button>
+                <button type="submit" className="button button-primary" disabled={reviewBusy}>
+                  {reviewBusy ? "Submitting…" : "Submit Review"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {dialog}
       {reschedule && (
         <div
@@ -618,6 +748,7 @@ function pollPayment(appointmentId, onResult) {
 
 export function AppointmentBooking() {
   const { dentistId: paramDentistId } = useParams();
+  const [searchParams] = useSearchParams();
   const user = useAuthStore((state) => state.user);
   const primary = usePrimaryDentist();
   const dentist = primary.dentist;
@@ -640,7 +771,7 @@ export function AppointmentBooking() {
   const [date, setDate] = useState(clinicDate());
   const [selectedSlot, setSelectedSlot] = useState("");
   const [mode, setMode] = useState("in-clinic");
-  const [reason, setReason] = useState("");
+  const [reason, setReason] = useState(() => searchParams.get("reason") || "");
   const [familyMemberName, setFamilyMemberName] = useState("");
   const [paymentChoice, setPaymentChoice] = useState("online");
   const [busy, setBusy] = useState(false);
@@ -1228,15 +1359,35 @@ export function PatientPrescriptions() {
       >
         <div className="record-grid">
           {items.map((item) => (
-            <article className="record-card" key={item._id}>
+            <article
+              className="record-card"
+              key={item._id}
+              style={{
+                opacity: item.status === "voided" ? 0.8 : 1,
+                border: item.status === "voided" ? "1px solid #fecaca" : undefined,
+                background: item.status === "voided" ? "#fff5f5" : undefined,
+              }}
+            >
               <div className="record-card-head">
                 <span className="catalog-icon">
-                  <FileText size={18} />
+                  <FileText size={18} color={item.status === "voided" ? "#dc2626" : undefined} />
                 </span>
                 <span>{fmtDate(item.createdAt)}</span>
               </div>
-              <h2>{item.diagnosis || "Prescription"}</h2>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                <h2>{item.diagnosis || "Prescription"}</h2>
+                {item.status === "voided" && (
+                  <span style={{ fontSize: "0.75rem", padding: "0.15rem 0.4rem", background: "#fee2e2", color: "#dc2626", borderRadius: "4px", fontWeight: 700 }}>
+                    VOIDED
+                  </span>
+                )}
+              </div>
               <p>Dr. {item.dentist?.user?.name || "Your dentist"}</p>
+              {item.status === "voided" && (
+                <p style={{ color: "#dc2626", fontSize: "0.85rem", fontStyle: "italic", margin: "0.2rem 0" }}>
+                  This prescription was voided{item.voidReason ? `: ${item.voidReason}` : " and is no longer valid."}
+                </p>
+              )}
               <ul className="medicine-list">
                 {(item.medicines || []).map((medicine, index) => (
                   <li key={`${medicine.name}-${index}`}>
@@ -1244,10 +1395,21 @@ export function PatientPrescriptions() {
                     <span>
                       {medicine.dosage} · {medicine.frequency} ·{" "}
                       {medicine.durationDays} days
+                      {medicine.instructions ? ` (${medicine.instructions})` : ""}
                     </span>
                   </li>
                 ))}
               </ul>
+              {item.additionalNotes && (
+                <p style={{ fontSize: "0.85rem", color: "#475569", margin: "0.5rem 0" }}>
+                  <strong>Notes:</strong> {item.additionalNotes}
+                </p>
+              )}
+              {item.followUpDate && (
+                <p style={{ fontSize: "0.85rem", color: "#475569", margin: "0.2rem 0" }}>
+                  <strong>Follow-up:</strong> {item.followUpDate}
+                </p>
+              )}
               <button
                 className="button button-outline button-small"
                 onClick={() =>
@@ -2110,5 +2272,175 @@ export function PatientProfilePhoto() {
         }}
       />
     </SectionPanel>
+  );
+}
+
+
+export function PatientTreatmentsPage() {
+  const user = useAuthStore((state) => state.user);
+  const [search, setSearch] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState("all");
+
+  const treatmentsQuery = useQuery({
+    queryKey: ["treatments"],
+    queryFn: api.treatments.list,
+  });
+
+  const plansQuery = useQuery({
+    queryKey: ["patient-plans", user?._id || "me"],
+    queryFn: api.plans.mine,
+    enabled: Boolean(user?._id) || Boolean(import.meta.env?.VITEST),
+  });
+
+  const treatments = treatmentsQuery.data?.data || [];
+  const plans = plansQuery.data?.data || [];
+
+  // Build a lookup map of treatments that are part of the patient's active plans
+  const planStepMap = useMemo(() => {
+    const map = new Map();
+    plans.forEach((plan) => {
+      (plan.steps || []).forEach((step, idx) => {
+        const stepInfo = {
+          planTitle: plan.title,
+          stepNumber: idx + 1,
+          totalSteps: plan.steps.length,
+          status: step.status,
+        };
+        if (step.treatment) {
+          const tId = typeof step.treatment === "object" ? step.treatment._id : step.treatment;
+          map.set(String(tId), stepInfo);
+        }
+        if (step.name) {
+          map.set(step.name.toLowerCase().trim(), stepInfo);
+        }
+      });
+    });
+    return map;
+  }, [plans]);
+
+  // Extract unique categories
+  const categories = useMemo(() => {
+    const set = new Set();
+    treatments.forEach((t) => {
+      if (t.category) set.add(t.category);
+    });
+    return ["all", ...Array.from(set)];
+  }, [treatments]);
+
+  // Filter treatments
+  const filtered = treatments.filter((t) => {
+    const matchesCategory = selectedCategory === "all" || t.category === selectedCategory;
+    const matchesSearch =
+      !search.trim() ||
+      (t.name && t.name.toLowerCase().includes(search.toLowerCase())) ||
+      (t.description && t.description.toLowerCase().includes(search.toLowerCase()));
+    return matchesCategory && matchesSearch;
+  });
+
+  return (
+    <div>
+      <PageTitle
+        eyebrow="Dental procedures"
+        title="Treatments & my plan"
+        description="Explore dental procedures available at the clinic, estimated fees, and track procedures in your active care plan."
+        actions={
+          <Link to="/app/treatment-plans" className="button button-outline">
+            View full treatment plan <ArrowRight size={15} />
+          </Link>
+        }
+      />
+
+      {/* Filter and Search Bar */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.8rem", alignItems: "center", marginBottom: "1.2rem" }}>
+        <div style={{ flex: 1, minWidth: "220px" }}>
+          <TextInput
+            placeholder="Search treatments by name or description..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+      </div>
+
+      {/* Category Chips */}
+      {categories.length > 2 && (
+        <div className="filter-chips" style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem", marginBottom: "1.5rem" }}>
+          {categories.map((cat) => (
+            <button
+              key={cat}
+              type="button"
+              className={"button button-small " + (selectedCategory === cat ? "button-primary" : "button-outline")}
+              onClick={() => setSelectedCategory(cat)}
+            >
+              {cat === "all" ? "All treatments" : cat}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <AsyncView
+        query={treatmentsQuery}
+        empty={!treatmentsQuery.isLoading && !treatmentsQuery.isError && !filtered.length}
+        emptyTitle="No treatments found"
+        emptyDescription={search ? "Try adjusting your search query or category filter." : "The treatment catalog is currently empty."}
+      >
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "1.2rem" }}>
+          {filtered.map((item) => {
+            const planStep = planStepMap.get(String(item._id)) || planStepMap.get(item.name?.toLowerCase().trim());
+            return (
+              <article
+                key={item._id}
+                className="record-card"
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  justifyContent: "space-between",
+                  padding: "1.2rem",
+                  border: planStep ? "1.5px solid #6366f1" : "1px solid var(--border-color, #e2e8f0)",
+                  borderRadius: "8px",
+                  background: "var(--color-surface, #ffffff)",
+                  position: "relative",
+                }}
+              >
+                <div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "0.5rem", marginBottom: "0.5rem" }}>
+                    <h3 style={{ margin: 0, fontSize: "1.1rem" }}>{item.name}</h3>
+                    {item.category && (
+                      <span style={{ fontSize: "0.75rem", padding: "0.15rem 0.5rem", background: "var(--color-surface-subtle, #f1f5f9)", borderRadius: "12px", color: "#64748b" }}>
+                        {item.category}
+                      </span>
+                    )}
+                  </div>
+
+                  {planStep && (
+                    <div style={{ margin: "0.5rem 0 0.8rem 0", padding: "0.4rem 0.6rem", background: "#e0e7ff", borderRadius: "6px", fontSize: "0.8rem", color: "#3730a3" }}>
+                      <strong>In your care plan:</strong> Step {planStep.stepNumber} of {planStep.totalSteps} ({planStep.status})
+                    </div>
+                  )}
+
+                  <p style={{ fontSize: "0.88rem", color: "#475569", margin: "0.4rem 0 1rem 0" }}>
+                    {item.description || "Comprehensive dental procedure provided by our specialist team."}
+                  </p>
+
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "0.85rem", color: "#64748b", margin: "0.8rem 0" }}>
+                    <span>Estimated fee: <strong style={{ color: "var(--color-heading, #0f172a)" }}>{rupees(item.defaultCost || item.price || 0)}</strong></span>
+                    <span>{item.durationMinutes || 30} mins</span>
+                  </div>
+                </div>
+
+                <div style={{ marginTop: "1rem", borderTop: "1px solid var(--border-color, #f1f5f9)", paddingTop: "0.8rem" }}>
+                  <Link
+                    to={`/app/book?reason=${encodeURIComponent(item.name)}&treatmentId=${item._id}`}
+                    className="button button-primary button-small"
+                    style={{ width: "100%", textAlign: "center" }}
+                  >
+                    Book this treatment <ArrowRight size={14} />
+                  </Link>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      </AsyncView>
+    </div>
   );
 }

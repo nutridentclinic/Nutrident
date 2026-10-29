@@ -116,32 +116,53 @@ const generatePrescriptionPDF = async (prescription, stream) => {
 
   drawHeader(doc, clinic, 'PRESCRIPTION');
 
+  // Voided banner
+  if (prescription.status === 'voided') {
+    doc.save();
+    const bannerY = doc.y;
+    doc.rect(50, bannerY, doc.page.width - 100, 36).fillAndStroke('#fee2e2', '#ef4444');
+    doc.fontSize(11).font(getFont(true)).fillColor('#dc2626').text('VOIDED PRESCRIPTION - DO NOT DISPENSE', 50, bannerY + 6, {
+      align: 'center',
+      width: doc.page.width - 100,
+    });
+    if (prescription.voidReason) {
+      doc.fontSize(8).font(getFont(false)).fillColor('#b91c1c').text(`Reason: ${prescription.voidReason}`, 50, bannerY + 20, {
+        align: 'center',
+        width: doc.page.width - 100,
+      });
+    }
+    doc.restore();
+    doc.moveDown(3);
+    doc.fillColor('#000');
+  }
+
   doc.fontSize(10);
-  doc.font('Helvetica-Bold').text('Date: ', { continued: true }).font('Helvetica').text(new Date(prescription.createdAt).toDateString());
+  doc.font(getFont(true)).text('Rx #: ', { continued: true }).font(getFont(false)).text(String(prescription._id));
+  doc.font(getFont(true)).text('Date: ', { continued: true }).font(getFont(false)).text(new Date(prescription.createdAt).toDateString());
   doc.moveDown(0.5);
 
-  doc.font('Helvetica-Bold').text('Patient: ', { continued: true }).font('Helvetica').text(prescription.patient?.name || '');
+  doc.font(getFont(true)).text('Patient: ', { continued: true }).font(getFont(false)).text(prescription.patient?.name || '');
   if (prescription.patient?.phone) {
-    doc.font('Helvetica-Bold').text('Phone: ', { continued: true }).font('Helvetica').text(prescription.patient.phone);
+    doc.font(getFont(true)).text('Phone: ', { continued: true }).font(getFont(false)).text(prescription.patient.phone);
   }
-  const dentistName = prescription.dentist?.user?.name;
+  const dentistName = prescription.dentist?.user?.name || prescription.dentist?.name;
   if (dentistName) {
-    doc.font('Helvetica-Bold').text('Dentist: ', { continued: true }).font('Helvetica').text(`Dr. ${dentistName}`);
+    doc.font(getFont(true)).text('Dentist: ', { continued: true }).font(getFont(false)).text(`Dr. ${dentistName}`);
   }
   doc.moveDown(1);
 
   if (prescription.diagnosis) {
-    doc.font('Helvetica-Bold').text('Diagnosis:');
-    doc.font('Helvetica').text(prescription.diagnosis);
+    doc.font(getFont(true)).text('Diagnosis:');
+    doc.font(getFont(false)).text(prescription.diagnosis);
     doc.moveDown(0.8);
   }
 
-  doc.font('Helvetica-Bold').fontSize(12).text('Rx', { underline: true });
+  doc.font(getFont(true)).fontSize(12).text('Rx', { underline: true });
   doc.moveDown(0.3);
 
   const tableTop = doc.y;
-  const col = { name: 50, dosage: 220, freq: 320, duration: 420, instr: 490 };
-  doc.font('Helvetica-Bold').fontSize(9);
+  const col = { name: 50, dosage: 220, freq: 320, duration: 420 };
+  doc.font(getFont(true)).fontSize(9);
   doc.text('Medicine', col.name, tableTop);
   doc.text('Dosage', col.dosage, tableTop);
   doc.text('Frequency', col.freq, tableTop);
@@ -149,20 +170,27 @@ const generatePrescriptionPDF = async (prescription, stream) => {
   doc.moveTo(50, tableTop + 14).lineTo(doc.page.width - 50, tableTop + 14).strokeColor('#ddd').stroke();
 
   let y = tableTop + 20;
-  doc.font('Helvetica').fontSize(9);
+  doc.font(getFont(false)).fontSize(9);
   (prescription.medicines || []).forEach((m) => {
     doc.text(m.name, col.name, y, { width: 160 });
     doc.text(m.dosage, col.dosage, y, { width: 90 });
     doc.text(m.frequency, col.freq, y, { width: 90 });
     doc.text(String(m.durationDays), col.duration, y, { width: 60 });
-    if (m.instructions) doc.fontSize(8).fillColor('#555').text(m.instructions, col.name, y + 12, { width: 400 }).fillColor('#000').fontSize(9);
+    if (m.instructions) {
+      doc.fontSize(8).fillColor('#555').text(m.instructions, col.name, y + 12, { width: 400 }).fillColor('#000').fontSize(9);
+    }
     y += m.instructions ? 30 : 20;
   });
 
   if (prescription.additionalNotes) {
     doc.moveDown(1);
-    doc.font('Helvetica-Bold').fontSize(10).text('Additional Notes:');
-    doc.font('Helvetica').text(prescription.additionalNotes);
+    doc.font(getFont(true)).fontSize(10).text('Additional Notes:');
+    doc.font(getFont(false)).text(prescription.additionalNotes);
+  }
+
+  if (prescription.followUpDate) {
+    doc.moveDown(0.5);
+    doc.font(getFont(true)).fontSize(10).text('Follow-up Date: ', { continued: true }).font(getFont(false)).text(prescription.followUpDate);
   }
 
   doc.moveDown(3);

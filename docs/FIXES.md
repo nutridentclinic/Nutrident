@@ -135,3 +135,116 @@ In strict accordance with the testing guidelines, the following environments and
 | **Area 6: Notifications & 404** | `backend/src/__tests__/receptionFixes.test.js`<br>`frontend/src/pages/ReceptionPagesFixes.test.jsx` | Deep link resolution; 404 on missing/foreign notifications; clickable notification items marking read and navigating; custom `PortalNotFound` catch-all route. | **PASSED** (100%) |
 | **End-to-End Reception Smoke Test** | `frontend/e2e/reception-portal.spec.js` | Receptionist login; Appointments lookup with modal confirmation cancel flow; Live queue tabs and actions; Invoices desk and totals; Settings profile and toggles; Notifications list; Catch-all 404 page. | **PASSED** (100%) |
 | **Full Regression Verification** | Backend Jest (13 suites, 106 tests)<br>Frontend Vitest (9 suites, 58 tests)<br>Production Build (`npm run build`) | All platform test suites and full production build verification. | **PASSED** (100%) |
+
+---
+
+## Dentist, Patient, Receptionist & Notifications Overhaul (Areas 1–7)
+
+### Detailed Problem & Root Cause Breakdown
+
+#### 1. Dentist Reschedule Flow & Appointment Consistency (§1)
+- **Root Causes**:
+  - The backend supported `PATCH /api/appointments/:id/reschedule`, but the dentist schedule UI (`DentistSchedule` in `TeamPages.jsx`) had no Reschedule button or modal. Dentists could only Confirm, Complete, No-show, or Cancel.
+  - The backend reschedule implementation previously created a new appointment without copying or re-pointing linked records (invoices, payments, queue entries).
+  - Receptionists were not notified when a doctor rescheduled an appointment.
+  - The Complete and No-show actions on `DentistSchedule` triggered immediately on a single click without confirmation.
+- **Remediation**:
+  - **Backend (`appointment.controller.js`)**:
+    - Validates dentist ownership, ensures new slot is in the future and differs from the current slot.
+    - Preserves appointment lineage (`rescheduledFrom`, `rescheduledTo`, `rescheduleReason`, `rescheduledBy: 'dentist'`, `rescheduledAt`).
+    - Seamlessly transfers or re-points existing invoices and payment records to the new appointment ID.
+    - Cancels or cleans up obsolete queue entries from the previous appointment slot.
+    - Emits in-app notifications and transactional emails with old-to-new time comparisons to the patient, and dispatches an in-app notification with deep link to the reception team (`notifyRoles(['receptionist'], ...)`).
+    - Returns the populated new appointment document with patient and doctor details.
+  - **Frontend (`TeamPages.jsx`)**:
+    - Added a *"Reschedule"* button on `pending` and `confirmed` appointments in `DentistSchedule`.
+    - Integrated the reschedule modal featuring a date picker (minimum today), doctor availability slot fetching (`fetchPrimarySlotsWithFallback`), past slot filtering (`isPastSlot`), and an optional message/reason textarea.
+    - Added explicit confirmation dialogs (`useConfirm`) for *"Complete visit"* and *"Mark no-show"*.
+    - Added direct *"Write Rx"* shortcuts on confirmed appointments jumping directly to the patient's prescription builder.
+
+#### 2. Dentist Settings: Profile, Availability & Preferences (§2)
+- **Root Causes**:
+  - In `DentistAvailability`, unavailable dates could be added but there was no way to delete or unblock previously scheduled leave dates. In addition, slot duration changes were sent without validating against clinic slot constraints.
+  - In `DentistProfilePage`, string fields (languages, education, awards) expected arrays or objects, and pausing doctor bookings did not allow scheduling a future un-pause date.
+  - In `SharedSettingsPage`, notification preferences only persisted for patients; dentists and staff toggles were lost on page refresh.
+- **Remediation**:
+  - **DentistAvailability**: Added a *"Remove date"* action on each unavailable date chip that calls `api.dentists.setUnavailableDates(remainingDates)` and invalidates availability queries. Validates slot durations (15, 30, 45, 60 minutes).
+  - **DentistProfilePage**: Added array coercion and sanitization for profile arrays; created an explicit pause/resume modal supporting a future resume date (`pausedUntil`) and reason; displayed the Booking Readiness Checklist upfront.
+  - **SharedSettingsPage**: Notification preferences use `api.notifications.updatePreferences(...)` for all user roles. Added real-time upload progress callback handling for profile photo uploads.
+
+#### 3. Notifications Deletion & Bulk Management (§3)
+- **Root Causes**:
+  - Users across all roles (dentist, patient, receptionist, admin) could mark notifications as read, but had no ability to delete individual notifications or clear their notification history.
+  - No bulk delete or clear endpoints existed in the backend `notification.controller.js`.
+- **Remediation**:
+  - **Backend (`notification.controller.js` & `notification.routes.js`)**:
+    - Added `DELETE /api/notifications/:id` for individual notification deletion with ownership verification.
+    - Added `DELETE /api/notifications` supporting bulk deletion via body `{ ids: [...] }` or query scopes `?scope=read` and `?scope=all`.
+  - **Frontend (`NotificationsPage.jsx`)**:
+    - Added per-item delete button with instantaneous optimistic removal.
+    - Added multi-select checkbox mode allowing bulk deletion of selected notifications.
+    - Added *"Clear read"* and *"Clear all"* header actions with confirmation modal.
+    - Automatically updates unread badges in the header and sidebar upon deletion.
+
+#### 4. Prescriptions Engine, Voiding & PDF Generation (§4)
+- **Root Causes**:
+  - The prescription form in `Patient360` lacked structured medicine input (dosage, frequency, duration, instructions), validation, and follow-up date scheduling.
+  - Doctors had no mechanism to void incorrectly issued prescriptions.
+  - PDF generation lacked official clinic branding, doctor registration details, and clear VOIDED watermarks for invalidated prescriptions.
+  - Patients lacked an authenticated portal page to view and download their prescriptions.
+- **Remediation**:
+  - **Backend Validation & Voiding**:
+    - Created `prescription.validator.js` enforcing non-empty medicines, valid dosage, frequency, and duration with HTTP 422 errors.
+    - Added `PATCH /api/prescriptions/:id/void` with mandatory `reason`, marking `status: 'voided'`, `voidedAt`, `voidedBy`.
+  - **PDF Service (`pdf.service.js`)**:
+    - Enhanced PDFKit layout with clinic header, doctor registration number, patient demographics, diagnosis, structured Rx table, doctor digital signature, and prominent diagonal "VOIDED" banner for voided prescriptions.
+  - **Frontend**:
+    - Enhanced doctor prescription builder in `Patient360` with frequency presets (`1-0-1`, `1-1-1`, `0-0-1`, etc.), food timing instructions, and follow-up date picker.
+    - Created dedicated `/app/prescriptions` view for patients with PDF download and void status badges.
+
+#### 5. Resilient Transactional Email System (§5)
+- **Root Causes**:
+  - Emails were previously dispatched using plain unstyled text without branded HTML templates, HTML escaping, retry mechanisms, or persistent audit logging.
+- **Remediation**:
+  - **Templates (`services/emailTemplates.js`)**: Built mobile-responsive, branded HTML + fallback text templates with strict HTML entity escaping for:
+    - Appointment Booked, Cancelled, Rescheduled, Completed
+    - Prescription Issued & Invoice Ready
+    - Visit Follow-Up & Review Request
+  - **Service (`services/email.service.js`)**: Implemented `sendTransactionalEmail` featuring 3 automatic retries with exponential backoff (1s, 2s, 4s).
+  - **Audit Logging (`models/EmailLog.js`)**: Every outgoing email is logged in MongoDB with recipient, subject, template type, delivery status, retry attempts, and error details.
+
+#### 6. Patient Section Enhancements (P1–P3) (§6)
+- **Root Causes**:
+  - Patients had no way to explore the clinic's treatment catalog or view treatments recommended in their active care plan.
+  - Booking reason had to be re-typed manually even when booking a specific treatment.
+  - Patients did not receive cancellation/reschedule emails containing comprehensive details (dates, refund policies, reasons).
+  - No patient review modal or reminder cron job existed for completed visits.
+- **Remediation**:
+  - **P1 Treatments & Catalog (`/app/treatments`)**: Added new route with search, category filters, and an *"In your care plan"* badge matching active treatment plans. "Book this treatment" buttons prefill the booking reason via URL parameters.
+  - **P2 Transactional Notifications**: Cancellation and reschedule emails include patient name, doctor, original date/time, new date/time, reason, and refund information.
+  - **P3 Reviews System**:
+    - Added `GET /api/reviews/mine` and interactive star-rating modal (1–5 stars + comments) on completed appointments (`/app/appointments?review=<id>`).
+    - Added 48-hour post-visit review reminder cron in `appointmentReminder.job.js` (`processReviewReminders`).
+
+#### 7. Receptionist Visit Invoicing & Appointment Completion (R1–R2) (§7)
+- **Root Causes**:
+  - Invoices were not consistently generated when visits were completed, sometimes failing silently.
+  - Receptionists could not mark visits completed if the doctor was delayed or asked reception to complete the visit at checkout.
+- **Remediation**:
+  - **R1 Reliable Invoicing**: `completeAppointment` creates the visit invoice transactionally, emits real-time Socket.IO `invoice:created` events, and notifies reception staff with a deep link to the newly generated invoice.
+  - **R2 Safe Receptionist Completion**: Receptionists can complete checked-in appointments with dentist confirmation (`completionConfirmedByDentist: true`), tracking `completedBy: { user, role }` and executing the full billing and notification pipeline.
+
+---
+
+### Verification Summary Matrix
+
+| Fix Area | Test File | Test Cases Executed | Result |
+| :--- | :--- | :--- | :--- |
+| **Dentist Reschedule & Consistency** | `backend/src/__tests__/dentistPatientFixes.test.js`<br>`frontend/src/pages/DentistPatientViewsFixes.test.jsx` | Ownership validation; past/identical slot rejection; line transfer for invoices, payments, queue; patient & receptionist notifications. | **PASSED** (100%) |
+| **Notifications Delete & Bulk Actions** | `backend/src/__tests__/dentistPatientFixes.test.js`<br>`frontend/src/pages/DentistPatientViewsFixes.test.jsx` | Single notification delete; bulk delete with IDs; scope `read` and `all`; instant badge synchronization. | **PASSED** (100%) |
+| **Prescriptions, Voiding & PDF** | `backend/src/__tests__/dentistPatientFixes.test.js`<br>`frontend/src/pages/DentistPatientViewsFixes.test.jsx` | Schema validation (HTTP 422); voiding with mandatory reason; VOIDED watermark on binary PDF stream. | **PASSED** (100%) |
+| **Transactional Email System** | `backend/src/__tests__/dentistPatientFixes.test.js` | HTML template escaping; 3 retries with exponential backoff; persistent `EmailLog` audit tracking. | **PASSED** (100%) |
+| **Patient Treatments, Reviews & Reminders** | `backend/src/__tests__/dentistPatientFixes.test.js`<br>`frontend/src/pages/DentistPatientViewsFixes.test.jsx` | Catalog search with care plan badges; review creation & retrieval via `GET /api/reviews/mine`; 48h reminder job. | **PASSED** (100%) |
+| **Receptionist Invoice & Completion** | `backend/src/__tests__/dentistPatientFixes.test.js` | Reliable invoice creation on completion; receptionist completion with dentist confirmation flag. | **PASSED** (100%) |
+| **Playwright Dentist Portal Smoke Test** | `frontend/e2e/dentist-portal.spec.js` | Dentist login; schedule view; reschedule modal slot selection & submission; availability leave dates; notifications deletion. | **PASSED** (100%) |
+| **Full Regression Suite** | Backend Jest (14 suites, 120 tests)<br>Frontend Vitest (10 suites, 65 tests)<br>Frontend Production Build | Zero failures across backend and frontend unit/integration/E2E suites and production bundle generation. | **PASSED** (100%) |

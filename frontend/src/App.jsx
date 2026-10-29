@@ -7,7 +7,7 @@ import { useAuthStore } from './store/auth.js'
 import PortalLayout from './layouts/PortalLayout.jsx'
 import { LoadingState } from './components/ui.jsx'
 import { AboutPage, ContactPage, DentistDirectory, DentistProfile, DoctorProfilePage, LegalPage, PricingPage, PublicHome, PublicLayout, ServicesPage, SimplePublicPage } from './pages/PublicPages.jsx'
-import { PatientAppointments, AppointmentBooking, AppointmentDetail, PatientBilling, PatientCare, PatientDashboard, PatientFamily, PatientPrescriptions, PatientProfile, PatientProfilePhoto, PatientRecords, PatientTreatmentPlans, PatientDentalChart } from './pages/PatientPages.jsx'
+import { PatientAppointments, AppointmentBooking, AppointmentDetail, PatientBilling, PatientCare, PatientDashboard, PatientFamily, PatientPrescriptions, PatientProfile, PatientProfilePhoto, PatientRecords, PatientTreatmentPlans, PatientDentalChart, PatientTreatmentsPage } from './pages/PatientPages.jsx'
 import { ClinicalRecord, DentistAvailability, DentistDashboard, DentistProfilePage, DentistReviews, DentistSchedule, PatientDirectory, QueuePage } from './pages/TeamPages.jsx'
 import { AppointmentLookup, InvoiceCreator, NotificationsPage, ReceptionPage } from './pages/ReceptionPages.jsx'
 import { Patient360 } from './pages/Patient360.jsx'
@@ -217,6 +217,7 @@ export default function App() {
         <Route path="book/:dentistId" element={<Navigate to="/app/book" replace />} />
         <Route path="prescriptions" element={<PatientPrescriptions />} /><Route path="records" element={<PatientRecords />} />
         <Route path="treatment-plans" element={<PatientTreatmentPlans />} />
+        <Route path="treatments" element={<PatientTreatmentsPage />} />
         <Route path="dental-chart" element={<PatientDentalChart />} />
         <Route path="care" element={<Navigate to="/app/treatment-plans" replace />} />
         <Route path="billing" element={<PatientBilling />} /><Route path="family" element={<PatientFamily />} />

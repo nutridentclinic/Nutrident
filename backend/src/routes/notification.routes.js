@@ -9,5 +9,7 @@ router.patch('/read-all', ctrl.markAllAsRead);
 router.put('/fcm-token', ctrl.updateFcmToken);
 router.get('/preferences', ctrl.getPreferences);
 router.patch('/preferences', ctrl.updatePreferences);
+router.delete('/:id', ctrl.deleteNotification);
+router.delete('/', ctrl.deleteNotifications);
 
 module.exports = router;
