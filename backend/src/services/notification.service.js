@@ -63,7 +63,7 @@ const sendPush = async ({ fcmToken, title, message, url = null }) => {
   }
 };
 
-const notify = async ({ userId, title, message, type, relatedId = null, link = null }) => {
+const notify = async ({ userId, title, message, type, relatedId = null, link = null, skipEmail = false }) => {
   let resolvedLink = link;
   const user = await User.findById(userId).select('email name role fcmToken notificationPreferences');
   if (user && !resolvedLink) {
@@ -79,8 +79,8 @@ const notify = async ({ userId, title, message, type, relatedId = null, link = n
     sendPush({ fcmToken: user.fcmToken, title, message, url: resolvedLink });
   }
 
-  // 2. Email notification
-  if (process.env.BREVO_API_KEY && user.email && user.notificationPreferences?.email !== false) {
+  // 2. Email notification (skip if caller handles dedicated transactional email)
+  if (!skipEmail && process.env.BREVO_API_KEY && user.email && user.notificationPreferences?.email !== false) {
     try {
       await sendEmail({
         to: user.email,

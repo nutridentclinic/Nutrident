@@ -249,12 +249,41 @@ export function PatientAppointments() {
   // Check review param in URL on load
   useEffect(() => {
     const reviewId = searchParams.get("review");
-    if (reviewId && items.length > 0) {
+    if (!reviewId) return;
+
+    if (reviewedApptIds.has(String(reviewId))) {
+      notify("You have already submitted a review for this visit. Thank you!");
+      searchParams.delete("review");
+      setSearchParams(searchParams, { replace: true });
+      return;
+    }
+
+    if (items.length > 0) {
       const match = items.find((a) => String(a._id) === reviewId);
-      if (match && match.status === "completed" && !reviewedApptIds.has(String(match._id))) {
-        setReviewTarget(match);
+      if (match) {
+        if (match.status === "completed") {
+          setReviewTarget(match);
+        }
+        return;
       }
     }
+
+    // Direct detail fetch fallback so email link works instantly regardless of list filters
+    let active = true;
+    api.appointments
+      .detail(reviewId)
+      .then((res) => {
+        if (!active) return;
+        const appt = res?.data;
+        if (appt && appt.status === "completed") {
+          setReviewTarget(appt);
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      active = false;
+    };
   }, [searchParams, items, reviewedApptIds]);
 
   const handleReviewSubmit = async (e) => {
@@ -657,6 +686,48 @@ function ReviewForm({ appointmentId }) {
   const [rating, setRating] = useState(5);
   const [comment, setComment] = useState("");
   const action = useAction();
+  const queryClient = useQueryClient();
+  const myReviewsQuery = useQuery({
+    queryKey: ["my-reviews"],
+    queryFn: api.reviews.mine,
+    ...queryOptions,
+  });
+  const myReviews = myReviewsQuery.data?.data || [];
+  const existingReview = myReviews.find(
+    (r) => String(r.appointment?._id || r.appointment) === String(appointmentId)
+  );
+
+  if (existingReview) {
+    return (
+      <SectionPanel
+        title="Your review"
+        description="You have submitted a verified review for this completed visit."
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+            <span style={{ color: "#f59e0b", fontSize: "1.2rem" }}>
+              {"★".repeat(existingReview.rating || 5)}
+            </span>
+            <span style={{ fontSize: "0.85rem", color: "#16a34a", fontWeight: 600 }}>
+              Submitted ✓
+            </span>
+          </div>
+          {existingReview.comment && (
+            <p style={{ color: "var(--body)", fontSize: "14px", margin: "4px 0" }}>
+              "{existingReview.comment}"
+            </p>
+          )}
+          {existingReview.reply?.text && (
+            <div className="review-reply" style={{ marginTop: "0.5rem" }}>
+              <strong>Doctor's response:</strong>
+              <p style={{ margin: "4px 0 0" }}>{existingReview.reply.text}</p>
+            </div>
+          )}
+        </div>
+      </SectionPanel>
+    );
+  }
+
   return (
     <SectionPanel
       title="Share your experience"
@@ -666,10 +737,17 @@ function ReviewForm({ appointmentId }) {
         className="stack-form"
         onSubmit={(event) => {
           event.preventDefault();
-          action.mutate({
-            action: api.reviews.create,
-            args: [{ appointmentId, rating, comment }],
-          });
+          action.mutate(
+            {
+              action: api.reviews.create,
+              args: [{ appointmentId, rating, comment }],
+            },
+            {
+              onSuccess: () => {
+                queryClient.invalidateQueries({ queryKey: ["my-reviews"] });
+              },
+            }
+          );
         }}
       >
         <Field label="Rating">
@@ -680,7 +758,7 @@ function ReviewForm({ appointmentId }) {
           >
             {[5, 4, 3, 2, 1].map((value) => (
               <option key={value} value={value}>
-                {value} / 5
+                {value} / 5 Stars
               </option>
             ))}
           </TextInput>
@@ -690,11 +768,12 @@ function ReviewForm({ appointmentId }) {
             as="textarea"
             rows={3}
             value={comment}
+            placeholder="Share details about your consultation, dental procedure, or care experience..."
             onChange={(event) => setComment(event.target.value)}
           />
         </Field>
         <button className="button button-primary" disabled={action.isPending}>
-          Submit review <ArrowRight size={15} />
+          {action.isPending ? "Submitting…" : "Submit review"} <ArrowRight size={15} />
         </button>
       </form>
     </SectionPanel>

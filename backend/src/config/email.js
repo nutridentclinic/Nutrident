@@ -7,6 +7,9 @@ const sendEmail = async ({ to, subject, html, text }) => {
     throw new Error('BREVO_API_KEY is not set - cannot send email.');
   }
 
+  const senderEmail = process.env.EMAIL_FROM_ADDRESS || 'nutridentclinic01@gmail.com';
+  const senderName = process.env.EMAIL_FROM_NAME || 'Nutrident Dental Clinic';
+
   const response = await fetch(BREVO_API_URL, {
     method: 'POST',
     headers: {
@@ -15,7 +18,7 @@ const sendEmail = async ({ to, subject, html, text }) => {
       Accept: 'application/json',
     },
     body: JSON.stringify({
-      sender: { email: process.env.EMAIL_FROM_ADDRESS, name: process.env.EMAIL_FROM_NAME || 'Dental Clinic' },
+      sender: { email: senderEmail, name: senderName },
       to: [{ email: to }],
       subject,
       htmlContent: html,

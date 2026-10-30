@@ -429,6 +429,51 @@ describe('Dentist, Patient, Notifications & Reception Comprehensive Tests', () =
 
       const patientNotif = await Notification.findOne({ user: patientUser._id, type: 'appointment_completed' });
       expect(patientNotif).not.toBeNull();
+
+      // Email sent with review link to patient
+      const EmailLog = require('../models/EmailLog');
+      const emailLog = await EmailLog.findOne({
+        to: patientUser.email,
+        template: 'appointmentCompleted',
+        relatedId: appt._id,
+      });
+      expect(emailLog).not.toBeNull();
+      expect(emailLog.status).toBe('sent');
+    });
+
+    it('allows dentist to complete appointment and delivers review email to patient', async () => {
+      const targetDate = new Date();
+      targetDate.setDate(targetDate.getDate() + 1);
+
+      const appt = await Appointment.create({
+        patient: patientUser._id,
+        dentist: dentistProfile._id,
+        date: targetDate.toISOString().slice(0, 10),
+        startTime: '11:00',
+        endTime: '11:30',
+        fees: { consultationFee: 500, totalAmount: 500 },
+        paymentStatus: 'paid',
+        status: 'confirmed',
+      });
+
+      const res = await request(app)
+        .patch(`/api/appointments/${appt._id}/complete`)
+        .set('Authorization', `Bearer ${dentistToken}`)
+        .send();
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.appointment.status).toBe('completed');
+      expect(res.body.data.appointment.completedBy).toBe('dentist');
+
+      const EmailLog = require('../models/EmailLog');
+      const emailLog = await EmailLog.findOne({
+        to: patientUser.email,
+        template: 'appointmentCompleted',
+        relatedId: appt._id,
+      });
+      expect(emailLog).not.toBeNull();
+      expect(emailLog.status).toBe('sent');
     });
 
     it('rejects receptionist completion without confirmation or check-in (400)', async () => {

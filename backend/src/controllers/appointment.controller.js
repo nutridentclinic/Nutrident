@@ -609,6 +609,8 @@ exports.rescheduleAppointment = catchAsync(async (req, res, next) => {
   success(res, 200, 'Appointment rescheduled.', newAppointment);
 });
 
+const { processAppointmentCompletion } = require('../services/appointmentCompletion.service');
+
 // @route PATCH /api/appointments/:id/complete  (dentist marks visit done)
 exports.completeAppointment = catchAsync(async (req, res, next) => {
   const appointment = await Appointment.findById(req.params.id);
@@ -633,87 +635,7 @@ exports.completeAppointment = catchAsync(async (req, res, next) => {
     return next(new AppError('Only confirmed or checked-in appointments can be completed.', 400));
   }
 
-  appointment.status = 'completed';
-  appointment.completedBy = req.user.role;
-  appointment.completedAt = new Date();
-  await appointment.save();
-
-  let invoice = null;
-  let invoiceError = null;
-  try {
-    invoice = await createInvoiceForAppointment(appointment);
-  } catch (err) {
-    invoiceError = err.message;
-    logger.error(`Auto-invoice creation error for appointment ${appointment._id}: ${err.message}`);
-  }
-
-  try {
-    const { getIO } = require('../sockets');
-    const io = getIO();
-    if (io) {
-      if (invoice) io.emit('invoice:created', { invoiceId: invoice._id, appointmentId: appointment._id });
-      io.emit('appointment:completed', { appointmentId: appointment._id });
-    }
-  } catch (socketErr) {
-    // Sockets optional
-  }
-
-  await notifyUser(appointment.patient, {
-    title: 'Visit Completed',
-    message: 'Your appointment has been marked as completed. You can now leave a review.',
-    type: 'appointment_completed',
-    relatedId: appointment._id,
-    link: `/app/appointments?review=${appointment._id}`,
-  });
-
-  if (invoice) {
-    await notifyRoles(['receptionist'], {
-      title: 'Invoice Generated',
-      message: `Invoice #${invoice.invoiceNumber} generated for completed appointment.`,
-      type: 'invoice_ready',
-      relatedId: invoice._id,
-      link: `/reception/invoices?open=${invoice._id}`,
-    });
-  }
-
-  try {
-    const patientUser = await User.findById(appointment.patient);
-    const dentistDoc = await Dentist.findById(appointment.dentist).populate('user', 'name');
-    const doctorName = dentistDoc?.user?.name || dentistDoc?.name || 'Your Doctor';
-    const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
-
-    if (patientUser?.email) {
-      const { sendTransactionalEmail } = require('../services/email.service');
-      sendTransactionalEmail({
-        to: patientUser.email,
-        template: 'appointmentCompleted',
-        data: {
-          patientName: patientUser.name,
-          doctorName,
-          date: typeof appointment.date === 'string' ? appointment.date : new Date(appointment.date).toDateString(),
-          reviewUrl: `${clientUrl}/app/appointments?review=${appointment._id}`,
-        },
-        relatedId: appointment._id,
-      }).catch((e) => logger.error(`Email send failed: ${e.message}`));
-
-      if (invoice) {
-        sendTransactionalEmail({
-          to: patientUser.email,
-          template: 'invoiceReady',
-          data: {
-            patientName: patientUser.name,
-            invoiceNumber: invoice.invoiceNumber,
-            amount: invoice.totalAmount,
-            date: new Date(invoice.createdAt).toDateString(),
-            portalUrl: `${clientUrl}/app/billing?open=${invoice._id}`,
-          },
-          relatedId: invoice._id,
-        }).catch((e) => logger.error(`Invoice email send failed: ${e.message}`));
-      }
-    }
-  } catch (emailErr) {
-    logger.error(`Error sending completion emails: ${emailErr.message}`);
-  }
+  const { invoice, invoiceError } = await processAppointmentCompletion(appointment, req.user.role, req);
 
   success(res, 200, 'Appointment marked as completed.', { appointment, invoice, invoiceError });
 });

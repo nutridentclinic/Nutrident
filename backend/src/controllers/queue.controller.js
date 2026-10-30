@@ -185,6 +185,8 @@ exports.callNext = catchAsync(async (req, res, next) => {
   success(res, 200, 'Patient called in.', entry);
 });
 
+const { processAppointmentCompletion } = require('../services/appointmentCompletion.service');
+
 // @route PATCH /api/queue/:id/complete
 exports.completeEntry = catchAsync(async (req, res, next) => {
   const entry = await Queue.findByIdAndUpdate(
@@ -198,13 +200,8 @@ exports.completeEntry = catchAsync(async (req, res, next) => {
   if (entry.appointment) {
     const appt = await Appointment.findById(entry.appointment);
     if (appt && appt.status !== 'completed') {
-      appt.status = 'completed';
-      await appt.save();
-      try {
-        invoice = await createInvoiceForAppointment(appt);
-      } catch (err) {
-        logger.error(`Failed creating invoice on queue complete for appt ${appt._id}: ${err.message}`);
-      }
+      const completionResult = await processAppointmentCompletion(appt, req.user.role, req);
+      invoice = completionResult.invoice;
     } else if (appt) {
       const Invoice = require('../models/Invoice');
       invoice = await Invoice.findOne({ appointment: appt._id });
