@@ -1,37 +1,40 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
+const STORAGE_KEY = 'drn-auth'
 const SESSION_HINT_KEY = 'drn_has_session'
-const LEGACY_STORAGE_KEY = 'drn-auth'
 
-// Purge any legacy authentication tokens from localStorage immediately
-if (typeof window !== 'undefined' && window.localStorage) {
+const getInitialStorageState = () => {
+  if (typeof window === 'undefined' || !window.localStorage) {
+    return { hasSession: false, status: 'anon' }
+  }
   try {
-    const raw = window.localStorage.getItem(LEGACY_STORAGE_KEY)
-    if (raw && (raw.includes('accessToken') || raw.includes('refreshToken'))) {
-      window.localStorage.removeItem(LEGACY_STORAGE_KEY)
+    const raw = window.localStorage.getItem(STORAGE_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      const state = parsed?.state
+      if (state?.user && state?.accessToken) {
+        return { hasSession: true, status: 'authed', user: state.user, profile: state.profile || null, accessToken: state.accessToken, refreshToken: state.refreshToken || null }
+      }
     }
+    const hasHint = window.localStorage.getItem(SESSION_HINT_KEY) === 'true'
+    return { hasSession: hasHint, status: hasHint ? 'booting' : 'anon' }
   } catch {
-    // Ignore storage access errors
+    return { hasSession: false, status: 'anon' }
   }
 }
 
-const checkInitialHasSession = () => {
-  if (typeof window === 'undefined' || !window.localStorage) return false
-  return window.localStorage.getItem(SESSION_HINT_KEY) === 'true'
-}
-
-const initialHasSession = checkInitialHasSession()
+const initial = getInitialStorageState()
 
 export const useAuthStore = create(
   persist(
     (set, get) => ({
-      user: null,
-      profile: null,
-      accessToken: null,
-      refreshToken: null,
-      status: initialHasSession ? 'booting' : 'anon',
-      hasSession: initialHasSession,
+      user: initial.user || null,
+      profile: initial.profile || null,
+      accessToken: initial.accessToken || null,
+      refreshToken: initial.refreshToken || null,
+      status: initial.status,
+      hasSession: initial.hasSession,
 
       setSession: ({ user, profile = null, accessToken, refreshToken, status }) => {
         const authed = Boolean(user || accessToken)
@@ -60,12 +63,12 @@ export const useAuthStore = create(
             window.localStorage.setItem(SESSION_HINT_KEY, 'true')
           } catch {}
         }
-        set({
+        set((state) => ({
           user,
-          profile,
+          profile: profile !== undefined ? profile : state.profile,
           status: user ? 'authed' : 'anon',
           hasSession: Boolean(user),
-        })
+        }))
       },
 
       setTokens: ({ accessToken, refreshToken }) =>
@@ -94,7 +97,7 @@ export const useAuthStore = create(
         if (typeof window !== 'undefined' && window.localStorage) {
           try {
             window.localStorage.removeItem(SESSION_HINT_KEY)
-            window.localStorage.removeItem(LEGACY_STORAGE_KEY)
+            window.localStorage.removeItem(STORAGE_KEY)
           } catch {}
         }
         set({
@@ -108,9 +111,22 @@ export const useAuthStore = create(
       },
     }),
     {
-      name: LEGACY_STORAGE_KEY,
-      // Never store JWT tokens in localStorage
-      partialize: () => ({}),
+      name: STORAGE_KEY,
+      partialize: (state) => ({
+        user: state.user,
+        profile: state.profile,
+        accessToken: state.accessToken,
+        refreshToken: state.refreshToken,
+      }),
+      onRehydrateStorage: () => (state) => {
+        if (state?.user && state?.accessToken) {
+          state.setStatus('authed')
+        } else if (state?.accessToken || state?.user) {
+          state.setStatus('booting')
+        } else {
+          state.setStatus('anon')
+        }
+      },
     },
   ),
 )
@@ -118,7 +134,8 @@ export const useAuthStore = create(
 // Cross-tab logout synchronization via localStorage storage event
 if (typeof window !== 'undefined') {
   window.addEventListener('storage', (event) => {
-    if (event.key === SESSION_HINT_KEY && event.newValue === null) {
+    if ((event.key === SESSION_HINT_KEY && event.newValue === null) ||
+        (event.key === STORAGE_KEY && event.newValue === null)) {
       useAuthStore.getState().clearSession()
     }
   })

@@ -78,7 +78,6 @@ const NON_REFRESHABLE_AUTH_ROUTES = [
   '/auth/verify-phone',
   '/auth/reset-password',
   '/auth/logout',
-  '/auth/me',
 ]
 
 const isNonRefreshableAuth = (url = '') => {

@@ -107,7 +107,7 @@ function RequireRole({ roles }) {
     }
   }, [meQuery.isError, meQuery.error])
 
-  if (status === 'booting') {
+  if (status === 'booting' && !user) {
     return <LoadingState label="Verifying your secure session…" />
   }
 
@@ -206,34 +206,36 @@ function PatientProfileWorkspace() {
 }
 
 export default function App() {
-  const { status, setSession, setStatus, hasSession } = useAuthStore()
+  const { status, setStatus, hasSession, accessToken, user, setUserAndProfile } = useAuthStore()
 
   useEffect(() => {
     let active = true
-    if (status === 'booting' && hasSession) {
+    if (status === 'booting' && (hasSession || accessToken)) {
       api.auth.me()
         .then((res) => {
           if (active && res?.data?.user) {
-            setSession({
-              user: res.data.user,
-              profile: res.data.profile || null,
-              accessToken: 'cookie-session',
-              status: 'authed',
-            })
+            setUserAndProfile(res.data.user, res.data.profile || null)
           }
         })
-        .catch(() => {
+        .catch((err) => {
           if (active) {
-            setStatus('anon')
+            const s = err?.status || err?.response?.status
+            if (s === 401 || s === 403) {
+              setStatus('anon')
+            } else if (user) {
+              setStatus('authed')
+            } else {
+              setStatus('anon')
+            }
           }
         })
-    } else if (status === 'booting' && !hasSession) {
+    } else if (status === 'booting' && !hasSession && !accessToken) {
       setStatus('anon')
     }
     return () => {
       active = false
     }
-  }, [status, hasSession, setSession, setStatus])
+  }, [status, hasSession, accessToken, user, setUserAndProfile, setStatus])
 
   return (
     <>

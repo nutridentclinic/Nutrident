@@ -62,4 +62,31 @@ describe('protected role routes', () => {
     renderRoute('/admin')
     expect(await screen.findByRole('heading', { name: /Patient Portal Overview|Good .*Patient/i }, { timeout: 5000 })).toBeTruthy()
   })
+
+  it('keeps authenticated session on page refresh and does not redirect to login', async () => {
+    useAuthStore.getState().setSession({
+      user: { _id: 'patient-1', name: 'Jayesh Landage', role: 'patient' },
+      accessToken: 'valid-access-token',
+      refreshToken: 'valid-refresh-token',
+    })
+
+    renderRoute('/app')
+
+    expect(await screen.findByRole('heading', { name: /Patient Portal Overview/i }, { timeout: 5000 })).toBeTruthy()
+    expect(screen.queryByRole('heading', { name: 'Sign in to your care.' })).toBeNull()
+  })
+
+  it('keeps doctor session on page refresh at /dentist without redirecting to login', async () => {
+    useAuthStore.getState().setSession({
+      user: { _id: 'dentist-1', name: 'Ayush Wani', role: 'dentist' },
+      profile: { weeklyAvailability: [{ day: 'monday', slots: ['09:00'] }] },
+      accessToken: 'doctor-access-token',
+      refreshToken: 'doctor-refresh-token',
+    })
+
+    renderRoute('/dentist')
+
+    expect(await screen.findByRole('heading', { name: /Doctor Portal Overview/i }, { timeout: 5000 })).toBeTruthy()
+    expect(screen.queryByRole('heading', { name: 'Sign in to your care.' })).toBeNull()
+  })
 })
