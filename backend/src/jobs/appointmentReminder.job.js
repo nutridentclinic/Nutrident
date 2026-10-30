@@ -1,3 +1,4 @@
+
 const cron = require('node-cron');
 const Appointment = require('../models/Appointment');
 const Dentist = require('../models/Dentist');
@@ -7,15 +8,20 @@ const logger = require('../utils/logger');
 const getPendingExpiry = require('../utils/pendingExpiry');
 const { toClinicDate } = require('../utils/appointmentAccess');
 
+// Process appointment reminders
 const processDueReminders = async (now = new Date()) => {
-  const settings = (await ClinicSettings.findById('default')) || { reminderHoursBefore: 24 };
+  const settings =
+    (await ClinicSettings.findById('default')) ||
+    { reminderHoursBefore: 24 };
+
   const reminderHours = Number(settings.reminderHoursBefore) || 24;
   const nowMs = now.getTime();
   const windowEndMs = nowMs + reminderHours * 60 * 60 * 1000;
 
-  // Search candidate appointments around the current date window (from 1 day ago to 2 days ahead)
   const searchStart = new Date(nowMs - 24 * 60 * 60 * 1000);
-  const searchEnd = new Date(nowMs + (reminderHours + 48) * 60 * 60 * 1000);
+  const searchEnd = new Date(
+    nowMs + (reminderHours + 48) * 60 * 60 * 1000
+  );
 
   const candidateAppointments = await Appointment.find({
     status: 'confirmed',
@@ -24,16 +30,23 @@ const processDueReminders = async (now = new Date()) => {
   });
 
   const dueAppointments = [];
+
   for (const appt of candidateAppointments) {
     if (!appt.startTime) continue;
+
     try {
-      const apptStartMs = toClinicDate(appt.date, appt.startTime).getTime();
-      // Remind if start time is in the future and within the reminder window
+      const apptStartMs = toClinicDate(
+        appt.date,
+        appt.startTime
+      ).getTime();
+
       if (apptStartMs >= nowMs && apptStartMs <= windowEndMs) {
         dueAppointments.push(appt);
       }
     } catch (err) {
-      logger.error(`Error calculating appointment start date for ${appt._id}: ${err.message}`);
+      logger.error(
+        `Error calculating appointment start date for ${appt._id}: ${err.message}`
+      );
     }
   }
 
@@ -45,6 +58,7 @@ const processDueReminders = async (now = new Date()) => {
       type: 'appointment_reminder',
       relatedId: appt._id,
     });
+
     appt.reminderSent = true;
     await appt.save();
   }
@@ -52,29 +66,11 @@ const processDueReminders = async (now = new Date()) => {
   return dueAppointments;
 };
 
-// Runs every 30 minutes, sends a reminder for appointments starting
-// within the configured reminder window (default 24h) that haven't been reminded yet.
-const startReminderJob = () => {
-  cron.schedule('* * * * *', async () => {
-    try {
-      const { filter, update } = getPendingExpiry();
-      const result = await Appointment.updateMany(filter, update);
-      if (result.modifiedCount) logger.info(`Expired ${result.modifiedCount} unpaid appointment(s).`);
-
-      const now = new Date();
-      const resumed = await Dentist.updateMany(
-        { isActive: false, pausedUntil: { $ne: null, $lte: now } },
-        { $set: { isActive: true, pausedReason: '', pausedUntil: null } }
-      );
-      if (resumed.modifiedCount) logger.info(`Auto-resumed ${resumed.modifiedCount} dentist(s) past pausedUntil.`);
-    } catch (err) {
-      logger.error(`Pending appointment expiry or auto-resume job failed: ${err.message}`);
-    }
-  });
-
-  
+// Process review reminders
+// IMPORTANT: Declared outside startReminderJob so it can be exported.
 const processReviewReminders = async (now = new Date()) => {
   const nowMs = now.getTime();
+
   const twoDaysAgo = new Date(nowMs - 48 * 60 * 60 * 1000);
   const threeDaysAgo = new Date(nowMs - 72 * 60 * 60 * 1000);
 
@@ -85,16 +81,30 @@ const processReviewReminders = async (now = new Date()) => {
       { completedAt: { $gte: threeDaysAgo, $lte: twoDaysAgo } },
       { date: { $gte: threeDaysAgo, $lte: twoDaysAgo } },
     ],
-  }).populate('patient', 'name email').populate({ path: 'dentist', populate: { path: 'user', select: 'name' } });
+  })
+    .populate('patient', 'name email')
+    .populate({
+      path: 'dentist',
+      populate: { path: 'user', select: 'name' },
+    });
 
   const Review = require('../models/Review');
   const { sendTransactionalEmail } = require('../services/email.service');
-  const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
+
+  const clientUrl =
+    process.env.CLIENT_URL || 'http://localhost:5173';
 
   for (const appt of completedAppts) {
-    const existing = await Review.findOne({ appointment: appt._id });
+    const existing = await Review.findOne({
+      appointment: appt._id,
+    });
+
     if (!existing) {
-      const doctorName = appt.dentist?.user?.name || appt.dentist?.name || 'Your Doctor';
+      const doctorName =
+        appt.dentist?.user?.name ||
+        appt.dentist?.name ||
+        'Your Doctor';
+
       if (appt.patient?.email) {
         await sendTransactionalEmail({
           to: appt.patient.email,
@@ -105,42 +115,104 @@ const processReviewReminders = async (now = new Date()) => {
             reviewUrl: `${clientUrl}/app/appointments?review=${appt._id}`,
           },
           relatedId: appt._id,
-        }).catch((err) => logger.error(`Review reminder email failed: ${err.message}`));
+        }).catch((err) =>
+          logger.error(
+            `Review reminder email failed: ${err.message}`
+          )
+        );
       }
 
-      await notify({
-        userId: appt.patient._id || appt.patient,
-        title: 'How was your dental visit?',
-        message: `Please rate your consultation with Dr. ${doctorName}.`,
-        type: 'appointment_completed',
-        relatedId: appt._id,
-        link: `/app/appointments?review=${appt._id}`,
-      });
+      if (appt.patient?._id || appt.patient) {
+        await notify({
+          userId: appt.patient._id || appt.patient,
+          title: 'How was your dental visit?',
+          message: `Please rate your consultation with Dr. ${doctorName}.`,
+          type: 'appointment_completed',
+          relatedId: appt._id,
+          link: `/app/appointments?review=${appt._id}`,
+        });
+      }
     }
 
     appt.reviewReminderSent = true;
     await appt.save();
   }
+
+  return completedAppts;
 };
 
+// Start all scheduled jobs
+const startReminderJob = () => {
+
+  // Check pending appointments and resume dentists every minute
+  cron.schedule('* * * * *', async () => {
+    try {
+      const { filter, update } = getPendingExpiry();
+
+      const result = await Appointment.updateMany(filter, update);
+
+      if (result.modifiedCount) {
+        logger.info(
+          `Expired ${result.modifiedCount} unpaid appointment(s).`
+        );
+      }
+
+      const now = new Date();
+
+      const resumed = await Dentist.updateMany(
+        {
+          isActive: false,
+          pausedUntil: { $ne: null, $lte: now },
+        },
+        {
+          $set: {
+            isActive: true,
+            pausedReason: '',
+            pausedUntil: null,
+          },
+        }
+      );
+
+      if (resumed.modifiedCount) {
+        logger.info(
+          `Auto-resumed ${resumed.modifiedCount} dentist(s) past pausedUntil.`
+        );
+      }
+    } catch (err) {
+      logger.error(
+        `Pending appointment expiry or auto-resume job failed: ${err.message}`
+      );
+    }
+  });
+
+  // Process review reminders every hour
   cron.schedule('0 * * * *', async () => {
     try {
       await processReviewReminders();
     } catch (err) {
-      logger.error(`Review reminder job failed: ${err.message}`);
+      logger.error(
+        `Review reminder job failed: ${err.message}`
+      );
     }
   });
 
+  // Process appointment reminders every 30 minutes
   cron.schedule('*/30 * * * *', async () => {
     try {
       const dueAppointments = await processDueReminders();
-      if (dueAppointments.length) logger.info(`Sent ${dueAppointments.length} appointment reminder(s).`);
+
+      if (dueAppointments.length) {
+        logger.info(
+          `Sent ${dueAppointments.length} appointment reminder(s).`
+        );
+      }
     } catch (err) {
       logger.error(`Reminder job failed: ${err.message}`);
     }
   });
 };
 
+// Exports
 module.exports = startReminderJob;
 module.exports.processDueReminders = processDueReminders;
-module.exports.processReviewReminders = processReviewReminders;
+module.exports.processReviewReminders = processReviewReminders;
