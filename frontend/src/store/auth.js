@@ -3,6 +3,18 @@ import { persist } from 'zustand/middleware'
 
 const storageKey = 'drn-auth'
 
+// Purge any legacy authentication tokens from localStorage immediately
+if (typeof window !== 'undefined' && window.localStorage) {
+  try {
+    const raw = window.localStorage.getItem(storageKey)
+    if (raw && (raw.includes('accessToken') || raw.includes('refreshToken'))) {
+      window.localStorage.removeItem(storageKey)
+    }
+  } catch {
+    // Ignore storage access errors
+  }
+}
+
 export const useAuthStore = create(
   persist(
     (set, get) => ({
@@ -11,21 +23,24 @@ export const useAuthStore = create(
       accessToken: null,
       refreshToken: null,
       status: 'booting', // 'booting' | 'authed' | 'anon'
+      hasSession: false,
 
-      setSession: ({ user, profile = null, accessToken, refreshToken }) =>
+      setSession: ({ user, profile = null, accessToken, refreshToken, status }) =>
         set((state) => ({
           user: user !== undefined ? user : state.user,
           profile: profile !== undefined ? profile : state.profile,
           accessToken: accessToken !== undefined ? accessToken : state.accessToken,
           refreshToken: refreshToken !== undefined ? refreshToken : state.refreshToken,
-          status: (accessToken || state.accessToken) ? 'authed' : 'anon',
+          status: status || (user || accessToken || state.accessToken ? 'authed' : 'anon'),
+          hasSession: Boolean(user || accessToken || state.accessToken),
         })),
 
       setUserAndProfile: (user, profile = null) =>
         set((state) => ({
           user,
           profile,
-          status: user && state.accessToken ? 'authed' : state.accessToken ? 'booting' : 'anon',
+          status: user ? 'authed' : 'anon',
+          hasSession: Boolean(user),
         })),
 
       setTokens: ({ accessToken, refreshToken }) =>
@@ -33,11 +48,16 @@ export const useAuthStore = create(
           accessToken: accessToken !== undefined ? accessToken : state.accessToken,
           refreshToken: refreshToken !== undefined ? refreshToken : state.refreshToken,
           status: accessToken ? (state.user ? 'authed' : 'booting') : 'anon',
+          hasSession: Boolean(accessToken || state.user),
         })),
 
       setProfile: (profile) => set({ profile }),
 
-      setStatus: (status) => set({ status }),
+      setStatus: (status) =>
+        set({
+          status,
+          hasSession: status === 'authed',
+        }),
 
       clearSession: () =>
         set({
@@ -46,15 +66,18 @@ export const useAuthStore = create(
           accessToken: null,
           refreshToken: null,
           status: 'anon',
+          hasSession: false,
         }),
     }),
     {
       name: storageKey,
-      // CRITICAL SECURITY FIX (P3 / A4): Persist ONLY tokens; NEVER persist user or profile personal data
-      partialize: ({ accessToken, refreshToken }) => ({ accessToken, refreshToken }),
+      // CRITICAL SECURITY FIX: Persist ONLY non-sensitive session hint.
+      // NEVER persist JWT access or refresh tokens in localStorage.
+      partialize: ({ hasSession }) => ({ hasSession: Boolean(hasSession) }),
       onRehydrateStorage: () => (state) => {
-        if (!state?.accessToken) {
-          state?.setStatus?.('anon')
+        // When hydrating, initiate boot verification of HTTP-Only cookies
+        if (state?.hasSession) {
+          state?.setStatus?.('booting')
         } else {
           state?.setStatus?.('booting')
         }

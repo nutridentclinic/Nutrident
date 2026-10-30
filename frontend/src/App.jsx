@@ -12,6 +12,7 @@ import { ClinicalRecord, DentistAvailability, DentistDashboard, DentistProfilePa
 import { AppointmentLookup, InvoiceCreator, NotificationsPage, ReceptionPage } from './pages/ReceptionPages.jsx'
 import { Patient360 } from './pages/Patient360.jsx'
 import SharedSettingsPage from './pages/SharedSettingsPage.jsx'
+import { CookieConsentBanner } from './components/CookieConsentBanner.jsx'
 import './App.css'
 import { roleHome, getPortalBase } from './auth/routes.js'
 const AdminPage = lazy(() => import('./pages/AdminPages.jsx').then((module) => ({ default: module.AdminPage })))
@@ -26,15 +27,18 @@ const ResetPasswordPage = lazy(() => import('./pages/AuthPages.jsx').then((modul
 import { logout } from './auth/session.js'
 
 function GuestOnly({ children }) {
-  const { accessToken, user } = useAuthStore()
-  if (accessToken && user && !(user.role === 'patient' && user.isEmailVerified === false)) {
+  const { status, user } = useAuthStore()
+  if (status === 'booting') {
+    return <LoadingState label="Verifying session…" />
+  }
+  if (user && !(user.role === 'patient' && user.isEmailVerified === false)) {
     return <Navigate to={roleHome[user.role] || '/app'} replace />
   }
   return children
 }
 
 function RequireRole({ roles }) {
-  const { accessToken, setUserAndProfile } = useAuthStore()
+  const { accessToken, user, status, setUserAndProfile } = useAuthStore()
   const location = useLocation()
   const navigate = useNavigate()
 
@@ -46,25 +50,25 @@ function RequireRole({ roles }) {
     return () => window.removeEventListener('clinic:email-not-verified', handleUnverified)
   }, [navigate])
 
-  useEffect(() => {
-    if (!accessToken) {
-      logout({ reason: 'expired' })
-    }
-  }, [accessToken])
-
   const meQuery = useQuery({
     queryKey: ['auth-me'],
     queryFn: api.auth.me,
-    enabled: !!accessToken,
+    enabled: status === 'authed' || !!accessToken || !!user,
     refetchOnMount: false,
     refetchOnWindowFocus: false,
     retry: (failureCount, error) => {
-      const status = error?.response?.status || error?.status
-      if (status === 401 || status === 403) return false
+      const s = error?.response?.status || error?.status
+      if (s === 401 || s === 403) return false
       return failureCount < 2
     },
     staleTime: 60 * 1000,
   })
+
+  useEffect(() => {
+    if (status === 'anon' && !accessToken && !user) {
+      logout({ reason: 'expired' })
+    }
+  }, [status, accessToken, user])
 
   useEffect(() => {
     const handleRevalidate = (event) => {
@@ -93,26 +97,35 @@ function RequireRole({ roles }) {
   }, [meQuery])
 
   useEffect(() => {
-    if (meQuery.data?.data?.user && accessToken) {
+    if (meQuery.data?.data?.user) {
       setUserAndProfile(meQuery.data.data.user, meQuery.data.data.profile)
     }
-  }, [meQuery.data, accessToken, setUserAndProfile])
+  }, [meQuery.data, setUserAndProfile])
 
   useEffect(() => {
     if (meQuery.isError) {
-      const status = meQuery.error?.response?.status || meQuery.error?.status
-      // Only logout when refresh itself fails with 401/403 (invalid/expired/revoked)
-      if (status === 401 || status === 403) {
+      const s = meQuery.error?.response?.status || meQuery.error?.status
+      if (s === 401 || s === 403) {
         logout({ reason: 'expired' })
       }
     }
   }, [meQuery.isError, meQuery.error])
 
-  if (!accessToken) {
-    return <Navigate to="/login?reason=expired" replace state={{ returnTo: location.pathname + location.search }} />
+  if (status === 'booting') {
+    return <LoadingState label="Verifying your secure session…" />
   }
 
-  const currentUser = meQuery.data?.data?.user || useAuthStore.getState().user
+  const currentUser = meQuery.data?.data?.user || user
+
+  if (!currentUser) {
+    if (meQuery.isError && (meQuery.error?.response?.status === 401 || meQuery.error?.status === 401)) {
+      return <Navigate to="/login?reason=expired" replace state={{ returnTo: location.pathname + location.search }} />
+    }
+    if (status === 'anon' || (!accessToken && !user)) {
+      return <Navigate to="/login?reason=expired" replace state={{ returnTo: location.pathname + location.search }} />
+    }
+    return <LoadingState label="Verifying your secure session…" />
+  }
   const currentProfile = meQuery.data?.data?.profile || useAuthStore.getState().profile
 
   if (meQuery.isLoading && !currentUser) {
@@ -197,7 +210,37 @@ function PatientProfileWorkspace() {
 }
 
 export default function App() {
-  return <Suspense fallback={<LoadingState label="Preparing your workspace…" />}><Routes>
+  const { status, setSession, setStatus } = useAuthStore()
+
+  useEffect(() => {
+    let active = true
+    if (status === 'booting') {
+      api.auth.me()
+        .then((res) => {
+          if (active && res?.data?.user) {
+            setSession({
+              user: res.data.user,
+              profile: res.data.profile || null,
+              accessToken: 'cookie-session',
+              status: 'authed',
+            })
+          }
+        })
+        .catch(() => {
+          if (active) {
+            setStatus('anon')
+          }
+        })
+    }
+    return () => {
+      active = false
+    }
+  }, [status, setSession, setStatus])
+
+  return (
+    <>
+      <Suspense fallback={<LoadingState label="Preparing your workspace…" />}>
+        <Routes>
     <Route element={<PublicLayout />}>
       <Route path="/" element={<Landing />} />
       <Route path="/doctor" element={<DoctorProfilePage />} />
@@ -275,5 +318,9 @@ export default function App() {
       </Route>
     </Route>
     <Route path="*" element={<NotFound />} />
-  </Routes></Suspense>
+  </Routes>
+</Suspense>
+<CookieConsentBanner />
+</>
+  )
 }

@@ -10,6 +10,8 @@ exports.protect = catchAsync(async (req, res, next) => {
 
   if (authHeader && authHeader.startsWith('Bearer ')) {
     token = authHeader.split(' ')[1];
+  } else if (req.cookies && (req.cookies.accessToken || req.cookies.jwt)) {
+    token = req.cookies.accessToken || req.cookies.jwt;
   }
 
   if (!token) {
@@ -61,6 +63,8 @@ exports.optionalProtect = catchAsync(async (req, res, next) => {
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.startsWith('Bearer ')) {
     token = authHeader.split(' ')[1];
+  } else if (req.cookies && (req.cookies.accessToken || req.cookies.jwt)) {
+    token = req.cookies.accessToken || req.cookies.jwt;
   }
   if (!token) return next();
 

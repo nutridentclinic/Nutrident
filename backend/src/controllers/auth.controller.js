@@ -11,6 +11,7 @@ const { sendEmail } = require('../config/email');
 const { auth: firebaseAuth, isConfigured } = require('../config/firebase');
 const logger = require('../utils/logger');
 const { deleteCloudinaryFile } = require('../utils/cloudinaryCleanup');
+const { setAuthCookies, clearAuthCookies } = require('../utils/cookie');
 
 const hashToken = (token) => crypto.createHash('sha256').update(String(token)).digest('hex');
 
@@ -216,6 +217,7 @@ exports.login = catchAsync(async (req, res, next) => {
   }
 
   const tokens = await issueTokens(user);
+  setAuthCookies(res, tokens);
   success(res, 200, 'Logged in successfully.', { user: sanitizeUser(user), ...tokens });
 });
 
@@ -280,6 +282,7 @@ exports.verifyOTP = catchAsync(async (req, res, next) => {
   await user.save({ validateBeforeSave: false });
 
   const tokens = await issueTokens(user);
+  setAuthCookies(res, tokens);
   success(res, 200, 'Account verified successfully.', {
     user: sanitizeUser(user),
     ...tokens,
@@ -365,7 +368,7 @@ exports.resendOTP = catchAsync(async (req, res, next) => {
 
 // @route POST /api/auth/refresh-token
 exports.refreshToken = catchAsync(async (req, res, next) => {
-  const { refreshToken } = req.body;
+  const refreshToken = req.body?.refreshToken || req.cookies?.refreshToken;
   if (!refreshToken) return next(new AppError('Refresh token is required.', 400));
 
   let decoded;
@@ -410,6 +413,7 @@ exports.refreshToken = catchAsync(async (req, res, next) => {
 
   // Rotate refresh token on every refresh (old token hash replaced, old one invalidated)
   const tokens = await issueTokens(user, decoded.sid);
+  setAuthCookies(res, tokens);
   success(res, 200, 'Token refreshed.', tokens);
 });
 
@@ -418,9 +422,10 @@ exports.logout = catchAsync(async (req, res, next) => {
   let userId = req.user?._id;
   let targetSid = req.user?.sid;
 
-  if (req.body?.refreshToken) {
+  const rawRefreshToken = req.body?.refreshToken || req.cookies?.refreshToken;
+  if (rawRefreshToken) {
     try {
-      const decoded = verifyRefreshToken(req.body.refreshToken);
+      const decoded = verifyRefreshToken(rawRefreshToken);
       userId = userId || decoded.id;
       targetSid = targetSid || decoded.sid;
     } catch {
@@ -443,6 +448,7 @@ exports.logout = catchAsync(async (req, res, next) => {
     }
   }
 
+  clearAuthCookies(res);
   success(res, 200, 'Logged out successfully.');
 });
 
@@ -688,6 +694,7 @@ exports.updatePassword = catchAsync(async (req, res, next) => {
   await user.save();
 
   const tokens = await issueTokens(user);
+  setAuthCookies(res, tokens);
   success(res, 200, 'Password updated successfully.', tokens);
 });
 

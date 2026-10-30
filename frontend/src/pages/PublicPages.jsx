@@ -18,6 +18,7 @@ import {
 import { api } from '../api/domains.js'
 import { usePrimaryDentist } from '../hooks/usePrimaryDentist.js'
 import { AsyncView, EmptyState, LoadingState, PageTitle } from '../components/ui.jsx'
+import { openCookiePreferencesModal } from '../utils/cookieConsent.js'
 
 export function PublicLayout() {
   return (
@@ -61,6 +62,14 @@ export function PublicLayout() {
         <div>
           <Link to="/privacy">Privacy</Link>
           <Link to="/terms">Terms</Link>
+          <button
+            type="button"
+            className="footer-link-btn"
+            onClick={openCookiePreferencesModal}
+            aria-label="Manage cookie settings and privacy preferences"
+          >
+            Cookie Settings
+          </button>
         </div>
       </footer>
     </div>

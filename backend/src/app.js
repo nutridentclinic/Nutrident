@@ -3,6 +3,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const compression = require('compression');
+const cookieParser = require('cookie-parser');
 const sanitizeInput = require('./middleware/sanitize.middleware');
 
 const errorMiddleware = require('./middleware/error.middleware');
@@ -30,6 +31,7 @@ app.use(
   })
 );
 app.use(compression());
+app.use(cookieParser(process.env.COOKIE_SECRET || process.env.JWT_SECRET));
 if (process.env.NODE_ENV !== 'test') app.use(morgan('dev'));
 
 // --- Razorpay webhook needs the RAW body for signature verification.

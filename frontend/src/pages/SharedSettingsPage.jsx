@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react'
-import { Check, KeyRound, Bell, LogOut, ShieldCheck, User, Eye, EyeOff, Monitor, Save } from 'lucide-react'
+import { Check, KeyRound, Bell, LogOut, ShieldCheck, User, Eye, EyeOff, Monitor, Save, Cookie } from 'lucide-react'
 import { api } from '../api/domains.js'
 import { useAuthStore } from '../store/auth.js'
 import { logout } from '../auth/session.js'
 import { useToast } from '../components/ui.jsx'
 import { FileUpload } from '../components/FileUpload.jsx'
+import { openCookiePreferencesModal, getCookieConsent } from '../utils/cookieConsent.js'
 
 export function SharedSettingsPage() {
   const notify = useToast()
@@ -389,6 +390,35 @@ export function SharedSettingsPage() {
             </label>
             {prefSaved && <span className="saved-indicator"><Check size={14} /> Preferences saved</span>}
           </div>
+        </section>
+
+        {/* Cookie & Privacy Preferences Card */}
+        <section className="settings-card">
+          <div className="settings-card-header">
+            <Cookie size={20} className="text-teal" />
+            <h2>Privacy &amp; Cookie Preferences</h2>
+          </div>
+          <p className="muted-copy">
+            NutriDent uses secure HTTP-Only cookies for your clinical session and authentication. You can inspect or update your optional cookie preferences (analytics and functional preferences) at any time.
+          </p>
+          <div style={{ margin: '14px 0', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            <span className="badge badge-required" style={{ padding: '4px 10px' }}>
+              Essential: Always Active
+            </span>
+            <span className="badge" style={{ padding: '4px 10px', background: 'var(--bg-alt)', border: '1px solid var(--line)' }}>
+              Analytics: {getCookieConsent()?.analytics ? 'Allowed' : 'Disabled'}
+            </span>
+            <span className="badge" style={{ padding: '4px 10px', background: 'var(--bg-alt)', border: '1px solid var(--line)' }}>
+              Functional: {getCookieConsent()?.functional ? 'Allowed' : 'Disabled'}
+            </span>
+          </div>
+          <button
+            type="button"
+            className="button button-secondary button-small"
+            onClick={openCookiePreferencesModal}
+          >
+            Manage Cookie Preferences
+          </button>
         </section>
 
         {/* Security & Sign Out Card */}

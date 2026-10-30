@@ -13,6 +13,7 @@ const getBaseUrl = () => {
 const client = axios.create({
   baseURL: getBaseUrl(),
   timeout: 60000, // 60s for Render cold-start tolerance
+  withCredentials: true,
 })
 
 let refreshPromise
@@ -119,8 +120,8 @@ export const executeTokenRefresh = async (refreshToken) => {
   const doRefreshCall = async () => {
     const { data } = await axios.post(
       `${client.defaults.baseURL}/auth/refresh-token`,
-      { refreshToken },
-      { timeout: 60000 },
+      { refreshToken: refreshToken || undefined },
+      { timeout: 60000, withCredentials: true },
     )
     const tokens = data?.data || {}
     if (!tokens.accessToken || !tokens.refreshToken) {
