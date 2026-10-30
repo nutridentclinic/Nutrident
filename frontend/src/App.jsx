@@ -269,7 +269,7 @@ export default function App() {
         <Route path="treatment-plans" element={<PatientTreatmentPlans />} />
         <Route path="treatments" element={<PatientTreatmentsPage />} />
         <Route path="dental-chart" element={<PatientDentalChart />} />
-        <Route path="care" element={<Navigate to="/app/treatment-plans" replace />} />
+        <Route path="care" element={<PatientTreatmentPlans />} />
         <Route path="billing" element={<PatientBilling />} /><Route path="family" element={<PatientFamily />} />
         <Route path="profile" element={<PatientProfileWorkspace />} />
         <Route path="settings" element={<SharedSettingsPage />} />

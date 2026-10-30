@@ -35,7 +35,7 @@ import {
   useToast,
 } from "../components/ui.jsx";
 import { FDI_TEETH } from "../utils/teeth.js";
-import { formatClinicDate } from "../utils/formatDate.js";
+import { formatClinicDate, getTodayFormatted } from "../utils/formatDate.js";
 
 const dayNames = [
   "Sunday",
@@ -99,9 +99,9 @@ export function DentistDashboard() {
   return (
     <div>
       <PageTitle
-        eyebrow="Dentist workspace"
-        title={`Good day, Dr. ${user?.name?.split(" ").at(-1) || ""}.`}
-        description="Your schedule, patients and practice at a glance."
+        eyebrow="Doctor Portal"
+        title="Doctor Portal Overview"
+        description={`Your schedule, queue, and key stats for today · ${getTodayFormatted()}`}
         actions={
           <Link to="/dentist/appointments" className="button button-primary">
             Open schedule <ArrowRight size={16} />

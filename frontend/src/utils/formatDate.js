@@ -36,3 +36,13 @@ export function formatClinicTime(timeStr) {
   const hour12 = hour % 12 || 12;
   return `${hour12}:${m} ${ampm}`;
 }
+
+export function getTodayFormatted() {
+  return new Date().toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+

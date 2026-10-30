@@ -761,9 +761,12 @@ button.tooth-cell { cursor: pointer; }
   .mobile-menu-button { display: inline-grid; }
   .mobile-topbar-logout { display: inline-flex; align-items: center; gap: 5px; padding: 5px 8px; border-radius: 4px; border: 1px solid var(--line); background: transparent; color: #64767a; font-size: 11px; font-weight: 600; cursor: pointer; flex-shrink: 0; }
   .mobile-topbar-logout:hover { color: var(--ink); background: #f1f6f3; }
-  .breadcrumb { margin-right: auto; margin-left: 5px; font-size: 10px; }
-  .breadcrumb > span, .breadcrumb > i { display: none; }
-  .topbar-profile > span:last-child { display: none; }
+  .breadcrumb { margin-right: auto; margin-left: 5px; font-size: 11px; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: calc(100vw - 160px); }
+  .breadcrumb > span, .breadcrumb > i { display: inline; }
+  .breadcrumb i { margin: 0 1px; }
+  .topbar-profile > span:last-child { display: flex; flex-direction: column; }
+  .topbar-profile strong { display: none; }
+  .topbar-profile small { font-size: 10px; font-weight: 700; color: #137a76; }
   .portal-content { padding: 24px 15px 95px; }
   .mobile-tabs { position: fixed; z-index: 20; inset: auto 0 0; min-height: 62px; padding: 5px 8px calc(5px + env(safe-area-inset-bottom)); display: grid; grid-template-columns: repeat(4, 1fr); background: #fff; border-top: 1px solid var(--line); }
   .mobile-tab { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; color: #839291; text-decoration: none; font-size: 9px; font-weight: 700; }

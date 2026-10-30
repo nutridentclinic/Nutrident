@@ -16,6 +16,7 @@ import {
   Sparkles,
   Settings2,
   Users,
+  UserRound,
   Wallet,
   X,
 } from 'lucide-react'
@@ -26,27 +27,29 @@ import { api } from '../api/domains.js'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useIdleLogout, IdleWarningModal } from '../hooks/useIdleLogout.jsx'
 import ErrorBoundary from '../components/ErrorBoundary.jsx'
+import { ROLE_CONFIG, getRoleFriendlyName, getRolePortalName } from '../utils/roleConfig.js'
 
-const navigation = {
+export const navigation = {
   patient: [
     { to: '/app', label: 'Overview', icon: Home, end: true },
-    { to: '/app/appointments', label: 'Appointments', icon: CalendarDays },
+    { to: '/app/appointments', label: 'My appointments', icon: CalendarDays },
     { to: '/app/book', label: 'Book appointment', icon: Search },
-    { to: '/app/records', label: 'Medical records', icon: ClipboardList },
-    { to: '/app/treatments', label: 'Treatments & catalog', icon: Sparkles },
-    { to: '/app/care', label: 'Care & dental chart', icon: HeartPulse },
-    { to: '/app/billing', label: 'Invoices & payments', icon: Wallet },
-    { to: '/app/family', label: 'Family members', icon: Users },
-    { to: '/app/profile', label: 'Profile & settings', icon: Settings2 },
+    { to: '/app/records', label: 'Records', icon: ClipboardList },
+    { to: '/app/care', label: 'Care & treatment plans', icon: HeartPulse, aliases: ['/app/treatment-plans', '/app/dental-chart', '/app/treatments'] },
+    { to: '/app/billing', label: 'Invoices/billing', icon: Wallet },
+    { to: '/app/family', label: 'Family', icon: Users },
+    { to: '/app/profile', label: 'Profile', icon: UserRound },
+    { to: '/app/notifications', label: 'Notifications', icon: Bell },
+    { to: '/app/settings', label: 'Settings', icon: Settings2 },
   ],
   dentist: [
     { to: '/dentist', label: 'Overview', icon: Home, end: true },
     { to: '/dentist/appointments', label: 'Schedule', icon: CalendarDays },
-    { to: '/dentist/availability', label: 'Availability', icon: Settings2 },
-    { to: '/dentist/patients', label: 'Patients', icon: Users },
-    { to: '/dentist/reviews', label: 'Reviews', icon: MessageSquareText },
     { to: '/dentist/queue', label: 'Live queue', icon: Activity },
+    { to: '/dentist/patients', label: 'Patients', icon: Users },
+    { to: '/dentist/availability', label: 'Availability', icon: CalendarDays },
     { to: '/dentist/profile', label: 'My profile', icon: HeartPulse },
+    { to: '/dentist/notifications', label: 'Notifications', icon: Bell },
     { to: '/dentist/settings', label: 'Settings', icon: Settings2 },
   ],
   receptionist: [
@@ -55,6 +58,7 @@ const navigation = {
     { to: '/reception/patients', label: 'Patients', icon: Users },
     { to: '/reception/queue', label: 'Live queue', icon: Activity },
     { to: '/reception/invoices', label: 'Invoices', icon: Wallet },
+    { to: '/reception/notifications', label: 'Notifications', icon: Bell },
     { to: '/reception/settings', label: 'Settings', icon: Settings2 },
   ],
   admin: [
@@ -65,18 +69,25 @@ const navigation = {
     { to: '/admin/patients', label: 'Patients', icon: ClipboardList },
     { to: '/admin/treatments', label: 'Treatment catalog', icon: FileText },
     { to: '/admin/coupons', label: 'Coupons', icon: Wallet },
-    { to: '/admin/payments', label: 'Invoices & Payments', icon: Wallet },
+    { to: '/admin/payments', label: 'Payments & refunds', icon: Wallet },
     { to: '/admin/reviews', label: 'Reviews', icon: MessageSquareText },
     { to: '/admin/clinics', label: 'Clinic locations', icon: Building2 },
-    { to: '/admin/settings', label: 'Clinic settings', icon: Settings2 },
+    { to: '/admin/settings', label: 'Clinic settings', icon: Settings2, aliases: ['/admin/account'] },
+    { to: '/admin/notifications', label: 'Notifications', icon: Bell },
   ],
 }
 
-const roleLabel = {
-  patient: 'Patient portal',
-  dentist: 'Dentist workspace',
-  receptionist: 'Front desk',
-  admin: 'Administration',
+export function getActiveNavItem(items, pathname) {
+  if (!Array.isArray(items)) return null
+  const sorted = [...items].sort((a, b) => b.to.length - a.to.length)
+  return sorted.find((item) => {
+    if (item.end) return pathname === item.to
+    if (pathname === item.to || pathname.startsWith(item.to + '/')) return true
+    if (item.aliases && item.aliases.some((alias) => pathname === alias || pathname.startsWith(alias + '/'))) {
+      return true
+    }
+    return false
+  })
 }
 
 export default function PortalLayout() {
@@ -86,8 +97,15 @@ export default function PortalLayout() {
   const queryClient = useQueryClient()
   const navRef = useRef(null)
   const role = user?.role || 'patient'
+  const portalName = getRolePortalName(role)
+  const friendlyRole = getRoleFriendlyName(role)
   const items = navigation[role] || navigation.patient
   const isPatient = role === 'patient'
+  const homePath = getPortalBase(role)
+  const notificationsPath = `${homePath}/notifications`
+
+  const activeItem = getActiveNavItem(items, location.pathname)
+  const currentSection = activeItem?.label || 'Overview'
 
   // Scroll active nav item into view on route change
   useEffect(() => {
@@ -125,8 +143,6 @@ export default function PortalLayout() {
     refetchIntervalInBackground: false,
   })
   const unreadCount = notificationData?.meta?.unreadCount || 0
-  const homePath = getPortalBase(role)
-  const notificationsPath = `${homePath}/notifications`
 
   // Shared PC idle logout hook
   const { warningOpen, secondsRemaining, stayLoggedIn, logoutNow } = useIdleLogout()
@@ -146,7 +162,7 @@ export default function PortalLayout() {
             Nutrident<span className="brand-sub">Dental &amp; Diet Clinic</span>
           </span>
         </Link>
-        <div className="sidebar-caption">{roleLabel[role]}</div>
+        <div className="sidebar-caption">{portalName}</div>
         <nav
           ref={navRef}
           tabIndex={0}
@@ -154,28 +170,23 @@ export default function PortalLayout() {
           className="sidebar-nav"
           aria-label="Workspace navigation"
         >
-          {items.map(({ to, label, icon: Icon, end }) => (
-            <NavLink
-              key={to}
-              to={to}
-              end={end}
-              onClick={() => setMenuOpen(false)}
-              className={({ isActive }) => `nav-link ${isActive ? 'nav-link-active' : ''}`}
-            >
-              <Icon size={18} />
-              <span>{label}</span>
-              {label === 'Notifications' && unreadCount > 0 && <span className="nav-count">{unreadCount}</span>}
-            </NavLink>
-          ))}
-          <NavLink
-            to={notificationsPath}
-            className={`nav-link ${location.pathname === notificationsPath ? 'nav-link-active' : ''}`}
-            onClick={() => setMenuOpen(false)}
-          >
-            <MessageSquareText size={18} />
-            <span>Notifications</span>
-            {unreadCount > 0 && <span className="nav-count">{unreadCount}</span>}
-          </NavLink>
+          {items.map(({ to, label, icon: Icon, end, aliases }) => {
+            const isNotifications = to.endsWith('/notifications')
+            const isActive = activeItem?.to === to
+            return (
+              <NavLink
+                key={to}
+                to={to}
+                end={end}
+                onClick={() => setMenuOpen(false)}
+                className={`nav-link ${isActive ? 'nav-link-active' : ''}`}
+              >
+                <Icon size={18} />
+                <span>{label}</span>
+                {isNotifications && unreadCount > 0 && <span className="nav-count">{unreadCount}</span>}
+              </NavLink>
+            )
+          })}
         </nav>
         <div className="sidebar-bottom">
           <div className="sidebar-help">
@@ -201,10 +212,10 @@ export default function PortalLayout() {
           >
             {menuOpen ? <X size={21} /> : <Menu size={21} />}
           </button>
-          <div className="breadcrumb">
-            <span>{roleLabel[role]}</span>
-            <i>/</i>
-            <strong>{items.find((item) => location.pathname === item.to)?.label || 'Your care'}</strong>
+          <div className="breadcrumb" aria-label="Portal section navigation">
+            <span>{portalName}</span>
+            <i className="breadcrumb-dot">·</i>
+            <strong>{currentSection}</strong>
           </div>
           <Link
             to={notificationsPath}
@@ -246,7 +257,7 @@ export default function PortalLayout() {
             )}
             <span>
               <strong>{user?.name || 'Account'}</strong>
-              <small>{role}</small>
+              <small>{friendlyRole}</small>
             </span>
           </div>
           <button

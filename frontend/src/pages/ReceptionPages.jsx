@@ -31,7 +31,7 @@ import {
   useConfirm,
   useToast,
 } from "../components/ui.jsx";
-import { formatClinicDate } from "../utils/formatDate.js";
+import { formatClinicDate, getTodayFormatted } from "../utils/formatDate.js";
 
 const rupees = (amount) => `₹${Number(amount || 0).toLocaleString("en-IN")}`;
 const fmtDate = (date) => (date ? formatClinicDate(date) : "Date not set");
@@ -82,9 +82,9 @@ export function ReceptionDashboard() {
   return (
     <div>
       <PageTitle
-        eyebrow="Front desk"
-        title="Clinic operations"
-        description="Patient lookup, queue check-in and invoice tools for today’s work."
+        eyebrow="Receptionist Portal"
+        title="Receptionist Portal Overview"
+        description={`Today's appointments, waiting queue, and payments due · ${getTodayFormatted()}`}
       />
       <div className="dashboard-metrics">
         <article>

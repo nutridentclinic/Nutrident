@@ -49,7 +49,7 @@ import {
 import { PatientDirectory } from "./TeamPages.jsx";
 import { FileUpload } from "../components/FileUpload.jsx";
 import { BackendPendingNotice } from "../components/BackendPendingNotice.jsx";
-import { formatClinicDate } from "../utils/formatDate.js";
+import { formatClinicDate, getTodayFormatted } from "../utils/formatDate.js";
 import { clinicDate, isPastSlot } from "../utils/booking.js";
 import { fetchWeeklyAppointmentsWithFallback, fetchPrimarySlotsWithFallback } from "../api/capabilities.js";
 
@@ -141,9 +141,9 @@ export function AdminDashboard() {
   return (
     <div>
       <PageTitle
-        eyebrow="Single-clinic operations"
-        title="Administration"
-        description="Live operational KPIs, revenue tracking, and system health for DrNutrident."
+        eyebrow="Admin Portal"
+        title="Admin Portal Overview"
+        description={`Live operational KPIs, revenue tracking, and clinic health · ${getTodayFormatted()}`}
         actions={
           <div style={{ display: "flex", gap: "0.5rem" }}>
             <Link to="/admin/appointments" className="button button-quiet">

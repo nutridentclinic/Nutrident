@@ -60,6 +60,6 @@ describe('protected role routes', () => {
       refreshToken: 'patient-refresh',
     })
     renderRoute('/admin')
-    expect(await screen.findByRole('heading', { name: /Good .*Patient/i }, { timeout: 5000 })).toBeTruthy()
+    expect(await screen.findByRole('heading', { name: /Patient Portal Overview|Good .*Patient/i }, { timeout: 5000 })).toBeTruthy()
   })
 })

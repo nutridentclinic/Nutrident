@@ -37,7 +37,7 @@ import {
   useConfirm,
   useToast,
 } from "../components/ui.jsx";
-import { formatClinicDate } from "../utils/formatDate.js";
+import { formatClinicDate, getTodayFormatted } from "../utils/formatDate.js";
 
 const fmtDate = (date) => (date ? formatClinicDate(date) : "Date not set");
 const rupees = (amount) => `₹${Number(amount || 0).toLocaleString("en-IN")}`;
@@ -76,9 +76,9 @@ export function PatientDashboard() {
   return (
     <div className="dashboard-page">
       <PageTitle
-        eyebrow="Patient portal"
-        title={`Good ${greeting}, ${user?.name?.split(" ")[0] || "there"}.`}
-        description="A clear view of what is next in your care."
+        eyebrow="Patient Portal"
+        title="Patient Portal Overview"
+        description={`Welcome back, ${user?.name?.split(" ")[0] || "there"} · A clear view of your care · ${getTodayFormatted()}`}
         actions={
           <Link className="button button-primary" to="/dentists">
             Book a visit <ArrowRight size={16} />
