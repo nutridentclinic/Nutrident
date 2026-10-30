@@ -504,10 +504,10 @@ export function Patient360({ readOnly = false } = {}) {
                     <button
                       type="button"
                       onClick={() => setSelectedRecord(rec)}
-                      className="p-2 bg-slate-700/50 hover:bg-slate-700 rounded-lg text-teal-400 transition"
+                      className="button button-quiet button-small flex items-center gap-1.5"
                       title="View Record"
                     >
-                      <Eye size={16} />
+                      <Eye size={14} /> Open file
                     </button>
                   )}
                 </div>

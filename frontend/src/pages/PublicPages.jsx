@@ -6,14 +6,17 @@ import {
   ArrowRight,
   CalendarDays,
   Check,
+  ChevronLeft,
   ChevronRight,
   Clock3,
   MapPin,
+  Maximize2,
   MessageCircle,
   ShieldCheck,
   Sparkles,
   Star,
   Stethoscope,
+  X,
 } from 'lucide-react'
 import { api } from '../api/domains.js'
 import { usePrimaryDentist } from '../hooks/usePrimaryDentist.js'
@@ -254,6 +257,199 @@ export function DoctorProfilePage() {
   )
 }
 
+export const CLINIC_PHOTOS = [
+  {
+    id: 'reception',
+    title: 'Reception & Patient Welcome Lounge',
+    category: 'Reception & Lounge',
+    src: '/clinic/reception.jpg',
+    alt: 'DrNutrident Dental Clinic reception desk and patient lounge',
+    badge: 'Front Desk',
+    desc: 'Welcoming front-desk area featuring DrNutrident dental branding, comfortable seating, and ambient lighting.',
+  },
+  {
+    id: 'operatory-chair',
+    title: 'Modern Ergonomic Dental Suite',
+    category: 'Operatory & Treatment',
+    src: '/clinic/operatory-chair.jpg',
+    alt: 'Modern ergonomic dental chair and sanitized operatory setup',
+    badge: 'Operatory 1',
+    desc: 'Fully equipped modern dental chair with advanced overhead illumination and precision instruments for gentle treatments.',
+  },
+  {
+    id: 'operatory-view',
+    title: 'Sunlit Panoramic Treatment Bay',
+    category: 'Operatory & Treatment',
+    src: '/clinic/operatory-view.jpg',
+    alt: 'Bright dental operatory with natural daylight and relaxing aesthetic',
+    badge: 'Operatory 2',
+    desc: 'A calming operatory space designed with soothing natural light, air circulation, and modern clinical aesthetics.',
+  },
+  {
+    id: 'operatory-equipment',
+    title: 'Precision Clinical Delivery & Hygiene Bay',
+    category: 'Advanced Equipment',
+    src: '/clinic/operatory-equipment.jpg',
+    alt: 'Precision dental instruments, digital operatory, and sterilization units',
+    badge: 'Hygiene & Tech',
+    desc: 'Multi-tier autoclaved sterilization, digital monitoring, and precision dental instruments adhering to global hygiene standards.',
+  },
+  {
+    id: 'waiting-lounge',
+    title: 'Comfortable Family Waiting Area',
+    category: 'Reception & Lounge',
+    src: '/clinic/waiting-lounge.jpg',
+    alt: 'Patient lounge with comfortable seating and family-friendly atmosphere',
+    badge: 'Waiting Lounge',
+    desc: 'Quiet and comfortable seating area ensuring family members and patients relax comfortably before consultations.',
+  },
+]
+
+export function ClinicGallery({
+  title = 'Tour Our Modern Clinic & Facilities',
+  subtitle = 'Experience comfortable, hygienic, and technologically advanced dental care in our clinic.',
+}) {
+  const [activeCategory, setActiveCategory] = useState('All Spaces')
+  const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(null)
+
+  const categories = ['All Spaces', 'Operatory & Treatment', 'Reception & Lounge', 'Advanced Equipment']
+
+  const filteredPhotos = useMemo(() => {
+    if (activeCategory === 'All Spaces') return CLINIC_PHOTOS
+    return CLINIC_PHOTOS.filter((photo) => photo.category === activeCategory)
+  }, [activeCategory])
+
+  const selectedPhoto = selectedPhotoIndex !== null ? filteredPhotos[selectedPhotoIndex] : null
+
+  const handlePrev = (e) => {
+    e.stopPropagation()
+    setSelectedPhotoIndex((prev) => (prev > 0 ? prev - 1 : filteredPhotos.length - 1))
+  }
+
+  const handleNext = (e) => {
+    e.stopPropagation()
+    setSelectedPhotoIndex((prev) => (prev < filteredPhotos.length - 1 ? prev + 1 : 0))
+  }
+
+  return (
+    <section className="clinic-gallery-section" aria-label="Clinic Facilities Gallery">
+      <div className="clinic-gallery-header">
+        <span className="eyebrow">Our Clinic & Facilities</span>
+        <h2>{title}</h2>
+        <p>{subtitle}</p>
+        <div className="clinic-gallery-tabs" role="tablist" aria-label="Facility filter tabs">
+          {categories.map((cat) => (
+            <button
+              key={cat}
+              role="tab"
+              aria-selected={activeCategory === cat}
+              className={`clinic-gallery-tab ${activeCategory === cat ? 'active' : ''}`}
+              onClick={() => {
+                setActiveCategory(cat)
+                setSelectedPhotoIndex(null)
+              }}
+            >
+              {cat}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="clinic-gallery-grid">
+        {filteredPhotos.map((photo, idx) => (
+          <article
+            key={photo.id}
+            className="clinic-gallery-card"
+            onClick={() => setSelectedPhotoIndex(idx)}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                setSelectedPhotoIndex(idx)
+              }
+            }}
+          >
+            <div className="clinic-gallery-image-wrap">
+              <img
+                src={photo.src}
+                alt={photo.alt}
+                className="clinic-gallery-image"
+                loading="lazy"
+              />
+              <span className="clinic-gallery-badge">{photo.badge}</span>
+              <span className="clinic-gallery-zoom-pill">
+                <Maximize2 size={13} /> View Photo
+              </span>
+            </div>
+            <div className="clinic-gallery-card-body">
+              <h3>{photo.title}</h3>
+              <p>{photo.desc}</p>
+            </div>
+          </article>
+        ))}
+      </div>
+
+      {selectedPhoto && (
+        <div
+          className="clinic-lightbox-backdrop"
+          onClick={() => setSelectedPhotoIndex(null)}
+          role="dialog"
+          aria-modal="true"
+          aria-label={selectedPhoto.title}
+        >
+          <div className="clinic-lightbox-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="clinic-lightbox-header">
+              <h3>{selectedPhoto.title}</h3>
+              <button
+                type="button"
+                className="clinic-lightbox-close"
+                onClick={() => setSelectedPhotoIndex(null)}
+                aria-label="Close photo preview"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="clinic-lightbox-media-wrap">
+              <img
+                src={selectedPhoto.src}
+                alt={selectedPhoto.alt}
+                className="clinic-lightbox-img"
+              />
+              {filteredPhotos.length > 1 && (
+                <>
+                  <button
+                    type="button"
+                    className="clinic-lightbox-nav-btn clinic-lightbox-nav-prev"
+                    onClick={handlePrev}
+                    aria-label="Previous photo"
+                  >
+                    <ChevronLeft size={22} />
+                  </button>
+                  <button
+                    type="button"
+                    className="clinic-lightbox-nav-btn clinic-lightbox-nav-next"
+                    onClick={handleNext}
+                    aria-label="Next photo"
+                  >
+                    <ChevronRight size={22} />
+                  </button>
+                </>
+              )}
+            </div>
+            <div className="clinic-lightbox-footer">
+              <p>{selectedPhoto.desc}</p>
+              <span className="clinic-gallery-badge" style={{ position: 'static' }}>
+                {selectedPhoto.badge} · {selectedPhotoIndex + 1} of {filteredPhotos.length}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}
+
 export function PublicHome() {
   const { dentist, isAcceptingAppointments } = usePrimaryDentist()
   const treatments = useQuery({ queryKey: ['treatments'], queryFn: api.treatments.list })
@@ -296,9 +492,9 @@ export function PublicHome() {
             className="hero-image"
             src={
               dentist?.user?.profilePhoto?.url ||
-              'https://images.unsplash.com/photo-1606811971618-4486d14f3f99?auto=format&fit=crop&w=1100&q=85'
+              '/clinic/reception.jpg'
             }
-            alt="Dentist preparing for patient visit"
+            alt="Nutrident Dental Clinic reception and welcome lounge"
           />
           <div className="hero-image-caption">
             <span className="caption-icon">
@@ -357,8 +553,8 @@ export function PublicHome() {
       <section className="public-section care-section">
         <div className="care-image">
           <img
-            src="https://images.unsplash.com/photo-1609840114035-3c981b782dfe?auto=format&fit=crop&w=1000&q=85"
-            alt="Dental instruments prepared for a patient visit"
+            src="/clinic/operatory-equipment.jpg"
+            alt="Advanced dental operatory equipment and hygiene bay at DrNutrident"
           />
           <div className="care-note">
             <Sparkles size={17} />
@@ -397,6 +593,8 @@ export function PublicHome() {
           </Link>
         </div>
       </section>
+
+      <ClinicGallery />
 
       <section className="treatment-band">
         <div>
@@ -550,6 +748,11 @@ export function AboutPage() {
           </div>
         )}
       </div>
+
+      <ClinicGallery
+        title="Our Modern Facility & Treatment Environment"
+        subtitle="Designed for patient relaxation, impeccable hygiene, and cutting-edge dental care."
+      />
     </main>
   )
 }
@@ -618,6 +821,41 @@ export function ContactPage() {
                 </a>
               </div>
             )}
+          </div>
+          <div style={{ marginTop: '2rem', borderTop: '1px solid #e2ede8', paddingTop: '1.5rem' }}>
+            <h3 style={{ fontSize: '18px', fontWeight: 700, margin: '0 0 12px 0' }}>Visiting Our Clinic</h3>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
+              <div style={{ borderRadius: '8px', overflow: 'hidden', border: '1px solid #e2ede8' }}>
+                <img
+                  src="/clinic/reception.jpg"
+                  alt="DrNutrident Dental Clinic reception desk"
+                  style={{ width: '100%', height: '200px', objectFit: 'cover', display: 'block' }}
+                />
+                <div style={{ padding: '12px 14px', background: '#fafcfa' }}>
+                  <strong style={{ fontSize: '14px', display: 'block', color: 'var(--ink)' }}>
+                    Main Reception & Welcome Desk
+                  </strong>
+                  <small style={{ color: 'var(--muted)', fontSize: '12px' }}>
+                    Front desk check-in and patient consultation area
+                  </small>
+                </div>
+              </div>
+              <div style={{ borderRadius: '8px', overflow: 'hidden', border: '1px solid #e2ede8' }}>
+                <img
+                  src="/clinic/waiting-lounge.jpg"
+                  alt="DrNutrident patient waiting lounge"
+                  style={{ width: '100%', height: '200px', objectFit: 'cover', display: 'block' }}
+                />
+                <div style={{ padding: '12px 14px', background: '#fafcfa' }}>
+                  <strong style={{ fontSize: '14px', display: 'block', color: 'var(--ink)' }}>
+                    Patient Waiting Lounge
+                  </strong>
+                  <small style={{ color: 'var(--muted)', fontSize: '12px' }}>
+                    Comfortable seating area for patients and families
+                  </small>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}

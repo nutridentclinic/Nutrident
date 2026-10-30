@@ -88,6 +88,7 @@ export const api = {
     removeFamily: (id) => remove(`/patients/me/family-members/${id}`),
   },
   records: {
+    list: (params) => get('/medical-records', params),
     mine: (params) => get('/medical-records/me', params),
     forPatient: (id) => get(`/medical-records/patient/${id}`),
     upload: (data, onProgress) => request({ method: 'POST', url: '/medical-records', data, onUploadProgress: onProgress }),

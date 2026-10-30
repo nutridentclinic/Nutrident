@@ -5,6 +5,7 @@ const { restrictTo } = require('../middleware/role.middleware');
 const upload = require('../middleware/upload.middleware');
 
 router.use(protect);
+router.get('/', restrictTo('admin', 'receptionist', 'dentist'), ctrl.getAllRecords);
 router.post('/', upload('medical-records').single('file'), ctrl.uploadRecord);
 router.get('/me', restrictTo('patient'), ctrl.getMyRecords);
 router.get('/patient/:patientId', restrictTo('dentist', 'receptionist', 'admin'), ctrl.getPatientRecords);

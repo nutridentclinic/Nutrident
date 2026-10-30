@@ -11,6 +11,7 @@ import { PatientAppointments, AppointmentBooking, AppointmentDetail, PatientBill
 import { ClinicalRecord, DentistAvailability, DentistDashboard, DentistProfilePage, DentistReviews, DentistSchedule, PatientDirectory, QueuePage } from './pages/TeamPages.jsx'
 import { AppointmentLookup, InvoiceCreator, NotificationsPage, ReceptionPage } from './pages/ReceptionPages.jsx'
 import { Patient360 } from './pages/Patient360.jsx'
+import { AllRecordsPage } from './pages/RecordsPage.jsx'
 import SharedSettingsPage from './pages/SharedSettingsPage.jsx'
 import { CookieConsentBanner } from './components/CookieConsentBanner.jsx'
 import './App.css'
@@ -283,6 +284,7 @@ export default function App() {
       <Route path="/dentist" element={<PortalLayout />}>
         <Route index element={<DentistDashboard />} /><Route path="appointments" element={<DentistSchedule />} /><Route path="availability" element={<DentistAvailability />} />
         <Route path="patients" element={<PatientDirectory mode="dentist" />} /><Route path="patients/:patientId" element={<Patient360 />} />
+        <Route path="records" element={<AllRecordsPage role="dentist" />} />
         <Route path="reviews" element={<DentistReviews />} /><Route path="queue" element={<QueuePage role="dentist" />} /><Route path="profile" element={<DentistProfilePage />} />
         <Route path="settings" element={<SharedSettingsPage />} />
         <Route path="notifications" element={<NotificationsPage />} />
@@ -292,7 +294,9 @@ export default function App() {
     <Route element={<RequireRole roles={['receptionist']} />}>
       <Route path="/reception" element={<PortalLayout />}>
         <Route index element={<ReceptionPage page="dashboard" />} /><Route path="appointments" element={<AppointmentLookup />} /><Route path="patients" element={<PatientDirectory />} />
-        <Route path="patients/:patientId" element={<Patient360 readOnly />} /><Route path="queue" element={<QueuePage role="receptionist" />} /><Route path="invoices" element={<InvoiceCreator />} />
+        <Route path="patients/:patientId" element={<Patient360 readOnly />} />
+        <Route path="records" element={<AllRecordsPage role="receptionist" />} />
+        <Route path="queue" element={<QueuePage role="receptionist" />} /><Route path="invoices" element={<InvoiceCreator />} />
         <Route path="settings" element={<SharedSettingsPage />} />
         <Route path="notifications" element={<NotificationsPage />} />
         <Route path="*" element={<PortalNotFound />} />
@@ -306,6 +310,7 @@ export default function App() {
         <Route path="staff" element={<AdminPage page="staff" />} />
         <Route path="patients" element={<AdminPage page="patients" />} />
         <Route path="patients/:patientId" element={<Patient360 readOnly />} />
+        <Route path="records" element={<AllRecordsPage role="admin" />} />
         <Route path="treatments" element={<AdminPage page="treatments" />} />
         <Route path="coupons" element={<AdminPage page="coupons" />} />
         <Route path="payments" element={<AdminPage page="payments" />} />

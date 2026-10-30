@@ -1531,4 +1531,325 @@ button.tooth-cell { cursor: pointer; }
   }
 }
 
+/* Clinic Tour & Facilities Gallery */
+.clinic-gallery-section {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 80px 5vw;
+}
+
+.clinic-gallery-header {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 36px;
+}
+
+.clinic-gallery-header h2 {
+  font-size: 36px;
+  line-height: 1.2;
+  font-weight: 750;
+  margin: 0;
+  color: var(--ink);
+}
+
+.clinic-gallery-header p {
+  color: var(--muted);
+  font-size: 16px;
+  max-width: 680px;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.clinic-gallery-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.clinic-gallery-tab {
+  background: #f1f5f3;
+  border: 1px solid #dbe6e0;
+  color: var(--ink);
+  font-size: 13.5px;
+  font-weight: 600;
+  padding: 8px 18px;
+  border-radius: 9999px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.clinic-gallery-tab:hover {
+  background: #e2ede8;
+  border-color: #c4d7ce;
+}
+
+.clinic-gallery-tab.active {
+  background: var(--ink);
+  color: #ffffff;
+  border-color: var(--ink);
+  box-shadow: 0 4px 12px rgba(16, 45, 67, 0.15);
+}
+
+.clinic-gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 24px;
+}
+
+.clinic-gallery-card {
+  background: #ffffff;
+  border: 1px solid #e5ece8;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 4px 16px rgba(16, 45, 67, 0.04);
+  transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+  padding: 0;
+}
+
+.clinic-gallery-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 14px 30px rgba(16, 45, 67, 0.1);
+  border-color: #bed7cc;
+}
+
+.clinic-gallery-image-wrap {
+  position: relative;
+  width: 100%;
+  height: 250px;
+  background: #eef3f0;
+  overflow: hidden;
+}
+
+.clinic-gallery-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.4s ease;
+  display: block;
+}
+
+.clinic-gallery-card:hover .clinic-gallery-image {
+  transform: scale(1.04);
+}
+
+.clinic-gallery-badge {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 650;
+  padding: 4px 12px;
+  border-radius: 20px;
+  border: 1px solid rgba(220, 235, 228, 0.9);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.clinic-gallery-zoom-pill {
+  position: absolute;
+  bottom: 14px;
+  right: 14px;
+  background: rgba(16, 45, 67, 0.88);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: all 0.2s ease;
+}
+
+.clinic-gallery-card:hover .clinic-gallery-zoom-pill {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.clinic-gallery-card-body {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+}
+
+.clinic-gallery-card-body h3 {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 0;
+  color: var(--ink);
+}
+
+.clinic-gallery-card-body p {
+  font-size: 13.5px;
+  color: var(--muted);
+  line-height: 1.55;
+  margin: 0;
+}
+
+/* Lightbox Modal */
+.clinic-lightbox-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  background: rgba(10, 25, 38, 0.88);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.clinic-lightbox-dialog {
+  background: #ffffff;
+  border-radius: 12px;
+  overflow: hidden;
+  max-width: 960px;
+  width: 100%;
+  max-height: 92dvh;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.45);
+}
+
+.clinic-lightbox-header {
+  padding: 16px 22px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #e5ede8;
+}
+
+.clinic-lightbox-header h3 {
+  margin: 0;
+  font-size: 18px;
+  color: var(--ink);
+}
+
+.clinic-lightbox-close {
+  background: #f1f5f3;
+  border: 1px solid #dce7e1;
+  color: var(--ink);
+  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.clinic-lightbox-close:hover {
+  background: #e2ede8;
+}
+
+.clinic-lightbox-media-wrap {
+  position: relative;
+  background: #0d1e29;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  max-height: 60dvh;
+  overflow: hidden;
+}
+
+.clinic-lightbox-img {
+  max-width: 100%;
+  max-height: 60dvh;
+  object-fit: contain;
+}
+
+.clinic-lightbox-nav-btn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(4px);
+  border: none;
+  border-radius: 50%;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  transition: all 0.2s ease;
+  color: var(--ink);
+}
+
+.clinic-lightbox-nav-btn:hover {
+  background: #ffffff;
+  transform: translateY(-50%) scale(1.08);
+}
+
+.clinic-lightbox-nav-prev {
+  left: 16px;
+}
+
+.clinic-lightbox-nav-next {
+  right: 16px;
+}
+
+.clinic-lightbox-footer {
+  padding: 16px 22px;
+  background: #f9fbf9;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.clinic-lightbox-footer p {
+  margin: 0;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+@media (max-width: 768px) {
+  .clinic-gallery-section {
+    padding: 50px 20px;
+  }
+  .clinic-gallery-header h2 {
+    font-size: 26px;
+  }
+  .clinic-gallery-grid {
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+  .clinic-gallery-image-wrap {
+    height: 220px;
+  }
+  .clinic-lightbox-backdrop {
+    padding: 10px;
+  }
+  .clinic-lightbox-dialog {
+    max-height: 96dvh;
+  }
+  .clinic-lightbox-media-wrap {
+    max-height: 48dvh;
+  }
+  .clinic-lightbox-footer {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+}
+
+
 

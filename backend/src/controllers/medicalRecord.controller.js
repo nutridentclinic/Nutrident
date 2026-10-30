@@ -1,4 +1,6 @@
 const MedicalRecord = require('../models/MedicalRecord');
+const Patient = require('../models/Patient');
+const User = require('../models/User');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/appError');
 const { success } = require('../utils/response');
@@ -37,10 +39,18 @@ exports.uploadRecord = catchAsync(async (req, res, next) => {
   if (!req.file) return next(new AppError('A file is required.', 400));
 
   const { patientId, type, title, description, appointmentId } = req.body;
-  const targetPatient = req.user.role === 'patient' ? req.user._id : patientId;
+  let targetPatient = req.user.role === 'patient' ? req.user._id : patientId;
   if (!targetPatient) {
     if (req.file.filename) await deleteCloudinaryFile(req.file.filename);
     return next(new AppError('patientId is required.', 400));
+  }
+
+  // If patientId is a Patient profile ID, normalize to the underlying User ID
+  if (targetPatient) {
+    const patientProfile = await Patient.findById(targetPatient);
+    if (patientProfile?.user) {
+      targetPatient = patientProfile.user;
+    }
   }
 
   try {
@@ -72,10 +82,40 @@ exports.uploadRecord = catchAsync(async (req, res, next) => {
   }
 });
 
-// @route GET /api/medical-records/me  (patient)
+// @route GET /api/medical-records (admin/receptionist/dentist - browse all records across patients)
+exports.getAllRecords = catchAsync(async (req, res) => {
+  const { type, search } = req.query;
+  const filter = {};
+  if (type) filter.type = type;
+
+  const records = await MedicalRecord.find(filter)
+    .populate('patient', 'name email phone')
+    .populate('uploadedBy', 'name role')
+    .sort('-createdAt');
+
+  let results = records;
+  if (search && search.trim()) {
+    const s = search.trim().toLowerCase();
+    results = records.filter(
+      (r) =>
+        r.title?.toLowerCase().includes(s) ||
+        r.patient?.name?.toLowerCase().includes(s) ||
+        r.patient?.phone?.includes(s) ||
+        r.patient?.email?.toLowerCase().includes(s)
+    );
+  }
+
+  success(res, 200, 'All medical records fetched.', results);
+});
+
+// @route GET /api/medical-records/me  (patient - retrieve their own records)
 exports.getMyRecords = catchAsync(async (req, res) => {
   const { type } = req.query;
-  const filter = { patient: req.user._id };
+  const patientProfile = await Patient.findOne({ user: req.user._id });
+  const ids = [req.user._id];
+  if (patientProfile?._id) ids.push(patientProfile._id);
+
+  const filter = { patient: { $in: ids } };
   if (type) filter.type = type;
   const records = await MedicalRecord.find(filter).sort('-createdAt');
   success(res, 200, 'Medical records fetched.', records);
@@ -83,7 +123,22 @@ exports.getMyRecords = catchAsync(async (req, res) => {
 
 // @route GET /api/medical-records/patient/:patientId  (dentist/receptionist/admin)
 exports.getPatientRecords = catchAsync(async (req, res) => {
-  const records = await MedicalRecord.find({ patient: req.params.patientId }).sort('-createdAt');
+  const paramId = req.params.patientId;
+  const ids = [paramId];
+
+  // If paramId is a Patient profile ID, also query by User ID
+  const profileById = await Patient.findById(paramId);
+  if (profileById?.user) {
+    ids.push(profileById.user);
+  } else {
+    // If paramId is a User ID, also query by Patient profile ID
+    const profileByUser = await Patient.findOne({ user: paramId });
+    if (profileByUser?._id) {
+      ids.push(profileByUser._id);
+    }
+  }
+
+  const records = await MedicalRecord.find({ patient: { $in: ids } }).sort('-createdAt');
   success(res, 200, 'Medical records fetched.', records);
 });
 
@@ -92,7 +147,18 @@ exports.getRecordFile = catchAsync(async (req, res, next) => {
   const record = await MedicalRecord.findById(req.params.id);
   if (!record) return next(new AppError('Record not found.', 404));
 
-  const isPatientOwner = req.user.role === 'patient' && record.patient.toString() === req.user._id.toString();
+  let isPatientOwner = false;
+  if (req.user.role === 'patient') {
+    if (record.patient && record.patient.toString() === req.user._id.toString()) {
+      isPatientOwner = true;
+    } else {
+      const patientProfile = await Patient.findOne({ user: req.user._id });
+      if (patientProfile && record.patient && record.patient.toString() === patientProfile._id.toString()) {
+        isPatientOwner = true;
+      }
+    }
+  }
+
   const isStaff = ['dentist', 'receptionist', 'admin'].includes(req.user.role);
   if (!isPatientOwner && !isStaff) {
     return next(new AppError('You do not have access to this medical record.', 403));
