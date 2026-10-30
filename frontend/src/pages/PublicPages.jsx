@@ -9,9 +9,12 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock3,
+  Mail,
   MapPin,
   Maximize2,
+  Menu,
   MessageCircle,
+  Phone,
   ShieldCheck,
   Sparkles,
   Star,
@@ -24,6 +27,8 @@ import { AsyncView, EmptyState, LoadingState, PageTitle } from '../components/ui
 import { openCookiePreferencesModal } from '../utils/cookieConsent.js'
 
 export function PublicLayout() {
+  const [mobileOpen, setMobileOpen] = useState(false)
+
   return (
     <div className="public-shell">
       <header className="public-header">
@@ -49,8 +54,61 @@ export function PublicLayout() {
           <Link className="button button-primary button-small" to="/app/book">
             Book a visit <ArrowRight size={15} />
           </Link>
+          <button
+            type="button"
+            className="mobile-nav-toggle"
+            onClick={() => setMobileOpen((prev) => !prev)}
+            aria-label={mobileOpen ? 'Close navigation menu' : 'Open navigation menu'}
+            aria-expanded={mobileOpen}
+          >
+            {mobileOpen ? <X size={22} /> : <Menu size={22} />}
+          </button>
         </div>
       </header>
+
+      {/* Mobile Quick Navbar - always visible on phones directly under header */}
+      <nav className="public-mobile-nav-bar" aria-label="Mobile quick navigation">
+        <Link to="/services">Treatments</Link>
+        <Link to="/doctor">Meet the doctor</Link>
+        <Link to="/pricing">Fees</Link>
+        <Link to="/about">About</Link>
+        <Link to="/contact">Contact</Link>
+      </nav>
+
+      {/* Mobile Drawer Dropdown */}
+      {mobileOpen && (
+        <>
+          <div className="mobile-nav-drawer" role="dialog" aria-label="Mobile navigation drawer">
+            <div className="mobile-nav-links">
+              <Link to="/services" onClick={() => setMobileOpen(false)}>
+                Treatments <ChevronRight size={16} />
+              </Link>
+              <Link to="/doctor" onClick={() => setMobileOpen(false)}>
+                Meet the doctor <ChevronRight size={16} />
+              </Link>
+              <Link to="/pricing" onClick={() => setMobileOpen(false)}>
+                Fees <ChevronRight size={16} />
+              </Link>
+              <Link to="/about" onClick={() => setMobileOpen(false)}>
+                About <ChevronRight size={16} />
+              </Link>
+              <Link to="/contact" onClick={() => setMobileOpen(false)}>
+                Contact <ChevronRight size={16} />
+              </Link>
+            </div>
+            <div className="mobile-nav-actions">
+              <Link className="button button-outline" to="/login" onClick={() => setMobileOpen(false)}>
+                Sign in
+              </Link>
+              <Link className="button button-primary" to="/app/book" onClick={() => setMobileOpen(false)}>
+                Book a visit <ArrowRight size={15} />
+              </Link>
+            </div>
+          </div>
+          <div className="mobile-nav-backdrop" onClick={() => setMobileOpen(false)} />
+        </>
+      )}
+
       <Outlet />
       <footer className="public-footer">
         <Link to="/" className="brand-lockup">
@@ -620,6 +678,116 @@ export function PublicHome() {
         </AsyncView>
       </section>
 
+      {/* Dedicated Contact Us Section on Landing Page */}
+      <section className="public-section home-contact-section" id="contact" aria-label="Contact Nutrident Dental Clinic">
+        <div className="section-heading" style={{ marginBottom: '32px' }}>
+          <div>
+            <span className="eyebrow">Get In Touch</span>
+            <h2>
+              Visit or contact<br />
+              our dental clinic.
+            </h2>
+          </div>
+          <p style={{ maxWidth: '480px', color: 'var(--muted)', fontSize: '15px', lineHeight: 1.6 }}>
+            Have questions about dental procedures, appointments, or clinic timings? Contact DrNutrident directly by phone, email, or visit our clinic.
+          </p>
+        </div>
+
+        <div className="home-contact-grid">
+          {/* Card 1: Phone */}
+          <div className="home-contact-card">
+            <div className="home-contact-icon">
+              <Phone size={22} />
+            </div>
+            <div>
+              <span className="home-contact-label">Call or WhatsApp</span>
+              <a href="tel:+919420080771" className="home-contact-value">
+                +91-9420080771
+              </a>
+              <p className="home-contact-subtext">Mon – Sat: 9:00 AM – 8:00 PM</p>
+            </div>
+            <a
+              href="https://wa.me/919420080771"
+              target="_blank"
+              rel="noreferrer"
+              className="button button-outline button-small"
+              style={{ marginTop: 'auto', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+            >
+              <MessageCircle size={15} /> Chat on WhatsApp
+            </a>
+          </div>
+
+          {/* Card 2: Email */}
+          <div className="home-contact-card">
+            <div className="home-contact-icon">
+              <Mail size={22} />
+            </div>
+            <div>
+              <span className="home-contact-label">Email Us</span>
+              <a href="mailto:nutridentclinic01@gmail.com" className="home-contact-value" style={{ wordBreak: 'break-all' }}>
+                nutridentclinic01@gmail.com
+              </a>
+              <p className="home-contact-subtext">Direct inquiries &amp; consultation support</p>
+            </div>
+            <a
+              href="mailto:nutridentclinic01@gmail.com"
+              className="button button-outline button-small"
+              style={{ marginTop: 'auto', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+            >
+              <Mail size={15} /> Send an Email
+            </a>
+          </div>
+
+          {/* Card 3: Address */}
+          <div className="home-contact-card">
+            <div className="home-contact-icon">
+              <MapPin size={22} />
+            </div>
+            <div>
+              <span className="home-contact-label">Clinic Location</span>
+              <address className="home-contact-address">
+                Takli Rd, Godavari MIDC, Shankar Nagar, Dwarka, Nashik, Maharashtra 422011
+              </address>
+              <p className="home-contact-subtext">Convenient location in Dwarka, Nashik</p>
+            </div>
+            <a
+              href="https://maps.google.com/?q=Takli+Rd,+Godavari+MIDC,+Shankar+Nagar,+Dwarka,+Nashik,+Maharashtra+422011"
+              target="_blank"
+              rel="noreferrer"
+              className="button button-outline button-small"
+              style={{ marginTop: 'auto', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+            >
+              <MapPin size={15} /> View on Google Maps
+            </a>
+          </div>
+        </div>
+
+        {/* Clinic Visit Callout Banner */}
+        <div className="home-contact-banner">
+          <div className="home-contact-banner-image">
+            <img
+              src="/clinic/reception.jpg"
+              alt="DrNutrident Dental Clinic reception desk"
+            />
+          </div>
+          <div className="home-contact-banner-content">
+            <span className="home-contact-banner-badge">Welcoming Patients in Nashik</span>
+            <h3>Looking for gentle, expert dental care in Nashik?</h3>
+            <p>
+              Located at Shankar Nagar, Dwarka, Nashik. Book your visit online with instant confirmation or contact our front desk directly.
+            </p>
+            <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginTop: '8px' }}>
+              <Link to="/app/book" className="button button-primary">
+                Book a visit <ArrowRight size={16} />
+              </Link>
+              <Link to="/contact" className="button button-outline">
+                Full clinic details <ArrowRight size={15} />
+              </Link>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section className="booking-callout">
         <div>
           <span className="eyebrow">Your care, at your pace</span>
@@ -761,6 +929,13 @@ export function ContactPage() {
   const settingsQuery = useQuery({ queryKey: ['clinic-settings'], queryFn: api.settings.get })
   const settings = settingsQuery.data?.data
 
+  const clinicAddress = settings?.address || 'Takli Rd, Godavari MIDC, Shankar Nagar, Dwarka, Nashik, Maharashtra 422011'
+  const contactPhone = settings?.contactPhone || '+91-9420080771'
+  const contactEmail = settings?.contactEmail || 'nutridentclinic01@gmail.com'
+  const whatsappNumber = settings?.whatsappNumber || '+91-9420080771'
+  const mapUrl = settings?.mapUrl || `https://maps.google.com/?q=${encodeURIComponent(clinicAddress)}`
+  const openingHours = settings?.openingHours || 'Mon - Sat: 9:00 AM - 8:00 PM\nSunday: By appointment only'
+
   return (
     <main className="catalog-page">
       <PageTitle eyebrow="Contact" title="Get in touch with your clinic." />
@@ -770,57 +945,45 @@ export function ContactPage() {
         <p className="muted-copy">{settingsQuery.error.message}</p>
       ) : (
         <div className="section-panel">
-          <h2>{settings?.clinicName || 'Nutrident Dental Clinic'}</h2>
+          <h2>{settings?.clinicName || 'Nutrident Dental & Diet Clinic'}</h2>
           <div className="contact-details" style={{ display: 'grid', gap: '0.8rem', marginTop: '1rem' }}>
-            {settings?.address && (
-              <div>
-                <strong>Address:</strong> <p>{settings.address}</p>
-              </div>
-            )}
-            {settings?.openingHours && (
-              <div>
-                <strong>Clinic Hours:</strong> <p>{settings.openingHours}</p>
-              </div>
-            )}
-            {settings?.contactPhone && (
-              <div>
-                <strong>Phone:</strong>{' '}
-                <a href={`tel:${settings.contactPhone}`}>{settings.contactPhone}</a>
-              </div>
-            )}
-            {settings?.contactEmail && (
-              <div>
-                <strong>Email:</strong>{' '}
-                <a href={`mailto:${settings.contactEmail}`}>{settings.contactEmail}</a>
-              </div>
-            )}
-            {settings?.whatsappNumber && (
-              <div>
-                <strong>WhatsApp:</strong>{' '}
-                <a
-                  href={`https://wa.me/${settings.whatsappNumber.replace(/\D/g, '')}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="whatsapp-link"
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', color: '#16847c' }}
-                >
-                  <MessageCircle size={16} /> Chat on WhatsApp ({settings.whatsappNumber})
-                </a>
-              </div>
-            )}
-            {settings?.mapUrl && (
-              <div>
-                <a
-                  href={settings.mapUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="button button-outline button-small"
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', marginTop: '0.5rem' }}
-                >
-                  <MapPin size={15} /> View on Google Maps
-                </a>
-              </div>
-            )}
+            <div>
+              <strong>Address:</strong> <p>{clinicAddress}</p>
+            </div>
+            <div>
+              <strong>Clinic Hours:</strong> <p style={{ whiteSpace: 'pre-line' }}>{openingHours}</p>
+            </div>
+            <div>
+              <strong>Phone:</strong>{' '}
+              <a href={`tel:${contactPhone}`}>{contactPhone}</a>
+            </div>
+            <div>
+              <strong>Email:</strong>{' '}
+              <a href={`mailto:${contactEmail}`}>{contactEmail}</a>
+            </div>
+            <div>
+              <strong>WhatsApp:</strong>{' '}
+              <a
+                href={`https://wa.me/${whatsappNumber.replace(/\D/g, '')}`}
+                target="_blank"
+                rel="noreferrer"
+                className="whatsapp-link"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', color: '#16847c' }}
+              >
+                <MessageCircle size={16} /> Chat on WhatsApp ({whatsappNumber})
+              </a>
+            </div>
+            <div>
+              <a
+                href={mapUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="button button-outline button-small"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', marginTop: '0.5rem' }}
+              >
+                <MapPin size={15} /> View on Google Maps
+              </a>
+            </div>
           </div>
           <div style={{ marginTop: '2rem', borderTop: '1px solid #e2ede8', paddingTop: '1.5rem' }}>
             <h3 style={{ fontSize: '18px', fontWeight: 700, margin: '0 0 12px 0' }}>Visiting Our Clinic</h3>
