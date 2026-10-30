@@ -1,5 +1,6 @@
 const Appointment = require('../models/Appointment');
 const Dentist = require('../models/Dentist');
+const SlotHold = require('../models/SlotHold');
 const AppError = require('../utils/appError');
 const { getClinicDateTime } = require('../utils/appointmentAccess');
 const { parseDateOnly, dayRange, weekdayOf, todayInClinic, addDays } = require('../utils/clinicDate');
@@ -27,7 +28,7 @@ const isDentistPaused = (dentist) => {
 /**
  * Generates all bookable slots for a dentist on a given date,
  * based on weeklyAvailability, slotDurationMinutes, unavailableDates,
- * and excludes slots already booked (pending/confirmed).
+ * and excludes slots already booked (pending/confirmed) or currently held.
  */
 const getAvailableSlots = async (dentistId, dateStr) => {
   const dentist = await Dentist.findById(dentistId);
@@ -73,10 +74,20 @@ const getAvailableSlots = async (dentistId, dateStr) => {
   const booked = await Appointment.find({
     dentist: dentistId,
     date: { $gte: start, $lt: end },
-    status: { $in: ['pending', 'confirmed'] },
+    status: { $in: ['pending', 'confirmed', 'checked-in'] },
   }).select('startTime');
 
-  const bookedTimes = new Set(booked.map((b) => b.startTime));
+  const activeHolds = await SlotHold.find({
+    dentist: dentistId,
+    date: { $gte: start, $lt: end },
+    status: 'active',
+    expiresAt: { $gt: new Date() },
+  }).select('startTime');
+
+  const bookedTimes = new Set([
+    ...booked.map((b) => b.startTime),
+    ...activeHolds.map((h) => h.startTime),
+  ]);
 
   return allSlots.filter((slot) =>
     !bookedTimes.has(slot.startTime) && !(dateStr === today && slot.startTime <= currentTime)
@@ -98,34 +109,46 @@ const getDentistAvailabilityRange = async (dentistId, fromDateStr, toDateStr) =>
 
   const result = [];
   let curr = from;
-  let safety = 0;
 
-  while (curr <= to && safety < 60) {
-    safety += 1;
-    const weekday = weekdayOf(curr);
+  while (curr <= to) {
     let status = 'open';
     let slots = [];
+    let dateObj;
+
+    try {
+      dateObj = parseDateOnly(curr);
+    } catch {
+      curr = addDays(curr, 1);
+      continue;
+    }
+
+    const weekday = weekdayOf(dateObj);
 
     if (curr < today) {
       status = 'past';
-    } else if (isDentistPaused(dentist)) {
+    } else if (!dentist.isActive) {
+      status = 'paused';
+    } else if (dentist.pausedUntil && new Date(dentist.pausedUntil) > new Date()) {
       status = 'paused';
     } else {
       const isLeave = (dentist.unavailableDates || []).some(
         (d) => new Date(d).toISOString().slice(0, 10) === curr
       );
+
       if (isLeave) {
         status = 'leave';
       } else {
-        const daySched = (dentist.weeklyAvailability || []).find((d) => d.day === weekday);
-        if (!daySched || !daySched.slots || daySched.slots.length === 0) {
+        const dayAvail = (dentist.weeklyAvailability || []).find((d) => d.day === weekday);
+        if (!dayAvail || !dayAvail.slots || dayAvail.slots.length === 0) {
           status = 'closed';
         } else {
-          slots = await getAvailableSlots(dentist._id, curr);
-          if (slots.length === 0) {
-            status = 'full';
-          } else {
-            status = 'open';
+          try {
+            slots = await getAvailableSlots(dentistId, curr);
+            if (slots.length === 0) {
+              status = 'full';
+            }
+          } catch {
+            status = 'closed';
           }
         }
       }
@@ -146,7 +169,7 @@ const getDentistAvailabilityRange = async (dentistId, fromDateStr, toDateStr) =>
 
 /**
  * Atomically checks + reserves a slot to prevent double booking.
- * Call this right before creating the Appointment document.
+ * Call this right before creating the Appointment or SlotHold document.
  */
 const assertSlotIsFree = async (dentistId, date, startTime) => {
   const dateStr = typeof date === 'string' ? date.slice(0, 10) : date.toISOString().slice(0, 10);
@@ -156,10 +179,22 @@ const assertSlotIsFree = async (dentistId, date, startTime) => {
     dentist: dentistId,
     date: { $gte: start, $lt: end },
     startTime,
-    status: { $in: ['pending', 'confirmed'] },
+    status: { $in: ['pending', 'confirmed', 'checked-in'] },
   });
 
   if (clash) throw new AppError('This slot has just been booked. Please choose another slot.', 409);
+
+  const holdClash = await SlotHold.findOne({
+    dentist: dentistId,
+    date: { $gte: start, $lt: end },
+    startTime,
+    status: 'active',
+    expiresAt: { $gt: new Date() },
+  });
+
+  if (holdClash) {
+    throw new AppError('This slot is currently held by someone completing payment. Please choose another slot.', 409);
+  }
 };
 
 module.exports = {

@@ -103,29 +103,30 @@ exports.createAppointment = catchAsync(async (req, res, next) => {
     return next(new AppError('Pay at clinic is not currently available.', 400));
   }
 
-  const appointment = await createAppointmentSafe({
-    patient: req.user._id,
-    familyMemberName: familyMemberName || null,
-    dentist: dentist._id,
-    clinic: dentist.clinic || null,
-    date,
-    startTime,
-    endTime,
-    mode: 'in-clinic',
-    reasonForVisit,
-    fees: {
-      consultationFee,
-      platformFee: 0,
-      totalAmount: consultationFee,
-    },
-    status: isPayAtClinic ? 'confirmed' : 'pending',
-    paymentStatus: 'pending',
-    payAtClinic: Boolean(isPayAtClinic),
-  });
-
   const doctorName = dentist.user?.name ? `Dr. ${dentist.user.name}` : 'the doctor';
 
+  // --- PATH A: Pay at clinic (confirmed immediately) ---
   if (isPayAtClinic) {
+    const appointment = await createAppointmentSafe({
+      patient: req.user._id,
+      familyMemberName: familyMemberName || null,
+      dentist: dentist._id,
+      clinic: dentist.clinic || null,
+      date,
+      startTime,
+      endTime,
+      mode: 'in-clinic',
+      reasonForVisit,
+      fees: {
+        consultationFee,
+        platformFee: 0,
+        totalAmount: consultationFee,
+      },
+      status: 'confirmed',
+      paymentStatus: 'pending',
+      payAtClinic: true,
+    });
+
     await notifyUser(req.user._id, {
       title: 'Appointment Confirmed',
       message: `Your appointment with ${doctorName} on ${date} at ${startTime} has been confirmed. Please settle payment at the clinic reception desk upon arrival.`,
@@ -153,24 +154,104 @@ exports.createAppointment = catchAsync(async (req, res, next) => {
     return success(res, 201, 'Appointment confirmed with pay-at-clinic.', appointment);
   }
 
-  await notifyUser(req.user._id, {
-    title: 'Appointment Requested',
-    message: `Your appointment with ${doctorName} on ${date} at ${startTime} is pending payment/confirmation.`,
-    type: 'appointment_confirmed',
-    relatedId: appointment._id,
-  });
-
-  if (dentist.user) {
-    const dentistUserId = dentist.user._id || dentist.user;
-    await notifyUser(dentistUserId, {
-      title: 'New Appointment Booking',
-      message: `A new appointment has been booked for ${date} at ${startTime}.`,
-      type: 'new_booking',
-      relatedId: appointment._id,
-    });
+  // --- PATH B: Online Payment (NO pending appointment created; create SlotHold + Razorpay Order) ---
+  if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
+    return next(new AppError('Online payments are not configured on the server yet.', 503));
   }
 
-  success(res, 201, 'Appointment created. Proceed to payment to confirm.', appointment);
+  const amountInPaise = Math.round(consultationFee * 100);
+  const razorpay = require('../config/razorpay');
+  const SlotHold = require('../models/SlotHold');
+
+  const order = await razorpay.orders.create({
+    amount: amountInPaise,
+    currency: 'INR',
+    receipt: `hold_${Date.now()}`,
+    notes: {
+      patientId: String(req.user._id),
+      dentistId: String(dentist._id),
+      startTime,
+      date: String(date),
+    },
+  });
+
+  const holdMinutes = Number(process.env.SLOT_HOLD_MINUTES) || 10;
+  const expiresAt = new Date(Date.now() + holdMinutes * 60 * 1000);
+
+  let hold;
+  try {
+    hold = await SlotHold.create({
+      patient: req.user._id,
+      familyMemberName: familyMemberName || null,
+      dentist: dentist._id,
+      clinic: dentist.clinic || null,
+      date,
+      startTime,
+      endTime,
+      mode: 'in-clinic',
+      reasonForVisit: reasonForVisit || '',
+      fees: {
+        consultationFee,
+        platformFee: 0,
+        totalAmount: consultationFee,
+      },
+      razorpayOrderId: order.id,
+      expiresAt,
+      status: 'active',
+    });
+  } catch (err) {
+    if (err.code === 11000) {
+      throw new AppError('This slot was just selected by another patient. Please choose another slot.', 409);
+    }
+    throw err;
+  }
+
+  const payment = await Payment.create({
+    patient: req.user._id,
+    amount: consultationFee,
+    razorpayOrderId: order.id,
+    status: 'created',
+    hold: hold._id,
+  });
+
+  return success(res, 201, 'Slot held. Proceed to payment to complete booking.', {
+    holdId: hold._id,
+    order: {
+      orderId: order.id,
+      amount: order.amount,
+      currency: order.currency,
+      keyId: process.env.RAZORPAY_KEY_ID,
+      expiresAt: expiresAt.toISOString(),
+      holdMinutes,
+    },
+    paymentId: payment._id,
+  });
+});
+
+// @route POST /api/appointments/holds/:id/cancel
+exports.cancelHold = catchAsync(async (req, res, next) => {
+  const SlotHold = require('../models/SlotHold');
+  const hold = await SlotHold.findById(req.params.id);
+  if (!hold) {
+    return success(res, 200, 'Hold already released or not found.');
+  }
+
+  const isOwner = hold.patient.toString() === req.user._id.toString();
+  const isStaff = ['admin', 'receptionist', 'dentist'].includes(req.user.role);
+  if (!isOwner && !isStaff) {
+    return next(new AppError('You do not have permission to cancel this hold.', 403));
+  }
+
+  hold.status = 'released';
+  await hold.save();
+  await SlotHold.deleteOne({ _id: hold._id });
+
+  await Payment.findOneAndUpdate(
+    { razorpayOrderId: hold.razorpayOrderId, status: 'created' },
+    { status: 'failed', failureReason: 'Hold cancelled by user' }
+  );
+
+  return success(res, 200, 'Slot hold released.');
 });
 
 // @route POST /api/appointments/staff  (receptionist/admin books a confirmed walk-in or phone appointment)

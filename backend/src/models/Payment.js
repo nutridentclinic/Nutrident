@@ -4,6 +4,7 @@ const paymentSchema = new mongoose.Schema(
   {
     patient: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     appointment: { type: mongoose.Schema.Types.ObjectId, ref: 'Appointment', default: null },
+    hold: { type: mongoose.Schema.Types.ObjectId, ref: 'SlotHold', default: null },
     invoice: { type: mongoose.Schema.Types.ObjectId, ref: 'Invoice', default: null },
 
     amount: { type: Number, required: true }, // in INR (rupees, not paise)

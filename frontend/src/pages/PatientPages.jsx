@@ -70,8 +70,8 @@ export function PatientDashboard() {
     queryFn: api.patients.mine,
     ...queryOptions,
   });
-  const nextVisit = appointments.data?.data?.find((item) =>
-    ["pending", "confirmed"].includes(item.status),
+  const nextVisit = appointments.data?.data?.find(
+    (item) => item.status === "confirmed",
   );
   return (
     <div className="dashboard-page">
@@ -106,8 +106,8 @@ export function PatientDashboard() {
           </span>
           <small>Upcoming visits</small>
           <strong>
-            {appointments.data?.data?.filter((item) =>
-              ["pending", "confirmed"].includes(item.status),
+            {appointments.data?.data?.filter(
+              (item) => item.status === "confirmed",
             ).length ?? "—"}
           </strong>
         </article>
@@ -305,7 +305,6 @@ export function PatientAppointments() {
           >
             <option value="">All appointments</option>
             {[
-              "pending",
               "confirmed",
               "completed",
               "cancelled",
@@ -371,7 +370,7 @@ export function PatientAppointments() {
                     </button>
                   )
                 )}
-                {["pending", "confirmed"].includes(item.status) && (
+                {item.status === "confirmed" && (
                   <button
                     className="button button-quiet button-small"
                     onClick={async () => {
@@ -389,7 +388,7 @@ export function PatientAppointments() {
                     Cancel
                   </button>
                 )}
-                {["pending", "confirmed"].includes(item.status) && (
+                {item.status === "confirmed" && (
                   <button
                     className="button button-outline button-small"
                     onClick={() => {
@@ -619,7 +618,7 @@ export function AppointmentDetail() {
                   </dd>
                 </div>
               </dl>
-              {item && ["pending", "confirmed"].includes(item.status) && (
+              {item && item.status === "confirmed" && (
                 <button className="button button-quiet" onClick={cancelAppointment}>
                   Cancel appointment
                 </button>
@@ -713,22 +712,6 @@ async function loadCheckout() {
   });
 }
 
-function pollPayment(appointmentId, onResult) {
-  let attempts = 0;
-  const check = async () => {
-    attempts += 1;
-    try {
-      const result = await api.appointments.detail(appointmentId);
-      if (result.data?.paymentStatus === "paid") return onResult("confirmed");
-    } catch {
-      /* A transient read failure is retried within the bounded window. */
-    }
-    if (attempts >= 10) return onResult("not-confirmed");
-    window.setTimeout(check, 3000);
-  };
-  window.setTimeout(check, 3000);
-}
-
 export function AppointmentBooking() {
   const { dentistId: paramDentistId } = useParams();
   const [searchParams] = useSearchParams();
@@ -761,7 +744,16 @@ export function AppointmentBooking() {
   const [stage, setStage] = useState("idle");
   const [message, setMessage] = useState("");
   const [appointmentId, setAppointmentId] = useState("");
+  const [activeHoldId, setActiveHoldId] = useState(null);
   const [serverFees, setServerFees] = useState(null);
+
+  useEffect(() => {
+    return () => {
+      if (activeHoldId) {
+        api.appointments.cancelHold(activeHoldId).catch(() => {});
+      }
+    };
+  }, [activeHoldId]);
 
   // 14-day availability range calculation
   const fromDate = useMemo(() => clinicDate(), []);
@@ -820,46 +812,42 @@ export function AppointmentBooking() {
   const resultLabel = useMemo(
     () =>
       ({
-        "creating-appointment": "Saving your appointment…",
+        "creating-appointment": "Holding your appointment slot…",
         "creating-order": "Preparing secure checkout…",
         "checkout-open": "Checkout is open in a secure Razorpay window.",
         verifying: "Verifying payment with the clinic…",
-        polling: "Waiting for the clinic to confirm payment…",
         confirmed: "Payment confirmed. Your appointment is booked.",
-        "not-confirmed":
-          "Payment is not confirmed. No success has been recorded.",
         failed: "The booking could not be completed.",
       })[stage],
     [stage],
   );
 
-  const checkStatus = (id) => {
-    setStage("polling");
-    pollPayment(id, (status) => {
-      if (status === "confirmed") {
-        setStage("confirmed");
-        setMessage("Payment confirmed by the clinic.");
-      } else {
-        setStage("not-confirmed");
-        setMessage(
-          "Payment is not completed. You can retry checkout; your slot is held for 15 minutes.",
-        );
+  const handlePaymentCancelled = async (holdId, reasonMsg) => {
+    setStage("failed");
+    setMessage(reasonMsg || "Payment was not completed. No appointment was booked.");
+    setBusy(false);
+    setActiveHoldId(null);
+    try {
+      if (holdId) {
+        await api.appointments.cancelHold(holdId);
       }
-    });
+    } catch {
+      // hold might already be expired or removed
+    }
+    slotsQuery.refetch();
   };
 
-  const payForAppointment = async (id) => {
+  const startCheckout = async ({ holdId, order }) => {
     setBusy(true);
     setStage("creating-order");
     setMessage("");
     try {
-      const orderResponse = await api.payments.createOrder(id);
-      const order = orderResponse.data;
       const loaded = await loadCheckout();
-      if (!loaded || !window.Razorpay)
+      if (!loaded || !window.Razorpay) {
         throw new Error(
-          "Secure checkout could not be loaded. Your appointment remains unpaid; you can retry.",
+          "Secure checkout could not be loaded. Please check your internet connection and try again.",
         );
+      }
       const checkout = new window.Razorpay({
         key: order.keyId,
         order_id: order.orderId,
@@ -876,34 +864,41 @@ export function AppointmentBooking() {
               razorpay_payment_id: response.razorpay_payment_id,
               razorpay_signature: response.razorpay_signature,
             });
-            if (
-              verification.data?.payment?.status === "paid" &&
-              verification.data?.appointment?.paymentStatus === "paid"
-            ) {
+            const created = verification.data?.appointment;
+            if (created?._id) {
+              setAppointmentId(created._id);
+              setActiveHoldId(null);
               setStage("confirmed");
-              setMessage("Payment confirmed by the clinic.");
-            } else checkStatus(id);
-          } catch {
-            checkStatus(id);
+              setMessage("Payment confirmed by the clinic. Your appointment is booked!");
+            } else {
+              await handlePaymentCancelled(holdId, "Payment verification could not be completed. No appointment was booked.");
+            }
+          } catch (err) {
+            await handlePaymentCancelled(holdId, err.message || "Payment verification failed. No appointment was booked.");
+          } finally {
+            setBusy(false);
           }
         },
-        modal: { ondismiss: () => checkStatus(id) },
+        modal: {
+          ondismiss: async () => {
+            await handlePaymentCancelled(holdId, "Payment was not completed. No appointment was booked.");
+          },
+        },
         theme: { color: "#137a76" },
       });
-      checkout.on("payment.failed", () => checkStatus(id));
+      checkout.on("payment.failed", async () => {
+        await handlePaymentCancelled(holdId, "Payment failed. No appointment was booked.");
+      });
       setStage("checkout-open");
       checkout.open();
     } catch (error) {
-      setStage("failed");
-      setMessage(error.message);
-    } finally {
-      setBusy(false);
+      await handlePaymentCancelled(holdId, error.message);
     }
   };
 
   const book = async (event) => {
     event.preventDefault();
-    if (appointmentId && stage === "confirmed") return;
+    if (stage === "confirmed") return;
     if (!settingsQuery.isSuccess) {
       setMessage(
         settingsQuery.error?.message || "Loading clinic fee information…",
@@ -928,16 +923,19 @@ export function AppointmentBooking() {
         familyMemberName: familyMemberName || undefined,
         payAtClinic: isPayAtClinic,
       });
-      const appointment = result.data;
-      setAppointmentId(appointment._id);
-      setServerFees(appointment.fees);
 
       if (isPayAtClinic) {
+        const appointment = result.data;
+        setAppointmentId(appointment._id);
+        setServerFees(appointment.fees);
         setStage("confirmed");
         setMessage("Your appointment is confirmed! Consultation fee will be settled at the front desk when you arrive.");
         setBusy(false);
       } else {
-        await payForAppointment(appointment._id);
+        const { holdId, order, fees } = result.data || {};
+        if (fees) setServerFees(fees);
+        setActiveHoldId(holdId);
+        await startCheckout({ holdId, order });
       }
     } catch (error) {
       setStage("failed");
@@ -1242,7 +1240,7 @@ export function AppointmentBooking() {
 
             {paymentChoice === "online" && (
               <p className="summary-note">
-                Your slot is held for 15 minutes while completing online payment. Cancellation refunds follow clinic policy.
+                Your slot is temporarily held during checkout. An appointment is only booked after successful payment.
               </p>
             )}
             {paymentChoice === "at-clinic" && (
@@ -1267,16 +1265,6 @@ export function AppointmentBooking() {
               >
                 View appointments <ArrowRight size={16} />
               </Link>
-            ) : appointmentId && ["failed", "not-confirmed"].includes(stage) ? (
-              <button
-                type="button"
-                disabled={busy}
-                className="button button-primary button-wide"
-                onClick={() => payForAppointment(appointmentId)}
-              >
-                {busy ? "Preparing checkout…" : "Retry payment"}{" "}
-                <ArrowRight size={16} />
-              </button>
             ) : (
               <button
                 disabled={busy || !selectedSlot || !isAcceptingAppointments}

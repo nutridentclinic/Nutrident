@@ -8,6 +8,8 @@ const { createAppointmentRules, createStaffAppointmentRules, rescheduleRules } =
 router.use(protect);
 
 router.post('/', restrictTo('patient'), createAppointmentRules, validate, ctrl.createAppointment);
+router.post('/holds/:id/cancel', ctrl.cancelHold);
+router.delete('/holds/:id', ctrl.cancelHold);
 router.post('/staff', restrictTo('admin', 'receptionist'), createStaffAppointmentRules, validate, ctrl.createStaffAppointment);
 router.get('/', restrictTo('admin', 'receptionist'), ctrl.getAllAppointments);
 router.get('/me', restrictTo('patient'), ctrl.getMyAppointments);

@@ -626,7 +626,6 @@ export function AppointmentLookup() {
             }}
           >
             <option value="">All statuses</option>
-            <option value="pending">Pending</option>
             <option value="confirmed">Confirmed</option>
             <option value="checked-in">Checked In</option>
             <option value="completed">Completed</option>
@@ -732,15 +731,7 @@ export function AppointmentLookup() {
               </div>
 
               <div className="inline-actions" style={{ marginTop: "1rem", display: "flex", gap: "0.6rem", flexWrap: "wrap", alignItems: "center" }}>
-                {item.status === "pending" && (
-                  <button
-                    className="button button-outline"
-                    onClick={() => act("confirm")}
-                  >
-                    {item.paymentStatus === "paid" ? "Confirm visit" : "Staff override"} <Check size={15} />
-                  </button>
-                )}
-                {["pending", "confirmed", "checked-in"].includes(item.status) && (
+                {["confirmed", "checked-in"].includes(item.status) && (
                   <button
                     className="button button-quiet"
                     onClick={() => act("noShow")}
@@ -748,7 +739,7 @@ export function AppointmentLookup() {
                     Mark no-show
                   </button>
                 )}
-                {["pending", "confirmed", "checked-in"].includes(item.status) && (
+                {["confirmed", "checked-in"].includes(item.status) && (
                   <button
                     className="button button-quiet button-danger"
                     onClick={() => act("cancel")}

@@ -120,6 +120,7 @@ describe('N1, N2, and N3 Root Cause Fix Verification', () => {
           startTime: '10:00',
           mode: 'in-clinic',
           reasonForVisit: 'General checkup',
+          payAtClinic: true,
         });
 
       expect(okRes.status).toBe(201);

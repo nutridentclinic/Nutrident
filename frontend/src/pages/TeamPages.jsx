@@ -376,7 +376,7 @@ export function DentistSchedule() {
             onChange={(event) => setStatus(event.target.value)}
           >
             <option value="">All statuses</option>
-            {["pending", "confirmed", "completed", "cancelled", "no-show", "rescheduled"].map(
+            {["confirmed", "completed", "cancelled", "no-show", "rescheduled"].map(
               (s) => (
                 <option key={s}>{s}</option>
               ),
@@ -420,34 +420,6 @@ export function DentistSchedule() {
                 <StatusBadge value={item.status} />
               </div>
               <div className="appointment-actions">
-                {item.status === "pending" && (
-                  <>
-                    <button
-                      className="button button-outline button-small"
-                      disabled={item.paymentStatus !== "paid"}
-                      title={
-                        item.paymentStatus !== "paid"
-                          ? "Payment is required before confirming."
-                          : undefined
-                      }
-                      onClick={() =>
-                        action.mutate({
-                          action: api.appointments.confirm,
-                          args: [item._id],
-                        })
-                      }
-                    >
-                      Confirm
-                    </button>
-                    <button
-                      type="button"
-                      className="button button-outline button-small"
-                      onClick={() => openRescheduleModal(item)}
-                    >
-                      Reschedule
-                    </button>
-                  </>
-                )}
                 {item.status === "confirmed" && (
                   <>
                     <Link
@@ -475,12 +447,10 @@ export function DentistSchedule() {
                     >
                       No-show
                     </button>
+                    <button className="button button-quiet button-small" onClick={() => cancelAppointment(item)}>
+                      Cancel
+                    </button>
                   </>
-                )}
-                {["pending", "confirmed"].includes(item.status) && (
-                  <button className="button button-quiet button-small" onClick={() => cancelAppointment(item)}>
-                    Cancel
-                  </button>
                 )}
               </div>
             </article>
@@ -2367,7 +2337,7 @@ export function QueuePage({ role = "dentist" }) {
       : entries;
 
   const registeredAppts = (todayAppointments.data?.data || []).filter(
-    (a) => ["pending", "confirmed"].includes(a.status) && !entries.some((e) => (e.appointment?._id || e.appointment) === a._id)
+    (a) => a.status === "confirmed" && !entries.some((e) => (e.appointment?._id || e.appointment) === a._id)
   );
 
   return (

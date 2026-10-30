@@ -144,9 +144,15 @@ const processReviewReminders = async (now = new Date()) => {
 // Start all scheduled jobs
 const startReminderJob = () => {
 
-  // Check pending appointments and resume dentists every minute
+  // Check expired slot holds, pending appointments and resume dentists every minute
   cron.schedule('* * * * *', async () => {
     try {
+      const SlotHold = require('../models/SlotHold');
+      const expiredHolds = await SlotHold.deleteMany({ expiresAt: { $lt: new Date() } });
+      if (expiredHolds.deletedCount) {
+        logger.info(`Cleaned up ${expiredHolds.deletedCount} expired slot hold(s).`);
+      }
+
       const { filter, update } = getPendingExpiry();
 
       const result = await Appointment.updateMany(filter, update);

@@ -117,6 +117,9 @@ exports.verifyPayment = catchAsync(async (req, res, next) => {
     return next(new AppError('Razorpay payment details do not match this order.', 400));
   }
 
+  const SlotHold = require('../models/SlotHold');
+  const { createInvoiceForAppointment } = require('../services/invoice.service');
+
   let appointment = null;
   if (payment.appointment) {
     appointment = await Appointment.findById(payment.appointment);
@@ -128,8 +131,8 @@ exports.verifyPayment = catchAsync(async (req, res, next) => {
         { new: true }
       );
       if (capturedPayment) {
-        try { await processRefund(capturedPayment, null, 'Auto-refund: appointment is no longer active') }
-        catch (error) { logger.error(`Auto-refund failed for payment ${payment._id}: ${error.message}`) }
+        try { await processRefund(capturedPayment, null, 'Auto-refund: appointment is no longer active'); }
+        catch (error) { logger.error(`Auto-refund failed for payment ${payment._id}: ${error.message}`); }
       }
       return next(new AppError('This appointment is no longer active. Any captured payment will be refunded.', 409));
     }
@@ -138,11 +141,75 @@ exports.verifyPayment = catchAsync(async (req, res, next) => {
     }
   }
 
+  // Idempotency: if already confirmed and paid, return existing appointment
+  if (appointment && appointment.paymentStatus === 'paid' && appointment.status === 'confirmed') {
+    return success(res, 200, 'Payment verified successfully.', { payment, appointment });
+  }
+
+  // If no appointment yet, convert from active SlotHold
+  if (!appointment) {
+    const hold = await SlotHold.findOne({ razorpayOrderId: razorpay_order_id });
+    if (!hold) {
+      return next(new AppError('Booking hold not found or already expired.', 404));
+    }
+
+    const dateStr = typeof hold.date === 'string' ? hold.date.slice(0, 10) : hold.date.toISOString().slice(0, 10);
+    const { start, end } = dayRange(dateStr);
+
+    const clash = await Appointment.findOne({
+      dentist: hold.dentist,
+      date: { $gte: start, $lt: end },
+      startTime: hold.startTime,
+      status: { $in: ['confirmed', 'checked-in'] },
+    });
+
+    if (clash) {
+      const capturedPayment = await Payment.findOneAndUpdate(
+        { _id: payment._id, status: { $in: ['created', 'pending', 'failed'] } },
+        { status: 'paid', razorpayPaymentId: razorpay_payment_id, razorpaySignature: razorpay_signature, method: providerPayment.method || '' },
+        { new: true }
+      );
+      if (capturedPayment) {
+        try {
+          await processRefund(capturedPayment, null, 'Auto-refund: Slot expired and was booked by another patient');
+        } catch (rfErr) {
+          logger.error(`Auto-refund failed for hold clash: ${rfErr.message}`);
+        }
+      }
+      return next(new AppError('Your reservation expired and the slot was taken. Any payment captured will be refunded immediately.', 409));
+    }
+
+    appointment = await Appointment.create({
+      patient: hold.patient,
+      familyMemberName: hold.familyMemberName || null,
+      dentist: hold.dentist,
+      clinic: hold.clinic || null,
+      date: hold.date,
+      startTime: hold.startTime,
+      endTime: hold.endTime,
+      mode: hold.mode || 'in-clinic',
+      reasonForVisit: hold.reasonForVisit || '',
+      fees: hold.fees,
+      status: 'confirmed',
+      paymentStatus: 'paid',
+      payAtClinic: false,
+      payment: payment._id,
+    });
+
+    await SlotHold.deleteOne({ _id: hold._id });
+  }
+
   let updatedPayment = payment;
   if (payment.status !== 'paid' || payment.razorpayPaymentId !== razorpay_payment_id) {
     updatedPayment = await Payment.findOneAndUpdate(
       { _id: payment._id, status: { $in: ['created', 'pending', 'failed'] } },
-      { razorpayPaymentId: razorpay_payment_id, razorpaySignature: razorpay_signature, status: 'paid', method: providerPayment.method || '' },
+      {
+        razorpayPaymentId: razorpay_payment_id,
+        razorpaySignature: razorpay_signature,
+        status: 'paid',
+        method: providerPayment.method || '',
+        appointment: appointment._id,
+      },
       { new: true }
     );
     if (!updatedPayment) {
@@ -154,11 +221,19 @@ exports.verifyPayment = catchAsync(async (req, res, next) => {
     }
   }
 
-  if (appointment && appointment.paymentStatus !== 'paid') {
+  if (appointment && (appointment.paymentStatus !== 'paid' || appointment.status !== 'confirmed')) {
     appointment.paymentStatus = 'paid';
-    if (appointment.status === 'pending') appointment.status = 'confirmed';
+    appointment.status = 'confirmed';
+    appointment.payment = updatedPayment._id;
     await appointment.save();
   }
+
+  try {
+    await createInvoiceForAppointment(appointment);
+  } catch (invErr) {
+    logger.error(`Invoice creation error: ${invErr.message}`);
+  }
+
   if (payment.invoice) {
     await Invoice.findByIdAndUpdate(payment.invoice, { status: 'paid', payment: payment._id });
   }
@@ -226,22 +301,77 @@ exports.razorpayWebhook = catchAsync(async (req, res) => {
   if (event.event === 'payment.captured') {
     const orderId = event.payload.payment.entity.order_id;
     const paymentId = event.payload.payment.entity.id;
+    const method = event.payload.payment.entity.method;
 
-    const payment = await Payment.findOneAndUpdate(
-      { razorpayOrderId: orderId, status: { $in: ['created', 'pending', 'failed'] } },
-      { status: 'paid', razorpayPaymentId: paymentId, method: event.payload.payment.entity.method },
-      { new: true }
-    );
+    let payment = await Payment.findOne({ razorpayOrderId: orderId });
+    if (payment) {
+      payment.status = 'paid';
+      payment.razorpayPaymentId = paymentId;
+      payment.method = method || payment.method;
+      await payment.save();
 
-    if (payment && payment.appointment) {
-      const appointment = await Appointment.findById(payment.appointment);
-      if (appointment && ['cancelled', 'rescheduled'].includes(appointment.status)) {
-        try { await processRefund(payment, null, 'Auto-refund: appointment is no longer active') }
-        catch (err) { logger.error(`Auto-refund failed for payment ${payment._id}: ${err.message}`) }
-      } else if (appointment && ['pending', 'confirmed'].includes(appointment.status)) {
-        appointment.paymentStatus = 'paid';
-        if (appointment.status === 'pending') appointment.status = 'confirmed';
-        await appointment.save();
+      if (payment.appointment) {
+        const appointment = await Appointment.findById(payment.appointment);
+        if (appointment && ['cancelled', 'rescheduled'].includes(appointment.status)) {
+          try { await processRefund(payment, null, 'Auto-refund: appointment is no longer active'); }
+          catch (err) { logger.error(`Auto-refund failed for payment ${payment._id}: ${err.message}`); }
+        } else if (appointment) {
+          appointment.paymentStatus = 'paid';
+          if (appointment.status === 'pending') appointment.status = 'confirmed';
+          await appointment.save();
+        }
+      } else {
+        // Fallback for hold conversion when client closed tab mid-checkout
+        const SlotHold = require('../models/SlotHold');
+        const hold = await SlotHold.findOne({ razorpayOrderId: orderId });
+        if (hold) {
+          const dateStr = typeof hold.date === 'string' ? hold.date.slice(0, 10) : hold.date.toISOString().slice(0, 10);
+          const { start, end } = dayRange(dateStr);
+          const clash = await Appointment.findOne({
+            dentist: hold.dentist,
+            date: { $gte: start, $lt: end },
+            startTime: hold.startTime,
+            status: { $in: ['confirmed', 'checked-in'] },
+          });
+
+          if (clash) {
+            try { await processRefund(payment, null, 'Auto-refund: Slot expired before webhook capture'); }
+            catch (err) { logger.error(`Auto-refund failed for webhook clash: ${err.message}`); }
+          } else {
+            try {
+              const appointment = await Appointment.create({
+                patient: hold.patient,
+                familyMemberName: hold.familyMemberName || null,
+                dentist: hold.dentist,
+                clinic: hold.clinic || null,
+                date: hold.date,
+                startTime: hold.startTime,
+                endTime: hold.endTime,
+                mode: hold.mode || 'in-clinic',
+                reasonForVisit: hold.reasonForVisit || '',
+                fees: hold.fees,
+                status: 'confirmed',
+                paymentStatus: 'paid',
+                payAtClinic: false,
+                payment: payment._id,
+              });
+
+              payment.appointment = appointment._id;
+              await payment.save();
+              await SlotHold.deleteOne({ _id: hold._id });
+
+              const { notifyUser } = require('../services/notification.service');
+              await notifyUser(appointment.patient, {
+                title: 'Appointment Confirmed',
+                message: `Your appointment on ${dateStr} at ${appointment.startTime} is confirmed.`,
+                type: 'appointment_confirmed',
+                relatedId: appointment._id,
+              });
+            } catch (createErr) {
+              logger.error(`Webhook appointment creation error: ${createErr.message}`);
+            }
+          }
+        }
       }
     }
   }
@@ -252,6 +382,8 @@ exports.razorpayWebhook = catchAsync(async (req, res) => {
       { razorpayOrderId: orderId, status: { $in: ['created', 'pending', 'failed'] } },
       { status: 'failed', failureReason: event.payload.payment.entity.error_description || 'Payment failed' }
     );
+    const SlotHold = require('../models/SlotHold');
+    await SlotHold.deleteMany({ razorpayOrderId: orderId });
   }
 
   if (event.event === 'refund.processed') {

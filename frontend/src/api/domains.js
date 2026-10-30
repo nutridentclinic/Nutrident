@@ -53,6 +53,7 @@ export const api = {
   settings: { get: () => get('/clinic-settings'), update: (data) => patch('/clinic-settings', data) },
   appointments: {
     create: (data) => post('/appointments', data),
+    cancelHold: (id) => post(`/appointments/holds/${id}/cancel`),
     createStaff: (data) => post('/appointments/staff', data),
     mine: (params) => get('/appointments/me', params),
     dentistMine: (params) => get('/appointments/dentist/me', params),

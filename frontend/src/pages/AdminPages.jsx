@@ -600,7 +600,6 @@ export function AdminAppointments() {
           >
             <option value="">All statuses</option>
             <option value="confirmed">Confirmed</option>
-            <option value="pending">Pending</option>
             <option value="completed">Completed</option>
             <option value="no-show">No-Show</option>
             <option value="cancelled">Cancelled</option>
@@ -676,17 +675,7 @@ export function AdminAppointments() {
                     {rupees(a.fees?.totalAmount)}
                   </span>
 
-                  {a.status === "pending" && (
-                    <button
-                      type="button"
-                      className="button button-small button-primary"
-                      onClick={() => handleConfirm(a._id)}
-                    >
-                      Confirm
-                    </button>
-                  )}
-
-                  {["pending", "confirmed"].includes(a.status) && (
+                  {a.status === "confirmed" && (
                     <>
                       <button
                         type="button"

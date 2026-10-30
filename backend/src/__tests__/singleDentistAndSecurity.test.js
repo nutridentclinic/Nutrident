@@ -221,6 +221,7 @@ describe('Workstream B & D Integration Tests', () => {
           startTime: '10:00',
           mode: 'in-clinic',
           reasonForVisit: 'Checkup',
+          payAtClinic: true,
         });
       expect(resOk.status).toBe(201);
       expect(resOk.body.data.dentist).toBe(String(dentist._id));
