@@ -63,7 +63,7 @@ exports.getRecordFile = catchAsync(async (req, res, next) => {
     return next(new AppError('File URL not found.', 404));
   }
 
-  if (req.query.format === 'json' || req.headers.accept?.includes('application/json')) {
+  if (req.query.format === 'json') {
     return success(res, 200, 'File details fetched.', {
       url: record.file.url,
       publicId: record.file.publicId,
@@ -72,24 +72,7 @@ exports.getRecordFile = catchAsync(async (req, res, next) => {
     });
   }
 
-  const https = require('https');
-  const http = require('http');
-  const clientLib = record.file.url.startsWith('https') ? https : http;
-
-  clientLib.get(record.file.url, (streamRes) => {
-    if (streamRes.statusCode >= 400) {
-      return res.redirect(record.file.url);
-    }
-    const contentType = streamRes.headers['content-type'] || 'application/octet-stream';
-    res.setHeader('Content-Type', contentType);
-    if (streamRes.headers['content-length']) {
-      res.setHeader('Content-Length', streamRes.headers['content-length']);
-    }
-    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(record.title || 'medical-record')}"`);
-    streamRes.pipe(res);
-  }).on('error', () => {
-    res.redirect(record.file.url);
-  });
+  return res.redirect(record.file.url);
 });
 
 // @route DELETE /api/medical-records/:id

@@ -108,6 +108,8 @@ function uploadToCloudinary(buffer, options = {}) {
       });
     });
 
+    uploadStream.on('error', () => {});
+
     uploadStream.end(buffer);
   });
 }

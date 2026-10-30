@@ -172,18 +172,26 @@ export async function downloadPdf(path, filename) {
 }
 
 export async function openRecordFile(recordId, fallbackUrl) {
+  if (fallbackUrl && (fallbackUrl.startsWith('http://') || fallbackUrl.startsWith('https://'))) {
+    window.open(fallbackUrl, '_blank', 'noopener,noreferrer')
+    return
+  }
+
   try {
-    const response = await client.get(`/medical-records/${recordId}/file`, { responseType: 'blob' })
-    const contentType = response.headers['content-type'] || 'application/pdf'
-    const blob = new Blob([response.data], { type: contentType })
-    const url = URL.createObjectURL(blob)
-    window.open(url, '_blank')
-    setTimeout(() => URL.revokeObjectURL(url), 60000)
-  } catch (err) {
-    if (fallbackUrl) {
-      window.open(fallbackUrl, '_blank')
-    } else {
-      throw err
+    const response = await client.get(`/medical-records/${recordId}/file?format=json`)
+    const targetUrl = response.data?.data?.url || fallbackUrl
+    if (targetUrl) {
+      window.open(targetUrl, '_blank', 'noopener,noreferrer')
+      return
     }
+  } catch {
+    if (fallbackUrl) {
+      window.open(fallbackUrl, '_blank', 'noopener,noreferrer')
+      return
+    }
+  }
+
+  if (recordId) {
+    window.open(`/api/medical-records/${recordId}/file`, '_blank', 'noopener,noreferrer')
   }
 }
