@@ -1,5 +1,5 @@
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { usePrimaryDentist } from "../hooks/usePrimaryDentist.js";
 import { fetchPrimarySlotsWithFallback, fetchAvailabilityRangeWithFallback } from "../api/capabilities.js";
@@ -239,7 +239,10 @@ export function PatientAppointments() {
     ...queryOptions,
   });
   const myReviews = myReviewsQuery.data?.data || [];
-  const reviewedApptIds = new Set(myReviews.map((r) => String(r.appointment?._id || r.appointment)));
+  const reviewedApptIds = useMemo(
+    () => new Set(myReviews.map((r) => String(r.appointment?._id || r.appointment))),
+    [myReviews]
+  );
 
   const [reviewTarget, setReviewTarget] = useState(null);
   const [reviewRating, setReviewRating] = useState(5);
@@ -531,10 +534,12 @@ export function PatientAppointments() {
                             ],
                             successMessage: "Appointment rescheduled.",
                           },
-                          { onSuccess: (result) => {
-                            setReschedule(null);
-                            if (result.data?._id) navigate(`/app/appointments/${result.data._id}`);
-                          } },
+                          {
+                            onSuccess: (result) => {
+                              setReschedule(null);
+                              if (result.data?._id) navigate(`/app/appointments/${result.data._id}`);
+                            }
+                          },
                         )
                       }
                     >
@@ -625,11 +630,11 @@ export function AppointmentDetail() {
                   </dd>
                 </div>
               </dl>
-                {item && ["pending", "confirmed"].includes(item.status) && (
-                  <button className="button button-quiet" onClick={cancelAppointment}>
-                    Cancel appointment
-                  </button>
-                )}
+              {item && ["pending", "confirmed"].includes(item.status) && (
+                <button className="button button-quiet" onClick={cancelAppointment}>
+                  Cancel appointment
+                </button>
+              )}
             </SectionPanel>
             <SectionPanel title="Fee summary">
               <div className="fee-lines">
@@ -1325,11 +1330,11 @@ export function AppointmentBooking() {
               "verifying",
               "polling",
             ].includes(stage) && (
-              <div className="checkout-progress">
-                <LoaderCircle className="spin" size={16} />
-                {resultLabel}
-              </div>
-            )}
+                <div className="checkout-progress">
+                  <LoaderCircle className="spin" size={16} />
+                  {resultLabel}
+                </div>
+              )}
           </aside>
         </form>
       )}
