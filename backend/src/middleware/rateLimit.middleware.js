@@ -1,22 +1,23 @@
 const rateLimit = require('express-rate-limit');
 
-// General API limiter
+// General API limiter for clinic endpoints
 exports.apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 1000,
+  max: process.env.NODE_ENV === 'test' ? 10000 : 5000,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => req.method === 'OPTIONS' || req.path === '/health',
   message: { success: false, message: 'Too many requests. Please try again later.' },
 });
 
-// Stricter limiter for auth endpoints (login/register/OTP)
+// Stricter limiter for sensitive auth endpoints (login, register, forgot-password)
 exports.authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: process.env.NODE_ENV === 'test' ? 5000 : 30,
+  max: process.env.NODE_ENV === 'test' ? 5000 : 120,
   skipSuccessfulRequests: true,
   keyGenerator: (req) => {
     const email = String(req.body?.email || '').trim().toLowerCase();
-    return `${req.ip}_${email}`;
+    return email ? `${req.ip}_${email}` : (req.ip || 'unknown');
   },
   validate: { keyGeneratorIpFallback: false },
   standardHeaders: true,
@@ -32,12 +33,13 @@ exports.authLimiter = rateLimit({
   },
 });
 
-// Dedicated generous limiter for token refresh
+// Dedicated limiter for token refresh
 exports.refreshLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: process.env.NODE_ENV === 'test' ? 5000 : 120,
+  max: process.env.NODE_ENV === 'test' ? 5000 : 300,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => req.method === 'OPTIONS',
   handler: (req, res, next, options) => {
     const retryAfter = Math.ceil(options.windowMs / 1000);
     res.setHeader('Retry-After', retryAfter);

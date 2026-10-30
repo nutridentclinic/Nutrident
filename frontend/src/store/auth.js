@@ -1,19 +1,27 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
-const storageKey = 'drn-auth'
+const SESSION_HINT_KEY = 'drn_has_session'
+const LEGACY_STORAGE_KEY = 'drn-auth'
 
 // Purge any legacy authentication tokens from localStorage immediately
 if (typeof window !== 'undefined' && window.localStorage) {
   try {
-    const raw = window.localStorage.getItem(storageKey)
+    const raw = window.localStorage.getItem(LEGACY_STORAGE_KEY)
     if (raw && (raw.includes('accessToken') || raw.includes('refreshToken'))) {
-      window.localStorage.removeItem(storageKey)
+      window.localStorage.removeItem(LEGACY_STORAGE_KEY)
     }
   } catch {
     // Ignore storage access errors
   }
 }
+
+const checkInitialHasSession = () => {
+  if (typeof window === 'undefined' || !window.localStorage) return false
+  return window.localStorage.getItem(SESSION_HINT_KEY) === 'true'
+}
+
+const initialHasSession = checkInitialHasSession()
 
 export const useAuthStore = create(
   persist(
@@ -22,26 +30,43 @@ export const useAuthStore = create(
       profile: null,
       accessToken: null,
       refreshToken: null,
-      status: 'booting', // 'booting' | 'authed' | 'anon'
-      hasSession: false,
+      status: initialHasSession ? 'booting' : 'anon',
+      hasSession: initialHasSession,
 
-      setSession: ({ user, profile = null, accessToken, refreshToken, status }) =>
+      setSession: ({ user, profile = null, accessToken, refreshToken, status }) => {
+        const authed = Boolean(user || accessToken)
+        if (typeof window !== 'undefined' && window.localStorage) {
+          try {
+            if (authed) {
+              window.localStorage.setItem(SESSION_HINT_KEY, 'true')
+            } else {
+              window.localStorage.removeItem(SESSION_HINT_KEY)
+            }
+          } catch {}
+        }
         set((state) => ({
           user: user !== undefined ? user : state.user,
           profile: profile !== undefined ? profile : state.profile,
           accessToken: accessToken !== undefined ? accessToken : state.accessToken,
           refreshToken: refreshToken !== undefined ? refreshToken : state.refreshToken,
-          status: status || (user || accessToken || state.accessToken ? 'authed' : 'anon'),
-          hasSession: Boolean(user || accessToken || state.accessToken),
-        })),
+          status: status || (authed ? 'authed' : 'anon'),
+          hasSession: authed,
+        }))
+      },
 
-      setUserAndProfile: (user, profile = null) =>
-        set((state) => ({
+      setUserAndProfile: (user, profile = null) => {
+        if (typeof window !== 'undefined' && window.localStorage && user) {
+          try {
+            window.localStorage.setItem(SESSION_HINT_KEY, 'true')
+          } catch {}
+        }
+        set({
           user,
           profile,
           status: user ? 'authed' : 'anon',
           hasSession: Boolean(user),
-        })),
+        })
+      },
 
       setTokens: ({ accessToken, refreshToken }) =>
         set((state) => ({
@@ -53,13 +78,25 @@ export const useAuthStore = create(
 
       setProfile: (profile) => set({ profile }),
 
-      setStatus: (status) =>
+      setStatus: (status) => {
+        if (status === 'anon' && typeof window !== 'undefined' && window.localStorage) {
+          try {
+            window.localStorage.removeItem(SESSION_HINT_KEY)
+          } catch {}
+        }
         set({
           status,
           hasSession: status === 'authed',
-        }),
+        })
+      },
 
-      clearSession: () =>
+      clearSession: () => {
+        if (typeof window !== 'undefined' && window.localStorage) {
+          try {
+            window.localStorage.removeItem(SESSION_HINT_KEY)
+            window.localStorage.removeItem(LEGACY_STORAGE_KEY)
+          } catch {}
+        }
         set({
           user: null,
           profile: null,
@@ -67,36 +104,22 @@ export const useAuthStore = create(
           refreshToken: null,
           status: 'anon',
           hasSession: false,
-        }),
+        })
+      },
     }),
     {
-      name: storageKey,
-      // CRITICAL SECURITY FIX: Persist ONLY non-sensitive session hint.
-      // NEVER persist JWT access or refresh tokens in localStorage.
-      partialize: ({ hasSession }) => ({ hasSession: Boolean(hasSession) }),
-      onRehydrateStorage: () => (state) => {
-        // When hydrating, initiate boot verification of HTTP-Only cookies
-        if (state?.hasSession) {
-          state?.setStatus?.('booting')
-        } else {
-          state?.setStatus?.('booting')
-        }
-      },
+      name: LEGACY_STORAGE_KEY,
+      // Never store JWT tokens in localStorage
+      partialize: () => ({}),
     },
   ),
 )
 
-// Cross-tab storage event handler
+// Cross-tab logout synchronization via localStorage storage event
 if (typeof window !== 'undefined') {
   window.addEventListener('storage', (event) => {
-    if (event.key !== storageKey) return
-    if (!event.newValue) {
-      // Key was removed in another tab
-      import('../auth/session.js').then(({ logout }) => {
-        logout({ reason: 'cross-tab', broadcast: false })
-      })
-    } else {
-      useAuthStore.persist.rehydrate()
+    if (event.key === SESSION_HINT_KEY && event.newValue === null) {
+      useAuthStore.getState().clearSession()
     }
   })
 }

@@ -78,6 +78,7 @@ const NON_REFRESHABLE_AUTH_ROUTES = [
   '/auth/verify-phone',
   '/auth/reset-password',
   '/auth/logout',
+  '/auth/me',
 ]
 
 const isNonRefreshableAuth = (url = '') => {
@@ -267,7 +268,7 @@ client.interceptors.response.use(
     let message = body?.message || error.message || 'Unable to reach the clinic service.'
     if (status === 429) {
       const retrySec = body?.retryAfterSeconds || error.response?.headers?.['retry-after'] || 60
-      message = `Too many attempts, try again in ${retrySec} s.`
+      message = body?.message || `Too many attempts, try again in ${retrySec} s.`
     }
 
     const normalized = new Error(message)

@@ -16,14 +16,23 @@ const logger = require('./utils/logger');
 
 const app = express();
 const corsOrigins = getCorsOrigins();
-app.set('trust proxy', Number(process.env.TRUST_PROXY) || (process.env.NODE_ENV === 'production' ? 1 : 0));
+const isAllowedOrigin = (origin) => {
+  if (!origin) return true;
+  if (corsOrigins.includes(origin)) return true;
+  // Support all Vercel deployments (production + preview domains)
+  if (/^https:\/\/([a-z0-9-]+)\.vercel\.app$/i.test(origin)) return true;
+  return false;
+};
+
+// Trust first proxy hop (Render, Cloudflare, etc.) so client IP is accurately extracted
+app.set('trust proxy', 1);
 
 // --- Security & core middleware ---
 app.use(helmet());
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin || corsOrigins.includes(origin)) return callback(null, true);
+      if (isAllowedOrigin(origin)) return callback(null, true);
       logger.warn(`CORS rejected origin: ${origin}`);
       return callback(null, false);
     },

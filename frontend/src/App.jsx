@@ -64,11 +64,7 @@ function RequireRole({ roles }) {
     staleTime: 60 * 1000,
   })
 
-  useEffect(() => {
-    if (status === 'anon' && !accessToken && !user) {
-      logout({ reason: 'expired' })
-    }
-  }, [status, accessToken, user])
+
 
   useEffect(() => {
     const handleRevalidate = (event) => {
@@ -210,11 +206,11 @@ function PatientProfileWorkspace() {
 }
 
 export default function App() {
-  const { status, setSession, setStatus } = useAuthStore()
+  const { status, setSession, setStatus, hasSession } = useAuthStore()
 
   useEffect(() => {
     let active = true
-    if (status === 'booting') {
+    if (status === 'booting' && hasSession) {
       api.auth.me()
         .then((res) => {
           if (active && res?.data?.user) {
@@ -231,11 +227,13 @@ export default function App() {
             setStatus('anon')
           }
         })
+    } else if (status === 'booting' && !hasSession) {
+      setStatus('anon')
     }
     return () => {
       active = false
     }
-  }, [status, setSession, setStatus])
+  }, [status, hasSession, setSession, setStatus])
 
   return (
     <>
