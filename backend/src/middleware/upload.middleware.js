@@ -108,9 +108,11 @@ const upload = (folder) => ({
         req.file.filename = result.publicId;
         req.file.url = result.url;
         req.file.publicId = result.publicId;
-        req.file.bytes = result.bytes;
-        req.file.format = result.format;
+        req.file.bytes = result.bytes || req.file.size;
+        req.file.format = result.format || detected.ext;
         req.file.detectedMime = detected.mime;
+        req.file.resourceType = result.resourceType || (detected.mime === 'application/pdf' ? 'auto' : 'image');
+        req.file.originalName = req.file.originalname || '';
 
         return next();
       } catch (uploadErr) {

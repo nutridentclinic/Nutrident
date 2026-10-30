@@ -18,11 +18,13 @@ import {
   ShieldCheck,
   Trash2,
   UserRound,
+  Eye,
   X,
 } from "lucide-react";
 import { api, downloadPdf, openRecordFile } from "../api/domains.js";
 import { useAuthStore } from "../store/auth.js";
 import { FileUpload } from "../components/FileUpload.jsx";
+import { RecordViewer } from "../components/RecordViewer.jsx";
 import { clinicDate, isPastSlot } from "../utils/booking.js";
 import { FDI_TEETH as fdiTeeth } from "../utils/teeth.js";
 import {
@@ -1322,6 +1324,7 @@ export function PatientRecords() {
   });
   const [title, setTitle] = useState("");
   const [type, setType] = useState("other");
+  const [viewingRecord, setViewingRecord] = useState(null);
   const items = query.data?.data || [];
 
   const handleUpload = async (file, onProgress) => {
@@ -1436,7 +1439,7 @@ export function PatientRecords() {
                   <button
                     type="button"
                     className="button button-quiet button-small"
-                    onClick={() => openRecordFile(item._id, item.file?.url)}
+                    onClick={() => setViewingRecord(item)}
                   >
                     Open file <ArrowRight size={14} />
                   </button>
@@ -1453,6 +1456,12 @@ export function PatientRecords() {
           </div>
         </AsyncView>
       </section>
+      {viewingRecord && (
+        <RecordViewer
+          record={viewingRecord}
+          onClose={() => setViewingRecord(null)}
+        />
+      )}
       {dialog}
     </div>
   );
@@ -1709,6 +1718,7 @@ export function PatientBilling() {
   });
   const invoiceList = invoices.data?.data || [];
   const paymentList = payments.data?.data || [];
+  const [viewingInvoice, setViewingInvoice] = useState(null);
   return (
     <div>
       <PageTitle
@@ -1743,6 +1753,14 @@ export function PatientBilling() {
                 <div className="record-row-actions">
                   <StatusBadge value={invoice.status} />
                   <strong>{rupees(invoice.totalAmount)}</strong>
+                  <button
+                    type="button"
+                    className="button button-quiet button-small"
+                    onClick={() => setViewingInvoice(invoice)}
+                    title="View invoice PDF"
+                  >
+                    <Eye size={15} /> View
+                  </button>
                   <button
                     className="button button-quiet button-small"
                     onClick={() =>
@@ -1797,6 +1815,13 @@ export function PatientBilling() {
           </div>
         </AsyncView>
       </SectionPanel>
+      {viewingInvoice && (
+        <RecordViewer
+          fileUrl={`/invoices/${viewingInvoice._id}/pdf`}
+          title={`Invoice ${viewingInvoice.invoiceNumber}`}
+          onClose={() => setViewingInvoice(null)}
+        />
+      )}
     </div>
   );
 }

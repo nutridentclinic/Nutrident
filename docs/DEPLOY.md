@@ -97,6 +97,14 @@ To prevent cold start delays (30–60s spin-up time), set up an external pinger 
 | `VITE_SOCKET_URL` | `https://<your-render-service>.onrender.com` |
 | `VITE_CLINIC_TIMEZONE` | `Asia/Kolkata` |
 
+### Cloudinary Security Settings (Owner Action Required for PDF Delivery)
+> [!IMPORTANT]
+> By default, new Cloudinary accounts restrict direct delivery of PDFs and ZIP archives.
+> 1. Log into your [Cloudinary Console](https://console.cloudinary.com/).
+> 2. Navigate to **Settings** (gear icon) -> **Security**.
+> 3. Under **PDF and ZIP files delivery**, ensure the restriction is disabled (allow delivery of PDF files).
+> 4. In the DrNutrident portal, navigate to **Admin -> System status** and verify that Uploads are indicated as **Operational**.
+
 ### Content Security Policy Alignment (`vercel.json`)
 Verify that `frontend/vercel.json` includes your Render backend hostname in `connect-src` and `wss://`:
 ```json

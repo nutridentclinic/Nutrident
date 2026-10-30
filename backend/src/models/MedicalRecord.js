@@ -15,6 +15,11 @@ const medicalRecordSchema = new mongoose.Schema(
     file: {
       url: { type: String, required: true },
       publicId: { type: String, required: true },
+      resourceType: { type: String, default: 'image' },
+      format: { type: String, default: '' },
+      mimeType: { type: String, default: '' },
+      bytes: { type: Number, default: 0 },
+      originalName: { type: String, default: '' },
     },
     relatedAppointment: { type: mongoose.Schema.Types.ObjectId, ref: 'Appointment', default: null },
   },

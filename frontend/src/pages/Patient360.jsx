@@ -27,6 +27,7 @@ import { api, downloadPdf, openRecordFile } from '../api/domains.js'
 import { useAuthStore } from '../store/auth.js'
 import { formatClinicDate } from '../utils/formatDate.js'
 import { FileUpload } from '../components/FileUpload.jsx'
+import { RecordViewer } from '../components/RecordViewer.jsx'
 import BackendPendingNotice from '../components/BackendPendingNotice.jsx'
 import { AsyncView, EmptyState, Field, SectionPanel, StatusBadge, TextInput, useToast } from '../components/ui.jsx'
 
@@ -45,6 +46,8 @@ export function Patient360({ readOnly = false } = {}) {
   const [showUpload, setShowUpload] = useState(false)
   const [recordTitle, setRecordTitle] = useState('')
   const [recordType, setRecordType] = useState('xray')
+  const [selectedRecord, setSelectedRecord] = useState(null)
+  const [selectedInvoice, setSelectedInvoice] = useState(null)
 
   const [showEditModal, setShowEditModal] = useState(false)
   const [editBusy, setEditBusy] = useState(false)
@@ -500,9 +503,9 @@ export function Patient360({ readOnly = false } = {}) {
                   {rec.file?.url && (
                     <button
                       type="button"
-                      onClick={() => openRecordFile(rec._id, rec.file.url)}
+                      onClick={() => setSelectedRecord(rec)}
                       className="p-2 bg-slate-700/50 hover:bg-slate-700 rounded-lg text-teal-400 transition"
-                      title="Open Record"
+                      title="View Record"
                     >
                       <Eye size={16} />
                     </button>
@@ -593,8 +596,16 @@ export function Patient360({ readOnly = false } = {}) {
                         {formatClinicDate(inv.createdAt)} · Total: {rupees(inv.totalAmount)}
                       </small>
                     </div>
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2">
                       <StatusBadge value={inv.status} />
+                      <button
+                        type="button"
+                        onClick={() => setSelectedInvoice(inv)}
+                        className="p-1.5 bg-slate-700/50 hover:bg-slate-700 rounded text-teal-400 transition"
+                        title="View PDF"
+                      >
+                        <Eye size={15} />
+                      </button>
                       <button
                         onClick={() => downloadPdf(`/invoices/${inv._id}/pdf`, `${inv.invoiceNumber}.pdf`)}
                         className="p-1.5 bg-slate-700/50 hover:bg-slate-700 rounded text-slate-300 transition"
@@ -772,6 +783,20 @@ export function Patient360({ readOnly = false } = {}) {
             </form>
           </div>
         </div>
+      )}
+      {selectedRecord && (
+        <RecordViewer
+          record={selectedRecord}
+          onClose={() => setSelectedRecord(null)}
+        />
+      )}
+
+      {selectedInvoice && (
+        <RecordViewer
+          fileUrl={`/invoices/${selectedInvoice._id}/pdf`}
+          title={`Invoice ${selectedInvoice.invoiceNumber}`}
+          onClose={() => setSelectedInvoice(null)}
+        />
       )}
     </div>
   )

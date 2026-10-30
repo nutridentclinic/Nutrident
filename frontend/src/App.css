@@ -1314,3 +1314,218 @@ button.tooth-cell { cursor: pointer; }
   }
 }
 
+/* ==========================================================================
+   RECORD VIEWER IN-APP MODAL
+   ========================================================================== */
+
+.record-viewer-backdrop {
+  z-index: 2000;
+  padding: 12px;
+}
+
+.record-viewer-dialog {
+  width: min(1040px, calc(100vw - 24px));
+  height: min(88dvh, 860px);
+  max-height: 94dvh;
+  display: flex;
+  flex-direction: column;
+  padding: 0 !important;
+  background: #ffffff;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.4);
+}
+
+.record-viewer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--line);
+  background: #f8fafc;
+  flex-shrink: 0;
+  gap: 12px;
+}
+
+.record-viewer-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.record-type-pill {
+  font-size: 11px;
+  text-transform: uppercase;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  background: rgba(13, 148, 136, 0.12);
+  color: #0d9488;
+  padding: 3px 8px;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.record-viewer-title {
+  font-size: 15px;
+  font-weight: 700;
+  margin: 0;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 360px;
+}
+
+.record-viewer-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.record-viewer-zoom-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: #e2e8f0;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+
+.zoom-level {
+  font-size: 12px;
+  font-weight: 600;
+  min-width: 36px;
+  text-align: center;
+  color: #334155;
+}
+
+.toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.record-viewer-body {
+  flex: 1;
+  min-height: 0;
+  background: #0f172a;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+}
+
+.record-viewer-loading,
+.record-viewer-error,
+.record-viewer-other {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 32px 20px;
+  color: #cbd5e1;
+}
+
+.record-error-msg {
+  color: #fca5a5;
+  font-size: 13px;
+  max-width: 420px;
+  margin: 8px 0 16px;
+}
+
+.record-error-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.record-viewer-pdf-container {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.record-viewer-frame {
+  width: 100%;
+  height: 100%;
+  flex: 1;
+  min-height: 0;
+  border: none;
+}
+
+.mobile-pdf-notice {
+  background: #1e293b;
+  border-bottom: 1px solid #334155;
+  padding: 8px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12px;
+  color: #cbd5e1;
+}
+
+.mobile-notice-btns {
+  display: flex;
+  gap: 6px;
+}
+
+.pdf-fallback-view {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 16px;
+  color: #94a3b8;
+  text-align: center;
+  height: 100%;
+}
+
+.record-viewer-image-container {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+  padding: 16px;
+}
+
+.record-viewer-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  transition: transform 0.15s ease-out;
+}
+
+@media (max-width: 640px) {
+  .record-viewer-dialog {
+    width: 100vw;
+    height: 100dvh;
+    max-height: 100dvh;
+    border-radius: 0;
+    margin: 0;
+  }
+  .record-viewer-backdrop {
+    padding: 0;
+  }
+  .record-viewer-header {
+    padding: 10px 12px;
+  }
+  .toolbar-btn .btn-text {
+    display: none;
+  }
+  .toolbar-btn {
+    padding: 6px 8px;
+  }
+  .record-viewer-title {
+    max-width: 150px;
+  }
+}
+
+

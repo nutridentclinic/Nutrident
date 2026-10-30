@@ -23,6 +23,7 @@ import { usePrimaryDentist } from "../hooks/usePrimaryDentist.js";
 import { fetchPrimarySlotsWithFallback } from "../api/capabilities.js";
 import { clinicDate, isPastSlot } from "../utils/booking.js";
 import { FileUpload } from "../components/FileUpload.jsx";
+import { RecordViewer } from "../components/RecordViewer.jsx";
 import {
   AsyncView,
   Field,
@@ -1609,6 +1610,7 @@ function ClinicalRecordsWorkspace({ patientId, query }) {
   const [title, setTitle] = useState("");
   const [type, setType] = useState("other");
   const [filterType, setFilterType] = useState("");
+  const [viewingRecord, setViewingRecord] = useState(null);
   const records = query.data?.data || [];
   const visibleRecords = filterType
     ? records.filter((record) => record.type === filterType)
@@ -1717,19 +1719,24 @@ function ClinicalRecordsWorkspace({ patientId, query }) {
                     {record.type} · {fmtDate(record.createdAt)}
                   </span>
                 </div>
-                <a
+                <button
+                  type="button"
                   className="button button-quiet button-small"
-                  href={record.file?.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                  onClick={() => setViewingRecord(record)}
                 >
                   Open file <ArrowRight size={14} />
-                </a>
+                </button>
               </article>
             ))}
           </div>
         </AsyncView>
       </SectionPanel>
+      {viewingRecord && (
+        <RecordViewer
+          record={viewingRecord}
+          onClose={() => setViewingRecord(null)}
+        />
+      )}
     </div>
   );
 }
