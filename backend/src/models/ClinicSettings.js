@@ -9,7 +9,7 @@ const clinicSettingsSchema = new mongoose.Schema(
     address: { type: String, default: '' },
     contactPhone: { type: String, default: '' },
     contactEmail: { type: String, default: '' },
-    platformFee: { type: Number, default: 20 }, // flat fee added to bookings
+    platformFee: { type: Number, default: 0 },
     allowPayAtClinic: { type: Boolean, default: true },
     taxPercentage: { type: Number, default: 0 },
     currency: { type: String, default: 'INR' },

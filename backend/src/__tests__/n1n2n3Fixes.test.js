@@ -118,7 +118,7 @@ describe('N1, N2, and N3 Root Cause Fix Verification', () => {
         .send({
           date: nextMondayStr,
           startTime: '10:00',
-          mode: 'video',
+          mode: 'in-clinic',
           reasonForVisit: 'General checkup',
         });
 
@@ -139,7 +139,7 @@ describe('N1, N2, and N3 Root Cause Fix Verification', () => {
         .send({
           date: nextMondayStr,
           startTime: '10:00',
-          mode: 'video',
+          mode: 'in-clinic',
         });
 
       expect(unverifiedRes.status).toBe(400);
@@ -159,7 +159,7 @@ describe('N1, N2, and N3 Root Cause Fix Verification', () => {
         .send({
           date: nextMondayStr,
           startTime: '10:00',
-          mode: 'video',
+          mode: 'in-clinic',
         });
 
       expect(pausedRes.status).toBe(400);
@@ -180,7 +180,7 @@ describe('N1, N2, and N3 Root Cause Fix Verification', () => {
         .send({
           date: nextMondayStr,
           startTime: '10:00',
-          mode: 'video',
+          mode: 'in-clinic',
         });
 
       expect(pausedUntilRes.status).toBe(400);
@@ -200,7 +200,7 @@ describe('N1, N2, and N3 Root Cause Fix Verification', () => {
         .send({
           date: nextMondayStr,
           startTime: '10:00',
-          mode: 'video',
+          mode: 'in-clinic',
         });
 
       expect(noAvailRes.status).toBe(400);

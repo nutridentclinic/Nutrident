@@ -19,6 +19,5 @@ router.patch('/:id/cancel', ctrl.cancelAppointment); // patient/dentist/admin - 
 router.patch('/:id/reschedule', rescheduleRules, validate, ctrl.rescheduleAppointment);
 router.patch('/:id/complete', restrictTo('dentist', 'receptionist', 'admin'), ctrl.completeAppointment);
 router.patch('/:id/no-show', restrictTo('dentist', 'receptionist', 'admin'), ctrl.markNoShow);
-router.post('/:id/video/join', ctrl.joinVideoCall);
 
 module.exports = router;

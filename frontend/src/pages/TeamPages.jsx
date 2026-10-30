@@ -474,20 +474,6 @@ export function DentistSchedule() {
                     >
                       No-show
                     </button>
-                    <Link
-                      className="button button-outline button-small"
-                      to={`/dentist/patients/${item.patient?._id || item.patient}?tab=prescriptions&appointmentId=${item._id}`}
-                    >
-                      Write Rx
-                    </Link>
-                    {item.mode === "video" && (
-                      <Link
-                        className="button button-outline button-small"
-                        to={`/consultation/${item._id}/lobby`}
-                      >
-                        Join video
-                      </Link>
-                    )}
                   </>
                 )}
                 {["pending", "confirmed"].includes(item.status) && (
@@ -1399,22 +1385,11 @@ export function ClinicalRecord({ readOnly = false }) {
     queryFn: () => api.records.forPatient(patientId),
     enabled: tab === "records",
   });
-  const prescriptions = useQuery({
-    queryKey: ["prescriptions", patientId],
-    queryFn: () => api.prescriptions.forPatient(patientId),
-    enabled: tab === "prescriptions",
-  });
   const chart = useQuery({
     queryKey: ["chart", patientId],
     queryFn: () => api.charts.get(patientId),
     enabled: tab === "chart",
   });
-  const [medicine, setMedicine] = useState([
-    { name: "", dosage: "", frequency: "1-0-1", durationDays: "5", instructions: "After food" },
-  ]);
-  const [diagnosis, setDiagnosis] = useState("");
-  const [additionalNotes, setAdditionalNotes] = useState("");
-  const [followUpDate, setFollowUpDate] = useState("");
   const patientQuery = useQuery({
     queryKey: ["patient", patientId],
     queryFn: () => api.patients.detail(patientId),
@@ -1425,77 +1400,6 @@ export function ClinicalRecord({ readOnly = false }) {
   const searchParams = new URLSearchParams(location.search);
   const appointmentIdFromUrl = searchParams.get("appointmentId");
 
-  const savePrescription = async (event) => {
-    event.preventDefault();
-    if (!medicine.length || !medicine[0].name.trim()) {
-      notify("Please add at least one medicine.", "error");
-      return;
-    }
-    try {
-      const result = await api.prescriptions.create({
-        patientId,
-        appointmentId: appointmentIdFromUrl || undefined,
-        diagnosis,
-        additionalNotes,
-        followUpDate: followUpDate || undefined,
-        medicines: medicine.map((item) => ({
-          ...item,
-          durationDays: Number(item.durationDays) || 1,
-        })),
-      });
-      notify(result.message || "Prescription issued successfully.");
-      queryClient.invalidateQueries({ queryKey: ["prescriptions", patientId] });
-      setDiagnosis("");
-      setAdditionalNotes("");
-      setFollowUpDate("");
-      setMedicine([
-        {
-          name: "",
-          dosage: "",
-          frequency: "1-0-1",
-          durationDays: "5",
-          instructions: "After food",
-        },
-      ]);
-    } catch (error) {
-      notify(error.message, "error");
-    }
-  };
-
-  const handleVoidPrescription = async (prescriptionId) => {
-    let voidReason = "Voided by prescriber";
-    const ok = await confirm({
-      title: "Void this prescription?",
-      message: "Are you sure you want to void this prescription? A voided prescription cannot be used and will be marked as invalid.",
-      confirmText: "Yes, void prescription",
-      cancelText: "Cancel",
-      danger: true,
-      children: (
-        <div style={{ marginTop: "0.8rem" }}>
-          <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 600, marginBottom: "0.3rem" }}>
-            Reason for voiding
-          </label>
-          <input
-            className="input"
-            defaultValue={voidReason}
-            onChange={(e) => {
-              voidReason = e.target.value;
-            }}
-            placeholder="e.g. Dose correction or patient intolerance..."
-          />
-        </div>
-      ),
-    });
-    if (!ok) return;
-
-    try {
-      const res = await api.prescriptions.void(prescriptionId, voidReason);
-      notify(res.message || "Prescription voided.");
-      queryClient.invalidateQueries({ queryKey: ["prescriptions", patientId] });
-    } catch (err) {
-      notify(err.message, "error");
-    }
-  };
   const saveTooth = async (event) => {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
@@ -1521,7 +1425,6 @@ export function ClinicalRecord({ readOnly = false }) {
       <div className="tabs" role="tablist" aria-label="Patient clinical tabs">
         {[
           ["plans", "Treatment plans"],
-          ["prescriptions", "Prescriptions"],
           ["records", "Records"],
           ["chart", "Dental chart"],
         ].map(([key, label]) => (
@@ -1601,231 +1504,6 @@ export function ClinicalRecord({ readOnly = false }) {
                 ))}
               </div>
             ))}
-          </AsyncView>
-        </SectionPanel>
-      )}
-      {tab === "prescriptions" && (
-        <SectionPanel
-          title={readOnly ? "Prescriptions" : "Issue a prescription"}
-        >
-          {!readOnly && (
-            <fieldset className="clinical-fieldset" style={{ border: "1px solid var(--border-color, #e2e8f0)", padding: "1.2rem", borderRadius: "8px", marginBottom: "1.5rem" }}>
-              <form className="stack-form" onSubmit={savePrescription}>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
-                  <Field label="Diagnosis / Condition">
-                    <TextInput
-                      value={diagnosis}
-                      placeholder="e.g. Acute pulpitis, Post-extraction care"
-                      onChange={(event) => setDiagnosis(event.target.value)}
-                    />
-                  </Field>
-                  <Field label="Follow-up Date (optional)">
-                    <TextInput
-                      type="date"
-                      value={followUpDate}
-                      onChange={(event) => setFollowUpDate(event.target.value)}
-                    />
-                  </Field>
-                </div>
-
-                <div style={{ marginTop: "1rem" }}>
-                  <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 600, marginBottom: "0.5rem" }}>
-                    Prescribed Medicines *
-                  </label>
-                  {medicine.map((item, index) => (
-                    <div
-                      key={index}
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "2fr 1.2fr 1.5fr 1fr 2fr auto",
-                        gap: "0.5rem",
-                        alignItems: "flex-end",
-                        marginBottom: "0.8rem",
-                        background: "var(--color-surface-subtle, #f8fafc)",
-                        padding: "0.8rem",
-                        borderRadius: "6px",
-                      }}
-                    >
-                      <Field label="Medicine Name *">
-                        <TextInput
-                          required
-                          placeholder="e.g. Amoxicillin"
-                          value={item.name}
-                          onChange={(e) =>
-                            setMedicine((all) =>
-                              all.map((r, ix) => (ix === index ? { ...r, name: e.target.value } : r))
-                            )
-                          }
-                        />
-                      </Field>
-                      <Field label="Dosage *">
-                        <TextInput
-                          required
-                          placeholder="e.g. 500mg"
-                          value={item.dosage}
-                          onChange={(e) =>
-                            setMedicine((all) =>
-                              all.map((r, ix) => (ix === index ? { ...r, dosage: e.target.value } : r))
-                            )
-                          }
-                        />
-                      </Field>
-                      <Field label="Frequency *">
-                        <TextInput
-                          as="select"
-                          value={item.frequency}
-                          onChange={(e) =>
-                            setMedicine((all) =>
-                              all.map((r, ix) => (ix === index ? { ...r, frequency: e.target.value } : r))
-                            )
-                          }
-                        >
-                          <option value="1-0-1">1-0-1 (Twice daily)</option>
-                          <option value="1-1-1">1-1-1 (Thrice daily)</option>
-                          <option value="1-0-0">1-0-0 (Morning only)</option>
-                          <option value="0-0-1">0-0-1 (Night only)</option>
-                          <option value="1-1-1-1">1-1-1-1 (Four times daily)</option>
-                          <option value="SOS">SOS (As needed)</option>
-                          <option value="Once a week">Once a week</option>
-                        </TextInput>
-                      </Field>
-                      <Field label="Days *">
-                        <TextInput
-                          type="number"
-                          min={1}
-                          max={365}
-                          required
-                          value={item.durationDays}
-                          onChange={(e) =>
-                            setMedicine((all) =>
-                              all.map((r, ix) => (ix === index ? { ...r, durationDays: e.target.value } : r))
-                            )
-                          }
-                        />
-                      </Field>
-                      <Field label="Instructions">
-                        <TextInput
-                          placeholder="e.g. After food"
-                          value={item.instructions}
-                          onChange={(e) =>
-                            setMedicine((all) =>
-                              all.map((r, ix) => (ix === index ? { ...r, instructions: e.target.value } : r))
-                            )
-                          }
-                        />
-                      </Field>
-                      {medicine.length > 1 && (
-                        <button
-                          type="button"
-                          className="button button-quiet"
-                          style={{ color: "var(--color-danger, #ef4444)", height: "38px" }}
-                          title="Remove medicine"
-                          onClick={() => setMedicine((all) => all.filter((_, ix) => ix !== index))}
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-
-                <Field label="Additional Notes / Advice (optional)">
-                  <textarea
-                    className="input"
-                    rows={2}
-                    value={additionalNotes}
-                    placeholder="e.g. Warm saline rinses, avoid hard food on right side..."
-                    onChange={(e) => setAdditionalNotes(e.target.value)}
-                  />
-                </Field>
-
-                <div className="inline-actions" style={{ display: "flex", justifyContent: "space-between", marginTop: "1rem" }}>
-                  <button
-                    type="button"
-                    className="button button-quiet"
-                    onClick={() =>
-                      setMedicine((all) => [
-                        ...all,
-                        {
-                          name: "",
-                          dosage: "",
-                          frequency: "1-0-1",
-                          durationDays: "5",
-                          instructions: "After food",
-                        },
-                      ])
-                    }
-                  >
-                    <Plus size={15} /> Add another medicine
-                  </button>
-                  <button className="button button-primary" type="submit">
-                    Issue prescription <ArrowRight size={15} />
-                  </button>
-                </div>
-              </form>
-            </fieldset>
-          )}
-
-          <AsyncView
-            query={prescriptions}
-            empty={
-              !prescriptions.isLoading &&
-              !prescriptions.isError &&
-              !(prescriptions.data?.data || []).length
-            }
-            emptyTitle="No prescriptions issued"
-          >
-            {(prescriptions.data?.data || []).map((entry) => {
-              const isVoided = entry.status === "voided";
-              return (
-                <div
-                  className="record-row"
-                  key={entry._id}
-                  style={{
-                    opacity: isVoided ? 0.75 : 1,
-                    background: isVoided ? "#fef2f2" : undefined,
-                    border: isVoided ? "1px solid #fecaca" : undefined,
-                  }}
-                >
-                  <FileText size={18} color={isVoided ? "#dc2626" : undefined} />
-                  <div className="record-row-content">
-                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                      <strong>{entry.diagnosis || "Prescription"}</strong>
-                      {isVoided && (
-                        <span style={{ fontSize: "0.75rem", padding: "0.15rem 0.4rem", background: "#fee2e2", color: "#dc2626", borderRadius: "4px", fontWeight: 700 }}>
-                          VOIDED
-                        </span>
-                      )}
-                    </div>
-                    <span>
-                      {fmtDate(entry.createdAt)} · {(entry.medicines || []).length} medicines
-                      {isVoided && entry.voidReason ? ` · Reason: ${entry.voidReason}` : ""}
-                    </span>
-                  </div>
-                  <div style={{ display: "flex", gap: "0.4rem", alignItems: "center" }}>
-                    {!readOnly && !isVoided && (
-                      <button
-                        type="button"
-                        className="button button-quiet button-small"
-                        style={{ color: "var(--color-danger, #ef4444)" }}
-                        onClick={() => handleVoidPrescription(entry._id)}
-                      >
-                        Void
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      className="button button-outline button-small"
-                      onClick={() =>
-                        downloadPdf(`/prescriptions/${entry._id}/pdf`, `prescription-${entry._id}.pdf`)
-                      }
-                    >
-                      Download PDF <Download size={14} />
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
           </AsyncView>
         </SectionPanel>
       )}

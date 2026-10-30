@@ -24,6 +24,13 @@ export function getSecondsRemaining(targetIsoDate) {
   return Math.max(0, diff)
 }
 
+export function formatCountdown(seconds) {
+  const safe = Math.max(0, Number(seconds) || 0)
+  const m = Math.floor(safe / 60)
+  const s = safe % 60
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+}
+
 function AuthShell({ eyebrow, title, description, children, asideTitle = 'A calmer way to care for your smile.' }) {
   return (
     <main className="auth-page">
@@ -59,8 +66,10 @@ function AuthShell({ eyebrow, title, description, children, asideTitle = 'A calm
   )
 }
 
+import { getPortalBase } from '../auth/routes.js'
+
 function getHome(role) {
-  return { patient: '/app', dentist: '/dentist', receptionist: '/reception', admin: '/admin' }[role] || '/app'
+  return getPortalBase(role)
 }
 
 const loginSchema = z.object({
@@ -390,7 +399,7 @@ export function VerifyOtpPage() {
             onClick={resend}
           >
             {resendCountdown > 0 ? (
-              `Resend code in ${resendCountdown}s`
+              `Resend code in ${formatCountdown(resendCountdown)}`
             ) : (
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
                 <RotateCcw size={14} /> Resend code
@@ -595,7 +604,7 @@ export function ResetPasswordVerifyPage() {
             disabled={resendCountdown > 0 || busy || lockCountdown > 0}
             onClick={resend}
           >
-            {resendCountdown > 0 ? `Resend code in ${resendCountdown}s` : 'Resend code'}
+            {resendCountdown > 0 ? `Resend code in ${formatCountdown(resendCountdown)}` : 'Resend code'}
           </button>
 
           <Link to="/forgot-password" className="text-link" style={{ fontSize: '0.875rem' }}>

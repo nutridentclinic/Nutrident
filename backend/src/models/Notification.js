@@ -19,7 +19,6 @@ const notificationSchema = new mongoose.Schema(
         'treatment_plan_created',
         'treatment_updated',
         'follow_up_required',
-        'prescription_ready',
         'queue_update',
         'new_booking',
         'payment_received',

@@ -16,7 +16,7 @@
 | **A: Auth & Session Isolation** | Logout revocation, `tokenVersion`, Back/Forward cache immunity, multi-tab sync, token-only localStorage | **Complete** | Playwright A1 test on Chromium & WebKit, Jest session test suite |
 | **D: Security Hardening** | `validateEnv`, constant-time OTP + lockout, webhook parsing, FDI 32 adult teeth validation, file download ownership, clinic timezone reminders, reschedule payment isolation, staff deactivation safeguards | **Complete** | 7 Jest test suites (31 tests passed), MongoDB memory server |
 | **B: Single-Dentist Practice** | `GET /dentists/primary`, slots, single-dentist enforcement on `POST /dentists`, `/doctor` public page, `usePrimaryDentist()`, booking without doctor dropdown, admin single doctor view | **Complete** | Vitest capabilities fallback suite, Playwright single-dentist spec |
-| **C: Feature Completion** | Walk-in patient registration (`POST /patients`), staff booking (`POST /appointments/staff`), avatar photo upload (`PATCH /auth/me/photo`), Brevo email reminders, prescription PDF downloads, admin editing of treatments/coupons/settings | **Complete** | Playwright reception & admin spec, Jest integration tests |
+| **C: Feature Completion** | Walk-in patient registration (`POST /patients`), staff booking (`POST /appointments/staff`), avatar photo upload (`PATCH /auth/me/photo`), Brevo email reminders, admin editing of treatments/coupons/settings | **Complete** | Playwright reception & admin spec, Jest integration tests |
 | **E: Automated Test Suites & Deliverables** | Zero-leak test coverage, cross-browser Playwright E2E, deployment documentation, Render checklist | **Complete** | 31 Jest tests, 24 Vitest tests, 5 Playwright tests (Chromium + WebKit) |
 | **F: Patient, Admin & Staff Fixes (15 Items)** | Cloudinary normalizer, FileUpload component, clinic date handling, notification fan-out, 6-box OTP, appointment strip & pay-at-clinic, medical records, treatment plans split, doctor pause, Sunday slots, photo endpoints, weekly series, Doctor 360, Patient 360, queue walk-in cleanup, auto-invoices, shared notifications | **Complete** | 9 Jest test suites (60 tests passed), 8 Vitest test files (49 tests passed) |
 
@@ -54,7 +54,7 @@
    - Public doctor endpoint `/dentists/primary` returns pause status; patient booking shows friendly pause banner.
    - Admin Doctor Profile page (`/admin/dentists`) provides full credential overview, bookable checklist, schedule editing, and temporary password reset.
 8. **Patient 360 (A3, S2)**:
-   - Mounted for Admin, Receptionist, and Dentist with complete history across Appointments, Prescriptions, Records, Treatment Plans, Dental Chart, and Billing.
+   - Mounted for Admin, Receptionist, and Dentist with complete history across Appointments, Records, Treatment Plans, Dental Chart, and Billing.
    - Receptionists and admins cannot edit clinical chart findings.
 9. **Staff Queue & Auto-Invoices (S1, S3)**:
    - Queue check-in restricted to registered patients or today's appointments; walk-in creation removed. Unregistered patients directed to `/register` via copyable link.

@@ -30,16 +30,6 @@ const createInvoiceForAppointment = async (appointment) => {
     amount: consultFee,
   });
 
-  const platformFee = appointment.fees?.platformFee ?? appointment.feeBreakdown?.platformFee ?? 0;
-  if (platformFee > 0) {
-    items.push({
-      description: 'Platform & Clinic Booking Fee',
-      quantity: 1,
-      unitPrice: platformFee,
-      amount: platformFee,
-    });
-  }
-
   // Find any treatment plan steps linked to this appointment and marked completed
   const treatmentPlans = await TreatmentPlan.find({
     patient: appointment.patient,

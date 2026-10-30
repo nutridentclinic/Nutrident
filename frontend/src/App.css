@@ -334,7 +334,7 @@ textarea.input { min-height: 88px; resize: vertical; }
 .clinic-name-footnote { padding: 0 5vw 22px; text-align: center; color: var(--muted); font-size: 11px; }
 
 /* Auth and workspace layouts */
-.auth-page { min-height: 100vh; display: grid; grid-template-columns: minmax(300px, .8fr) minmax(430px, 1.2fr); background: #fff; }
+.auth-page { min-height: 100vh; display: grid; grid-template-columns: minmax(280px, .8fr) minmax(0, 1.2fr); background: #fff; width: 100%; max-width: 100%; box-sizing: border-box; }
 .auth-aside { min-height: 100vh; padding: 42px clamp(28px, 6vw, 92px); position: relative; display: flex; flex-direction: column; justify-content: space-between; background: #e2eee8; overflow: hidden; }
 .auth-aside::after { content: ""; width: 420px; height: 420px; position: absolute; right: -190px; bottom: -100px; border: 1px solid #c7ddd3; border-radius: 50%; box-shadow: 0 0 0 32px #d7e8df, 0 0 0 64px #deece5; }
 .auth-aside-copy { max-width: 390px; position: relative; z-index: 1; margin: auto 0; }
@@ -342,9 +342,63 @@ textarea.input { min-height: 88px; resize: vertical; }
 .auth-aside-copy p { color: #5c7573; line-height: 1.7; }
 .auth-aside-rule { width: 48px; height: 3px; display: block; margin-top: 32px; background: var(--gold); }
 .auth-aside-bottom { position: relative; z-index: 1; display: flex; align-items: center; gap: 9px; color: #57746f; font-size: 11px; }
-.auth-form-wrap { min-height: 100vh; padding: 40px; display: grid; place-items: center; }
-.auth-form { width: min(100%, 430px); }
+.auth-form-wrap { min-height: 100vh; padding: clamp(20px, 4vw, 40px); display: grid; place-items: center; width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; }
+.auth-form { width: min(100%, 480px); min-width: 0; box-sizing: border-box; margin: 0 auto; }
 .auth-form h1 { margin: 0 0 9px; font-size: 31px; }
+
+/* OTP Fixed Grid & Digit Boxes */
+.otp-boxes-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: clamp(6px, 2vw, 12px);
+  width: 100%;
+  max-width: 380px;
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+.otp-digit-box {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  aspect-ratio: 1 / 1.15;
+  max-height: 60px;
+  padding: 0;
+  text-align: center;
+  font-size: clamp(1.1rem, 4.5vw, 1.5rem);
+  font-weight: 700;
+  border-radius: 10px;
+  border: 2px solid var(--border, #cbd5e1);
+  background: var(--surface, #ffffff);
+  color: var(--text, #0f172a);
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.otp-digit-box:focus {
+  border-color: var(--teal, #0f766e);
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.2);
+}
+.otp-digit-box.is-filled {
+  border-color: var(--teal, #0f766e);
+}
+.otp-digit-box:disabled {
+  background: #f1f5f9;
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+.otp-digit-box.has-error {
+  border-color: #ef4444;
+  animation: otp-shake 0.3s ease-in-out;
+}
+@keyframes otp-shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-4px); }
+  75% { transform: translateX(4px); }
+}
+.otp-error-space {
+  min-height: 24px;
+  margin-top: 6px;
+  text-align: center;
+}
 .auth-description { margin: 0 0 24px; color: var(--muted); line-height: 1.55; }
 .stack-form { display: flex; flex-direction: column; gap: 16px; }
 .form-meta { display: flex; justify-content: flex-end; font-size: 12px; }
@@ -474,11 +528,6 @@ textarea.input { min-height: 88px; resize: vertical; }
 .record-card h2 { margin: 14px 0 4px; font-size: 16px; }
 .record-card > p { color: var(--muted); font-size: 12px; }
 .record-card-head { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 11px; }
-.medicine-list { margin: 15px 0; padding: 0; list-style: none; }
-.medicine-list li { padding: 9px 0; border-bottom: 1px solid #edf1ef; }
-.medicine-list strong, .medicine-list span { display: block; font-size: 11px; }
-.medicine-list strong { color: var(--ink); }
-.medicine-list span { margin-top: 3px; color: var(--muted); }
 .tooth-chart { padding: 16px 8px; display: flex; flex-direction: column; gap: 20px; overflow-x: auto; }
 .tooth-row { min-width: 520px; display: grid; grid-template-columns: repeat(16, minmax(25px, 1fr)); gap: 4px; justify-content: center; }
 .tooth-row-1 { padding-top: 8px; border-top: 1px dashed #cfddd8; }
@@ -515,7 +564,6 @@ button.tooth-cell { cursor: pointer; }
 .tabs { margin-bottom: 17px; display: flex; gap: 6px; border-bottom: 1px solid var(--line); }
 .tab { min-height: 43px; padding: 0 14px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); cursor: pointer; font-weight: 700; font-size: 12px; }
 .tab-active { color: var(--teal-dark); border-bottom-color: var(--teal); }
-.medicine-row { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
 .inline-actions, .inline-form { display: flex; align-items: flex-end; gap: 10px; }
 .inline-form .field { flex: 1; }
 .inline-create-form { margin: 18px 0; padding: 14px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; background: #f6f9f7; }
@@ -625,52 +673,6 @@ button.tooth-cell { cursor: pointer; }
 .not-found { min-height: 65vh; padding: 8vw; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; }
 .not-found h1 { margin: 0 0 24px; font-size: 42px; }
 
-/* Consultation */
-.consultation-page { width: min(100% - 36px, 750px); min-height: 100vh; margin: 0 auto; padding: 30px 0 60px; }
-.consult-lobby-head { padding: 36px 0 28px; text-align: center; }
-.consult-icon { width: 48px; height: 48px; margin: 0 auto 17px; display: grid; place-items: center; color: var(--teal); background: #e0eee8; }
-.consult-lobby-head .eyebrow { display: block; }
-.consult-lobby-head h1 { margin: 7px 0; font-size: 32px; }
-.consult-lobby-head p { color: var(--muted); }
-.consult-countdown { margin: 16px 0; padding: 17px; display: grid; grid-template-columns: 22px 1fr; gap: 5px 11px; color: #6e551e; background: #fff7e5; border: 1px solid #eddfb9; }
-.consult-countdown small { grid-column: 2; color: #8f7b4b; }
-.device-check { margin: 20px 0; padding: 20px; display: flex; justify-content: space-between; gap: 18px; background: #fff; border: 1px solid var(--line); }
-.device-check > div:first-child { flex: 1; }
-.device-check strong { color: var(--ink); font-size: 13px; }
-.device-check p { margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
-.device-actions { display: flex; flex-direction: column; align-items: stretch; gap: 7px; }
-.device-indicator { width: 9px; height: 9px; margin: 0 8px 0 0; display: inline-block; border-radius: 50%; background: #c6d0cc; }
-.device-indicator.ready { background: #60a379; }
-.device-indicator.denied { background: #d07761; }
-.consult-disclaimer { margin: 16px 0; color: var(--muted); font-size: 11px; text-align: center; }
-.arrow-right { transform: rotate(180deg); }
-.call-page { min-height: 100vh; padding: 0 24px 35px; background: #112e3b; color: #fff; }
-.call-topbar { height: 64px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #ffffff20; }
-.call-topbar .brand-lockup { color: #fff; }
-.call-topbar .brand-sub { color: #a9bfbd; }
-.video-stage { width: min(100%, 1120px); height: min(68vh, 680px); min-height: 360px; margin: 25px auto 16px; position: relative; overflow: hidden; background: #172f3c; border: 1px solid #ffffff1a; }
-.remote-video, .local-video { position: absolute; display: grid; place-items: center; overflow: hidden; background: #203c48; }
-.remote-video { inset: 0; }
-.remote-video video, .local-video video { width: 100%; height: 100%; object-fit: cover; }
-.remote-wait { max-width: 400px; padding: 24px; text-align: center; }
-.remote-wait h1 { margin: 14px 0 7px; color: #fff; font-size: 21px; }
-.remote-wait p { color: #b7c9ca; font-size: 13px; }
-.remote-wait-mark { width: 48px; height: 48px; margin: auto; display: grid; place-items: center; border: 1px solid #ffffff40; border-radius: 50%; color: #b7cfca; }
-.local-video { width: 205px; height: 130px; right: 19px; top: 19px; border: 1px solid #ffffff45; }
-.local-video > span { position: absolute; left: 8px; bottom: 7px; padding: 4px 6px; background: #112e3bbb; font-size: 10px; }
-.call-identity { position: absolute; inset: auto 0 0; padding: 15px 18px; display: flex; justify-content: space-between; background: linear-gradient(transparent, #102633cc); color: #fff; font-size: 11px; }
-.call-identity strong, .call-identity small { display: block; }
-.call-identity small { margin-top: 3px; color: #b2c3c3; text-transform: capitalize; }
-.call-controls { display: flex; align-items: center; justify-content: center; gap: 12px; }
-.control-button { min-width: 75px; height: 64px; padding: 7px 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; border: 1px solid #ffffff24; border-radius: 5px; background: #1c3c48; color: #fff; cursor: pointer; }
-.control-button span { font-size: 10px; }
-.control-button:disabled { opacity: .5; }
-.control-off { color: #f3baaa; background: #543e42; }
-.control-leave { color: #fff; background: #bd4c42; border-color: #bd4c42; }
-.call-joining { margin-top: 15px; display: flex; justify-content: center; align-items: center; gap: 8px; color: #bbd1cc; font-size: 12px; }
-.call-error { position: absolute; z-index: 5; top: 18px; left: 18px; width: min(350px, calc(100% - 36px)); padding: 15px; color: #6b3228; background: #fff0eb; border: 1px solid #e5b4a6; }
-.call-error p { margin: 5px 0 12px; font-size: 12px; }
-
 @media (max-width: 1000px) {
   .public-header { padding-inline: 24px; }
   .public-nav { gap: 15px; }
@@ -683,6 +685,34 @@ button.tooth-cell { cursor: pointer; }
   .dashboard-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .booking-layout { grid-template-columns: minmax(0, 1fr) 275px; }
   .appointment-row { grid-template-columns: 130px 1fr auto; }
+}
+@media (max-width: 900px) {
+  .auth-page {
+    grid-template-columns: 1fr;
+    width: 100%;
+    min-width: 0;
+  }
+  .auth-aside {
+    display: none !important;
+  }
+  .auth-form-wrap {
+    min-height: 100vh;
+    padding: clamp(24px, 5vw, 40px) clamp(16px, 4vw, 32px);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+  .auth-form {
+    width: min(100%, 480px);
+    min-width: 0;
+    box-sizing: border-box;
+    margin: 0 auto;
+  }
 }
 @media (max-width: 760px) {
   .public-header { height: 64px; padding-inline: 16px; }
@@ -721,12 +751,8 @@ button.tooth-cell { cursor: pointer; }
   .booking-callout h2 { font-size: 24px; }
   .public-footer { padding: 16px 20px; flex-wrap: wrap; }
   .public-footer span { order: 3; width: 100%; }
-  .auth-page { grid-template-columns: 1fr; }
-  .auth-aside { min-height: 190px; padding: 21px 23px; }
-  .auth-aside-copy { display: none; }
-  .auth-aside-bottom { margin-top: 22px; font-size: 10px; }
-  .auth-form-wrap { min-height: calc(100vh - 190px); padding: 34px 22px; align-items: start; }
-  .auth-form h1 { font-size: 27px; }
+  .auth-form-wrap { min-height: 100vh; padding: 24px 16px; align-items: center; }
+  .auth-form h1 { font-size: 26px; }
   .portal-sidebar { width: min(290px, 84vw); height: 100dvh; transform: translateX(-100%); transition: transform .2s ease; box-shadow: 15px 0 32px #142e3a12; }
   .portal-sidebar.sidebar-open { transform: translateX(0); }
   .sidebar-backdrop { position: fixed; z-index: 25; inset: 0; display: block; border: 0; background: #102d4352; }
@@ -768,7 +794,6 @@ button.tooth-cell { cursor: pointer; }
   .record-row-actions .status-badge { margin-right: 3px; }
   .tabs { overflow-x: auto; }
   .tab { flex: 0 0 auto; padding-inline: 9px; font-size: 10px; }
-  .medicine-row { grid-template-columns: 1fr 1fr; }
   .inline-actions { align-items: stretch; flex-direction: column; }
   .inline-form { align-items: stretch; flex-direction: column; }
   .queue-row { flex-wrap: wrap; padding: 9px 0; }
@@ -791,17 +816,6 @@ button.tooth-cell { cursor: pointer; }
   .dentist-profile-head h1 { font-size: 21px; }
   .profile-fee { grid-column: 1 / -1; min-width: 0; display: grid; grid-template-columns: 1fr auto; align-items: center; }
   .profile-fee .button { grid-column: 1 / -1; }
-  .device-check { flex-direction: column; }
-  .device-actions { align-items: stretch; }
-  .device-actions .button { justify-content: center; }
-  .consult-lobby-head h1 { font-size: 27px; }
-  .call-page { padding-inline: 12px; }
-  .call-topbar { height: 58px; }
-  .video-stage { height: 60vh; min-height: 310px; margin-top: 12px; }
-  .local-video { width: 116px; height: 88px; right: 9px; top: 9px; }
-  .call-controls { gap: 6px; }
-  .control-button { min-width: 65px; height: 58px; padding-inline: 7px; }
-  .call-controls > .button { min-height: 45px; padding-inline: 9px; font-size: 10px; }
   .specialty-bars > div { grid-template-columns: 95px 1fr 22px; }
 }
 

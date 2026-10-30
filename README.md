@@ -27,8 +27,7 @@ DrNutrident is a complete dental-clinic management platform consisting of a Node
 - **Dashboard**: Upcoming appointments overview, quick booking CTA, dental health metrics.
 - **Appointment Booking (`/app/book/:dentistId`)**: Stepper for slot selection (clinic timezone), visit mode (in-clinic / video), reason for visit, family member assignment, fee summary, and Razorpay checkout.
 - **Appointments (`/app/appointments`)**: Filter by status, cancel with reason & clinic refund policy copy, reschedule with automatic navigation to new appointment, join video consultation.
-- **Prescriptions (`/app/prescriptions`)**: Authenticated PDF downloads (`/api/prescriptions/:id/pdf`).
-- **Medical Records (`/app/records`)**: Upload records (X-ray, lab report, prescription) as multipart form data (`file`), filter by type, open Cloudinary files directly, and delete.
+- **Medical Records (`/app/records`)**: Upload records (X-ray, lab report, clinical notes) as multipart form data (`file`), filter by type, open Cloudinary files directly, and delete.
 - **Care & Dental Chart (`/app/care`)**: View ongoing treatment plans with step-level statuses; interactive read-only 32-tooth FDI dental chart (numbers 11–18, 21–28, 31–38, 41–48).
 - **Billing (`/app/billing`)**: Patient invoice history with PDF download, payment records.
 - **Family Members (`/app/family`)**: Manage dependents and book visits on their behalf.
@@ -43,7 +42,6 @@ DrNutrident is a complete dental-clinic management platform consisting of a Node
 - **Patients Directory (`/dentist/patients`)**: List unique patients from appointment history or `GET /dentists/me/patients`.
 - **Clinical View (`/dentist/patients/:patientId`)**:
   - **Treatment Plans**: Create plans with steps from treatments catalog (`GET /treatments`), update step status (`planned`, `in-progress`, `completed`).
-  - **Prescriptions**: Dynamic medicine rows (name, dosage, frequency, days, instructions) with server validation.
   - **Medical Records**: View uploaded patient records.
   - **Dental Chart**: Interactive 32-tooth FDI grid. Tap any tooth to record condition (caries, filling, extraction, crown, healthy) and clinical notes.
 - **Patient Reviews (`/dentist/reviews`)**: View patient ratings and comments; submit dentist reply.

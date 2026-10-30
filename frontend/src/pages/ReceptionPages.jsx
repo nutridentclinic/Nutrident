@@ -661,8 +661,6 @@ export function AppointmentLookup() {
           >
             <option value="">All modes</option>
             <option value="in-clinic">In-clinic</option>
-            <option value="video">Video</option>
-            <option value="audio">Audio</option>
           </select>
         </Field>
       </div>
@@ -973,7 +971,6 @@ export function AppointmentLookup() {
                   onChange={(e) => setBookingMode(e.target.value)}
                 >
                   <option value="in-clinic">In-clinic visit</option>
-                  <option value="video">Video consultation</option>
                 </TextInput>
               </Field>
 

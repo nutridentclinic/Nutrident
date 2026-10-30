@@ -491,7 +491,6 @@ export function PricingPage() {
   const settings = settingsQuery.data?.data
 
   const consultationFee = Number(dentist?.consultationFee || 0)
-  const platformFee = Number(settings?.platformFee || 0)
   const refundHours = Number(settings?.cancellationFullRefundHours || 24)
 
   return (
@@ -506,11 +505,6 @@ export function PricingPage() {
           <span className="eyebrow">Doctor consultation</span>
           <strong>{consultationFee > 0 ? `₹${consultationFee.toLocaleString('en-IN')}` : 'Fee on appointment'}</strong>
           <p>Standard consultation fee with Dr. {dentist?.user?.name || 'our doctor'}.</p>
-        </div>
-        <div>
-          <span className="eyebrow">Platform fee</span>
-          <strong>₹{platformFee.toLocaleString('en-IN')}</strong>
-          <p>Online booking and secure scheduling processing.</p>
         </div>
         <div>
           <span className="eyebrow">Cancellation policy</span>

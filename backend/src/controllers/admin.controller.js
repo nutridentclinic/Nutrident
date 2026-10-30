@@ -13,10 +13,6 @@ exports.getSystemStatus = catchAsync(async (req, res) => {
   const rzpSec = process.env.RAZORPAY_KEY_SECRET || '';
   const paymentsConfigured = !!(rzpKey && rzpSec && !rzpKey.includes('replace') && !rzpSec.includes('replace'));
 
-  const agoraId = process.env.AGORA_APP_ID || '';
-  const agoraCert = process.env.AGORA_APP_CERTIFICATE || '';
-  const videoConfigured = !!(agoraId && agoraCert && !agoraId.includes('replace') && !agoraCert.includes('replace'));
-
   const firebaseConfigured = !!process.env.FIREBASE_SERVICE_ACCOUNT_BASE64;
 
   const cloudinaryPing = cloudinaryStatus.pingStatus || (
@@ -33,7 +29,6 @@ exports.getSystemStatus = catchAsync(async (req, res) => {
     uploads: cloudinaryStatus.configured && cloudinaryStatus.reachable,
     email: emailConfigured,
     payments: paymentsConfigured,
-    video: videoConfigured,
     firebase: firebaseConfigured,
     cloudinaryPing,
     missingCloudinaryVars: cloudinaryStatus.missing || [],
@@ -54,10 +49,6 @@ exports.getSystemStatus = catchAsync(async (req, res) => {
       payments: {
         configured: paymentsConfigured,
         reason: paymentsConfigured ? null : 'RAZORPAY_KEY_ID or RAZORPAY_KEY_SECRET missing or placeholder',
-      },
-      video: {
-        configured: videoConfigured,
-        reason: videoConfigured ? null : 'AGORA_APP_ID or AGORA_APP_CERTIFICATE missing or placeholder',
       },
       firebase: {
         configured: firebaseConfigured,

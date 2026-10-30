@@ -104,16 +104,6 @@ export function Patient360({ readOnly = false } = {}) {
     enabled: activeTab === 'records',
   })
 
-  // 4. Fetch Prescriptions
-  const presQuery = useQuery({
-    queryKey: ['patient-360-prescriptions', id],
-    queryFn: async () => {
-      const res = await api.prescriptions.forPatient(id)
-      return res?.data || []
-    },
-    enabled: activeTab === 'prescriptions',
-  })
-
   // 5. Fetch Treatment Plans
   const plansQuery = useQuery({
     queryKey: ['patient-plans', id],
@@ -284,7 +274,6 @@ export function Patient360({ readOnly = false } = {}) {
           { key: 'overview', label: 'Overview' },
           { key: 'appointments', label: 'Appointments' },
           { key: 'records', label: 'Medical Records' },
-          { key: 'prescriptions', label: 'Prescriptions' },
           { key: 'plans', label: 'Treatment Plans' },
           { key: 'billing', label: 'Invoices & Billing' },
         ].map((tab) => (
@@ -482,7 +471,6 @@ export function Patient360({ readOnly = false } = {}) {
                     className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white"
                   >
                     <option value="xray">Dental X-Ray</option>
-                    <option value="prescription">Prescription Scan</option>
                     <option value="lab-report">Lab Report</option>
                     <option value="other">Other Clinical Document</option>
                   </select>
@@ -500,11 +488,14 @@ export function Patient360({ readOnly = false } = {}) {
 
           <AsyncView query={recordsQuery} empty={recordsQuery.data?.length === 0} emptyTitle="No records on file">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {(recordsQuery.data || []).map((rec) => (
+              {(recordsQuery.data || []).map((rec) => {
+                const rawType = rec.type || rec.recordType;
+                const displayType = rawType === 'prescription' ? 'Other document' : rawType;
+                return (
                 <div key={rec._id} className="bg-slate-800/40 p-4 rounded-xl border border-slate-700/60 flex items-center justify-between">
                   <div>
                     <strong className="text-white block">{rec.title}</strong>
-                    <span className="text-xs text-slate-400 uppercase">{rec.type || rec.recordType} · {formatClinicDate(rec.createdAt)}</span>
+                    <span className="text-xs text-slate-400 uppercase">{displayType} · {formatClinicDate(rec.createdAt)}</span>
                   </div>
                   {rec.file?.url && (
                     <button
@@ -517,34 +508,8 @@ export function Patient360({ readOnly = false } = {}) {
                     </button>
                   )}
                 </div>
-              ))}
-            </div>
-          </AsyncView>
-        </SectionPanel>
-      )}
-
-      {activeTab === 'prescriptions' && (
-        <SectionPanel title="Prescriptions" description="Medication orders issued by the clinic">
-          <AsyncView query={presQuery} empty={presQuery.data?.length === 0} emptyTitle="No prescriptions issued">
-            <div className="space-y-4">
-              {(presQuery.data || []).map((pres) => (
-                <div key={pres._id} className="bg-slate-800/40 p-4 rounded-xl border border-slate-700/60">
-                  <div className="flex justify-between items-start mb-2">
-                    <div>
-                      <strong className="text-white block">{pres.diagnosis || 'Clinical Prescription'}</strong>
-                      <small className="text-xs text-slate-400">Date: {formatClinicDate(pres.createdAt)}</small>
-                    </div>
-                  </div>
-                  <div className="divide-y divide-slate-700/40 mt-3">
-                    {(pres.medicines || []).map((med, idx) => (
-                      <div key={idx} className="py-2 text-sm flex justify-between">
-                        <span className="text-white font-medium">{med.name} ({med.dosage || 'Standard'})</span>
-                        <span className="text-slate-400">{med.frequency} · {med.duration}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
+              );
+              })}
             </div>
           </AsyncView>
         </SectionPanel>

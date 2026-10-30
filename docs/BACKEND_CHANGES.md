@@ -106,7 +106,7 @@ This document details all modifications introduced to the DrNutrident backend an
 #### A3. Patient 360 View
 - Mounted at `/admin/patients/:id` and `/reception/patients/:id`.
 - Header: photo, name, age/gender, contact, verified badge, next appointment, last visit, outstanding balance.
-- Tabs: Overview, Appointments, Prescriptions, Records, Treatment Plans, Dental Chart, Billing.
+- Tabs: Overview, Appointments, Records, Treatment Plans, Dental Chart, Billing.
 - Backend endpoints: `GET /api/patients/:id/summary` and `GET /api/patients/:id/appointments` (*pending backend deploy*).
 - Read-only protection: receptionists and admins cannot edit clinical chart findings.
 

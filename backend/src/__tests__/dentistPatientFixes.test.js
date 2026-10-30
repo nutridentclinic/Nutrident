@@ -33,7 +33,6 @@ const app = require('../app');
 const User = require('../models/User');
 const Dentist = require('../models/Dentist');
 const Appointment = require('../models/Appointment');
-const Prescription = require('../models/Prescription');
 const Invoice = require('../models/Invoice');
 const Queue = require('../models/Queue');
 const Review = require('../models/Review');
@@ -69,7 +68,6 @@ describe('Dentist, Patient, Notifications & Reception Comprehensive Tests', () =
     await User.deleteMany({});
     await Dentist.deleteMany({});
     await Appointment.deleteMany({});
-    await Prescription.deleteMany({});
     await Invoice.deleteMany({});
     await Queue.deleteMany({});
     await Review.deleteMany({});
@@ -344,103 +342,6 @@ describe('Dentist, Patient, Notifications & Reception Comprehensive Tests', () =
 
       expect(res.status).toBe(400);
       expect(res.body.message).toContain('New slot must be different');
-    });
-  });
-
-  describe('§4 Prescriptions: Creation, Voiding, and PDF Stream', () => {
-    it('creates prescription with validation and notifies patient', async () => {
-      const res = await request(app)
-        .post('/api/prescriptions')
-        .set('Authorization', `Bearer ${dentistToken}`)
-        .send({
-          patientId: patientUser._id.toString(),
-          diagnosis: 'Acute Periapical Periodontitis',
-          medicines: [
-            {
-              name: 'Amoxicillin',
-              dosage: '500mg',
-              frequency: '1-0-1',
-              durationDays: 5,
-              instructions: 'After food',
-            },
-          ],
-          additionalNotes: 'Drink plenty of water',
-          followUpDate: '2026-11-10',
-        });
-
-      expect(res.status).toBe(201);
-      expect(res.body.success).toBe(true);
-      expect(res.body.data.status).toBe('active');
-      expect(res.body.data.diagnosis).toBe('Acute Periapical Periodontitis');
-
-      const notif = await Notification.findOne({ user: patientUser._id, type: 'prescription_ready' });
-      expect(notif).not.toBeNull();
-      expect(notif.link).toBe('/app/prescriptions');
-    });
-
-    it('validates medicines array and durationDays (422)', async () => {
-      const emptyMedRes = await request(app)
-        .post('/api/prescriptions')
-        .set('Authorization', `Bearer ${dentistToken}`)
-        .send({
-          patientId: patientUser._id.toString(),
-          diagnosis: 'Check',
-          medicines: [],
-        });
-      expect(emptyMedRes.status).toBe(422);
-
-      const invalidDurationRes = await request(app)
-        .post('/api/prescriptions')
-        .set('Authorization', `Bearer ${dentistToken}`)
-        .send({
-          patientId: patientUser._id.toString(),
-          medicines: [{ name: 'Paracetamol', dosage: '500mg', frequency: 'SOS', durationDays: 0 }],
-        });
-      expect(invalidDurationRes.status).toBe(422);
-    });
-
-    it('voids a prescription with reason and prevents re-voiding', async () => {
-      const p = await Prescription.create({
-        patient: patientUser._id,
-        dentist: dentistProfile._id,
-        diagnosis: 'Cavity',
-        medicines: [{ name: 'Painkiller', dosage: '400mg', frequency: '1-0-1', durationDays: 3 }],
-        status: 'active',
-      });
-
-      const voidRes = await request(app)
-        .patch(`/api/prescriptions/${p._id}/void`)
-        .set('Authorization', `Bearer ${dentistToken}`)
-        .send({ reason: 'Patient allergic to prescribed medication' });
-
-      expect(voidRes.status).toBe(200);
-      expect(voidRes.body.data.status).toBe('voided');
-      expect(voidRes.body.data.voidReason).toBe('Patient allergic to prescribed medication');
-
-      // Second void attempt should fail
-      const repeatRes = await request(app)
-        .patch(`/api/prescriptions/${p._id}/void`)
-        .set('Authorization', `Bearer ${dentistToken}`)
-        .send({ reason: 'Repeat' });
-      expect(repeatRes.status).toBe(400);
-    });
-
-    it('streams prescription PDF download', async () => {
-      const p = await Prescription.create({
-        patient: patientUser._id,
-        dentist: dentistProfile._id,
-        diagnosis: 'Gingivitis',
-        medicines: [{ name: 'Chlorhexidine Mouthwash', dosage: '10ml', frequency: '0-0-1', durationDays: 7 }],
-        status: 'voided',
-        voidReason: 'Discontinued',
-      });
-
-      const pdfRes = await request(app)
-        .get(`/api/prescriptions/${p._id}/pdf`)
-        .set('Authorization', `Bearer ${patientToken}`);
-
-      expect(pdfRes.status).toBe(200);
-      expect(pdfRes.headers['content-type']).toBe('application/pdf');
     });
   });
 

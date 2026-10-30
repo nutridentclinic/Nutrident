@@ -56,7 +56,6 @@ app.use('/api/appointments', require('./routes/appointment.routes'));
 app.use('/api/treatments', require('./routes/treatment.routes'));
 app.use('/api/treatment-plans', require('./routes/treatmentPlan.routes'));
 app.use('/api/dental-charts', require('./routes/dentalChart.routes'));
-app.use('/api/prescriptions', require('./routes/prescription.routes'));
 app.use('/api/medical-records', require('./routes/medicalRecord.routes'));
 app.use('/api/payments', require('./routes/payment.routes')); // webhook already mounted above; other payment routes here
 app.use('/api/invoices', require('./routes/invoice.routes'));

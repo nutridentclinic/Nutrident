@@ -133,7 +133,6 @@ describe('Patient, Admin and Staff Fixes (15 items)', () => {
       expect(res.body.data).toHaveProperty('uploads');
       expect(res.body.data).toHaveProperty('payments');
       expect(res.body.data).toHaveProperty('email');
-      expect(res.body.data).toHaveProperty('video');
     });
   });
 
@@ -706,14 +705,14 @@ describe('Patient, Admin and Staff Fixes (15 items)', () => {
         mode: 'in-clinic',
         status: 'confirmed',
         paymentStatus: 'pending',
-        fees: { consultationFee: 500, platformFee: 50, totalAmount: 550 },
+        fees: { consultationFee: 500, platformFee: 0, totalAmount: 500 },
       });
 
       const invoice1 = await createInvoiceForAppointment(appt);
       expect(invoice1).toBeDefined();
       expect(invoice1.invoiceNumber).toMatch(/^INV-\d{4}-\d{6}$/);
       expect(invoice1.status).toBe('unpaid');
-      expect(invoice1.totalAmount).toBe(550);
+      expect(invoice1.totalAmount).toBe(500);
 
       // Calling again is idempotent - returns same invoice
       const invoice2 = await createInvoiceForAppointment(appt);
@@ -856,7 +855,7 @@ describe('Patient, Admin and Staff Fixes (15 items)', () => {
         endTime: '10:30',
         mode: 'in-clinic',
         status: 'completed',
-        fees: { consultationFee: 500, platformFee: 50, totalAmount: 550 },
+        fees: { consultationFee: 500, platformFee: 0, totalAmount: 500 },
       });
 
       const review = await Review.create({

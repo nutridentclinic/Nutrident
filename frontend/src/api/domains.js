@@ -63,7 +63,6 @@ export const api = {
     reschedule: (id, data) => patch(`/appointments/${id}/reschedule`, data),
     complete: (id) => patch(`/appointments/${id}/complete`),
     noShow: (id) => patch(`/appointments/${id}/no-show`),
-    joinVideo: (id) => post(`/appointments/${id}/video/join`),
   },
   payments: {
     all: (params) => get('/payments', params),
@@ -93,7 +92,6 @@ export const api = {
     upload: (data, onProgress) => request({ method: 'POST', url: '/medical-records', data, onUploadProgress: onProgress }),
     remove: (id) => remove(`/medical-records/${id}`),
   },
-  prescriptions: { mine: () => get('/prescriptions/me'), forPatient: (id) => get(`/prescriptions/patient/${id}`), detail: (id) => get(`/prescriptions/${id}`), create: (data) => post('/prescriptions', data), void: (id, reason) => patch(`/prescriptions/${id}/void`, { reason }) },
   plans: {
     mine: () => get('/treatment-plans/me'),
     forPatient: (id) => get(`/treatment-plans/patient/${id}`),

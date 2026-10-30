@@ -615,7 +615,6 @@ export function AdminAppointments() {
           >
             <option value="">All modes</option>
             <option value="in-clinic">In-Clinic</option>
-            <option value="video">Video Consultation</option>
           </TextInput>
         </Field>
 
@@ -839,7 +838,6 @@ export function AdminAppointments() {
                   onChange={(e) => setBookingMode(e.target.value)}
                 >
                   <option value="in-clinic">In-Clinic Visit</option>
-                  <option value="video">Video Consultation</option>
                 </TextInput>
               </Field>
 
@@ -2740,7 +2738,7 @@ function SystemStatusCard() {
   return (
     <SectionPanel
       title="System integration status"
-      description="Live operational readiness for third-party integrations (Cloudinary, Brevo, Razorpay, Agora)."
+      description="Live operational readiness for third-party integrations (Cloudinary, Brevo, Razorpay)."
       actions={
         <button
           type="button"
@@ -2819,24 +2817,6 @@ function SystemStatusCard() {
               Checkout & refunds · {status.reasonCategory?.payments || "ok"}
             </small>
           </div>
-
-          {/* Video (Agora) */}
-          <div style={{ padding: "1rem", borderRadius: "0.5rem", border: "1px solid var(--border, #e2e8f0)", background: "var(--surface, #fff)" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.5rem" }}>
-              <strong>Video (Agora)</strong>
-              <span style={{
-                display: "inline-flex", alignItems: "center", gap: "0.25rem",
-                fontSize: "0.8125rem", fontWeight: 600,
-                color: status.video ? "#16a34a" : "#dc2626"
-              }}>
-                <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: status.video ? "#16a34a" : "#dc2626" }} />
-                {status.video ? "Operational" : "Not configured"}
-              </span>
-            </div>
-            <small style={{ color: "var(--text-muted, #64748b)" }}>
-              Teleconsultations · {status.reasonCategory?.video || "ok"}
-            </small>
-          </div>
         </div>
       ) : null}
 
@@ -2889,12 +2869,12 @@ function ClinicSettingsPage() {
     event.preventDefault();
     const payload = {
       ...data,
-      platformFee: Number(data.platformFee || 0),
       taxPercentage: Number(data.taxPercentage || 0),
       reminderHoursBefore: Number(data.reminderHoursBefore || 24),
       cancellationFullRefundHours: Number(data.cancellationFullRefundHours || 24),
       allowPayAtClinic: data.allowPayAtClinic !== false,
     };
+    delete payload.platformFee;
     try {
       const result = await api.settings.update(payload);
       notify(result.message || "Clinic settings saved successfully.");
@@ -3013,14 +2993,6 @@ function ClinicSettingsPage() {
 
           <SectionPanel title="Fees & booking policies">
             <div className="admin-form-grid">
-              <Field label="Platform fee (INR)">
-                <TextInput
-                  type="number"
-                  min="0"
-                  value={data.platformFee ?? 0}
-                  onChange={(e) => setForm({ ...data, platformFee: e.target.value })}
-                />
-              </Field>
               <Field label="Tax percentage (%)">
                 <TextInput
                   type="number"

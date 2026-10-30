@@ -10,7 +10,7 @@ const appointmentSchema = new mongoose.Schema(
     startTime: { type: String, required: true }, // "10:00"
     endTime: { type: String, required: true }, // "10:30"
 
-    mode: { type: String, enum: ['in-clinic', 'video', 'audio'], default: 'in-clinic' },
+    mode: { type: String, enum: ['in-clinic'], default: 'in-clinic' },
     reasonForVisit: { type: String, trim: true, default: '' },
 
     clinic: { type: mongoose.Schema.Types.ObjectId, ref: 'Clinic', default: null },
@@ -46,12 +46,6 @@ const appointmentSchema = new mongoose.Schema(
     },
     payAtClinic: { type: Boolean, default: false },
     payment: { type: mongoose.Schema.Types.ObjectId, ref: 'Payment', default: null },
-
-    videoCall: {
-      roomId: { type: String, default: null },
-      joinedByPatientAt: Date,
-      joinedByDentistAt: Date,
-    },
 
     reminderSent: { type: Boolean, default: false },
   },

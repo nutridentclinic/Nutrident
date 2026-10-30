@@ -7,16 +7,13 @@ import { useAuthStore } from './store/auth.js'
 import PortalLayout from './layouts/PortalLayout.jsx'
 import { LoadingState } from './components/ui.jsx'
 import { AboutPage, ContactPage, DentistDirectory, DentistProfile, DoctorProfilePage, LegalPage, PricingPage, PublicHome, PublicLayout, ServicesPage, SimplePublicPage } from './pages/PublicPages.jsx'
-import { PatientAppointments, AppointmentBooking, AppointmentDetail, PatientBilling, PatientCare, PatientDashboard, PatientFamily, PatientPrescriptions, PatientProfile, PatientProfilePhoto, PatientRecords, PatientTreatmentPlans, PatientDentalChart, PatientTreatmentsPage } from './pages/PatientPages.jsx'
+import { PatientAppointments, AppointmentBooking, AppointmentDetail, PatientBilling, PatientCare, PatientDashboard, PatientFamily, PatientProfile, PatientProfilePhoto, PatientRecords, PatientTreatmentPlans, PatientDentalChart, PatientTreatmentsPage } from './pages/PatientPages.jsx'
 import { ClinicalRecord, DentistAvailability, DentistDashboard, DentistProfilePage, DentistReviews, DentistSchedule, PatientDirectory, QueuePage } from './pages/TeamPages.jsx'
 import { AppointmentLookup, InvoiceCreator, NotificationsPage, ReceptionPage } from './pages/ReceptionPages.jsx'
 import { Patient360 } from './pages/Patient360.jsx'
 import SharedSettingsPage from './pages/SharedSettingsPage.jsx'
 import './App.css'
-
-const roleHome = { patient: '/app', dentist: '/dentist', receptionist: '/reception', admin: '/admin' }
-const ConsultationCall = lazy(() => import('./pages/ConsultationPages.jsx').then((module) => ({ default: module.ConsultationCall })))
-const ConsultationLobby = lazy(() => import('./pages/ConsultationPages.jsx').then((module) => ({ default: module.ConsultationLobby })))
+import { roleHome, getPortalBase } from './auth/routes.js'
 const AdminPage = lazy(() => import('./pages/AdminPages.jsx').then((module) => ({ default: module.AdminPage })))
 const LoginPage = lazy(() => import('./pages/AuthPages.jsx').then((module) => ({ default: module.LoginPage })))
 const RegisterPage = lazy(() => import('./pages/AuthPages.jsx').then((module) => ({ default: module.RegisterPage })))
@@ -166,19 +163,29 @@ function Landing() {
   return <PublicHome />
 }
 
-export function PortalNotFound({ homePath = '/reception', portalName = 'Reception' }) {
+export function PortalNotFound({ homePath, portalName }) {
+  const { user } = useAuthStore()
+  const role = user?.role || 'patient'
+  const computedHome = homePath || getPortalBase(role)
+  const computedName = portalName || (role === 'receptionist' ? 'Reception' : role === 'dentist' ? 'Dentist' : role === 'admin' ? 'Admin' : 'Care')
   return (
     <div className="section-panel" style={{ textAlign: 'center', padding: '3rem 1.5rem', margin: '2rem auto', maxWidth: '540px' }}>
       <span className="eyebrow" style={{ color: '#d97706' }}>Page not found</span>
-      <h2 style={{ fontSize: '1.5rem', margin: '0.5rem 0 1rem' }}>This {portalName} page does not exist.</h2>
+      <h2 style={{ fontSize: '1.5rem', margin: '0.5rem 0 1rem' }}>This {computedName} page does not exist.</h2>
       <p style={{ color: '#64748b', marginBottom: '1.5rem' }}>
-        The reception view or tool you are looking for may have been moved, removed, or is temporarily unavailable.
+        The {computedName.toLowerCase()} view or tool you are looking for may have been moved, removed, or is temporarily unavailable.
       </p>
-      <Link to={homePath} className="button button-primary">
-        Return to {portalName} overview <ArrowRight size={16} />
+      <Link to={computedHome} className="button button-primary">
+        Return to {computedName} overview <ArrowRight size={16} />
       </Link>
     </div>
   )
+}
+
+function LegacyRedirect({ toPrefix, stripPrefix }) {
+  const location = useLocation()
+  const subpath = location.pathname.replace(new RegExp(`^${stripPrefix}`), '')
+  return <Navigate to={`${toPrefix}${subpath}${location.search}`} replace />
 }
 
 function NotFound() {
@@ -210,12 +217,14 @@ export default function App() {
     <Route path="/reset-password/verify" element={<GuestOnly><ResetPasswordVerifyPage /></GuestOnly>} />
     <Route path="/reset-password/new" element={<GuestOnly><ResetPasswordNewPage /></GuestOnly>} />
     <Route path="/reset-password" element={<GuestOnly><ResetPasswordPage /></GuestOnly>} />
+    <Route path="/receptionist" element={<Navigate to="/reception" replace />} />
+    <Route path="/receptionist/*" element={<LegacyRedirect toPrefix="/reception" stripPrefix="/receptionist" />} />
     <Route element={<RequireRole roles={['patient']} />}>
       <Route path="/app" element={<PortalLayout />}>
         <Route index element={<PatientDashboard />} /><Route path="appointments" element={<PatientAppointments />} /><Route path="appointments/:id" element={<AppointmentDetail />} />
         <Route path="book" element={<AppointmentBooking />} />
         <Route path="book/:dentistId" element={<Navigate to="/app/book" replace />} />
-        <Route path="prescriptions" element={<PatientPrescriptions />} /><Route path="records" element={<PatientRecords />} />
+        <Route path="records" element={<PatientRecords />} />
         <Route path="treatment-plans" element={<PatientTreatmentPlans />} />
         <Route path="treatments" element={<PatientTreatmentsPage />} />
         <Route path="dental-chart" element={<PatientDentalChart />} />
@@ -224,6 +233,7 @@ export default function App() {
         <Route path="profile" element={<PatientProfileWorkspace />} />
         <Route path="settings" element={<SharedSettingsPage />} />
         <Route path="notifications" element={<NotificationsPage />} />
+        <Route path="*" element={<PortalNotFound />} />
       </Route>
     </Route>
     <Route element={<RequireRole roles={['dentist']} />}>
@@ -233,6 +243,7 @@ export default function App() {
         <Route path="reviews" element={<DentistReviews />} /><Route path="queue" element={<QueuePage role="dentist" />} /><Route path="profile" element={<DentistProfilePage />} />
         <Route path="settings" element={<SharedSettingsPage />} />
         <Route path="notifications" element={<NotificationsPage />} />
+        <Route path="*" element={<PortalNotFound />} />
       </Route>
     </Route>
     <Route element={<RequireRole roles={['receptionist']} />}>
@@ -260,10 +271,8 @@ export default function App() {
         <Route path="settings" element={<AdminPage page="settings" />} />
         <Route path="account" element={<SharedSettingsPage />} />
         <Route path="notifications" element={<NotificationsPage />} />
+        <Route path="*" element={<PortalNotFound />} />
       </Route>
-    </Route>
-    <Route element={<RequireRole roles={['patient', 'dentist']} />}>
-      <Route path="/consultation/:id/lobby" element={<ConsultationLobby />} /><Route path="/consultation/:id" element={<ConsultationCall />} />
     </Route>
     <Route path="*" element={<NotFound />} />
   </Routes></Suspense>

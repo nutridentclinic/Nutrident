@@ -44,7 +44,7 @@ const memoryUpload = multer({
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
 });
 
-// folder: 'profile-photos' | 'xrays' | 'prescriptions' | 'medical-records' | 'reports'
+// folder: 'profile-photos' | 'xrays' | 'medical-records' | 'reports'
 const upload = (folder) => ({
   single: (fieldName) => (req, res, next) => {
     const contentType = req.headers['content-type'] || '';

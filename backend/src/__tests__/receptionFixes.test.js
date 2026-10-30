@@ -157,7 +157,7 @@ describe('Area 1: Appointments Lookup & Server-Side Filtering', () => {
       date: tomorrow,
       startTime: '10:00',
       endTime: '10:30',
-      mode: 'video',
+      mode: 'in-clinic',
       reasonForVisit: 'Toothache consultation',
       status: 'pending',
       paymentStatus: 'pending',
@@ -239,7 +239,7 @@ describe('Area 1: Appointments Lookup & Server-Side Filtering', () => {
 
   test('filters combine with $and: status, mode, and search', async () => {
     const res = await request(app)
-      .get('/api/appointments?status=pending&mode=video&search=Bob')
+      .get('/api/appointments?status=pending&mode=in-clinic&search=Bob')
       .set('Authorization', `Bearer ${receptionistToken}`)
       .expect(200);
 

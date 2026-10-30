@@ -248,3 +248,86 @@ In strict accordance with the testing guidelines, the following environments and
 | **Receptionist Invoice & Completion** | `backend/src/__tests__/dentistPatientFixes.test.js` | Reliable invoice creation on completion; receptionist completion with dentist confirmation flag. | **PASSED** (100%) |
 | **Playwright Dentist Portal Smoke Test** | `frontend/e2e/dentist-portal.spec.js` | Dentist login; schedule view; reschedule modal slot selection & submission; availability leave dates; notifications deletion. | **PASSED** (100%) |
 | **Full Regression Suite** | Backend Jest (14 suites, 120 tests)<br>Frontend Vitest (10 suites, 65 tests)<br>Frontend Production Build | Zero failures across backend and frontend unit/integration/E2E suites and production bundle generation. | **PASSED** (100%) |
+
+---
+
+## Milestone 4: OTP Layout Hardening, Platform Fee Removal, In-Clinic Visits Only, Prescription Elimination, and Receptionist Route Unification
+
+### 1. Receptionist Notifications & Routing Unification (§5)
+- **Root Cause**:
+  - `PortalLayout.jsx` previously interpolated notification links as `/${role === 'patient' ? 'app' : role}/notifications`. For the receptionist role, this produced `/receptionist/notifications`. Because the reception portal is mounted at `/reception`, the browser routed to the top-level 404 page ("This page isn't here").
+- **Remediation**:
+  - Created `frontend/src/auth/routes.js` declaring single sources of truth: `roleHome` and `getPortalBase(role)` (`patient: '/app'`, `dentist: '/dentist'`, `receptionist: '/reception'`, `admin: '/admin'`).
+  - Updated `PortalLayout.jsx`, `App.jsx`, and `AuthPages.jsx` to build all portal paths via `getPortalBase(role)`.
+  - Added `LegacyRedirect` in `App.jsx` redirecting `/receptionist/*` to `/reception/*` and `/receptionist` to `/reception`.
+  - Added scoped `PortalNotFound` catch-all inside each portal layout with tailored messaging and navigation buttons back to the role's dashboard overview.
+
+### 2. OTP Layout & Responsive Grid Hardening (§1)
+- **Root Cause**:
+  - `OtpInput.jsx` used inline flex styling with explicit pixel widths, causing digit boxes to overflow and induce horizontal scrolling on screens under 760px.
+  - Auth page layout used `grid-template-columns: minmax(430px, 1.2fr) minmax(320px, 1fr)` with an active aside panel on tablet/mobile screens, forcing viewport sliding.
+  - OTP resend timers displayed raw integer seconds (e.g. `59s`) without standard `mm:ss` formatting.
+- **Remediation**:
+  - Refactored `OtpInput.jsx` to use CSS classes (`.otp-boxes-grid` and `.otp-digit-box`) with `grid-template-columns: repeat(6, minmax(0, 1fr))`, `size={1}`, and `inputMode="numeric"`.
+  - Updated `App.css` auth breakpoints to collapse `.auth-aside` at `@media (max-width: 900px)`, centering `.auth-form` with `width: min(100%, 480px)` and zero horizontal overflow.
+  - Implemented `formatCountdown(seconds)` in `AuthPages.jsx` displaying formatted `mm:ss` timers with 60-second cooldown on verification screens.
+
+### 3. Platform Fee Complete Removal (§2)
+- **Root Cause**:
+  - A legacy ₹20 platform fee was hardcoded into appointment pricing calculations, invoices, patient booking previews, and admin clinic settings.
+- **Remediation**:
+  - Set default `platformFee = 0` in `ClinicSettings.js`.
+  - Updated `createAppointment` and `createStaffAppointment` in `appointment.controller.js` so `fees.platformFee = 0` and `totalAmount = consultationFee`.
+  - Removed platform fee input from `AdminPages.jsx` and stripped `platformFee` from settings update payloads.
+  - Removed platform fee line item generation from `invoice.service.js`.
+  - Updated patient booking breakdowns (`PatientPages.jsx`) and public pricing cards (`PublicPages.jsx`). Total fee strictly matches consultation fee.
+  - Created migration script `scripts/removePlatformFee.js` supporting `--dry-run` to zero out legacy platform fees and recompute totals on pending bookings.
+
+### 4. Prescriptions Elimination (§4)
+- **Root Cause**:
+  - Prescriptions were superseded by clinic requirements; full removal of all prescription models, endpoints, views, and navigation was ordered.
+- **Remediation**:
+  - Deleted backend `models/Prescription.js`, `controllers/prescription.controller.js`, `routes/prescription.routes.js`, and `validators/prescription.validator.js`.
+  - Unmounted `/api/prescriptions` route in `backend/src/app.js`.
+  - Removed `generatePrescriptionPDF` from `pdf.service.js` and deleted `prescriptionIssued` from `emailTemplates.js`.
+  - Removed `'prescription_ready'` from `Notification.js` schema enum.
+  - Removed `prescriptions` API domain from `frontend/src/api/domains.js`.
+  - Removed `/app/prescriptions` route, `PatientPrescriptions` component, dashboard quick links, Patient360 prescription tabs/forms, and "Write Rx" shortcuts.
+  - Replaced `<option value="prescription">` in medical records upload with legacy display mapping to `'Other document'`.
+  - Removed `.medicine-list` and `.medicine-row` CSS from `App.css`.
+
+### 5. Video & Audio Consultation Elimination (§3)
+- **Root Cause**:
+  - Clinic operates solely for in-clinic dental visits; remote teleconsultation and Agora dependencies required complete decommissioning.
+- **Remediation**:
+  - Deleted `backend/src/config/agora.js`.
+  - Removed `POST /api/appointments/:id/video/join` and `joinVideoCall` controller method.
+  - Restricted `Appointment.mode` enum strictly to `['in-clinic']` (default: `'in-clinic'`) and removed the `videoCall` schema object.
+  - Removed `isWithinVideoWindow` helper and video join boundary logic from `appointmentAccess.js`.
+  - Removed Agora and video checks from `GET /api/admin/system-status` and Admin diagnostics UI.
+  - Deleted frontend `ConsultationPages.jsx` (`ConsultationLobby`, `ConsultationCall`) and `/consultation/:id` routes.
+  - Removed video consultation mode options, "Join video" and "Join audio" buttons across patient, dentist, receptionist, and admin portals.
+  - Removed `.video-stage`, `.remote-video`, `.local-video`, and call controls from `App.css`.
+  - Updated `frontend/vercel.json` CSP and Permissions-Policy (`camera=(), microphone=()`).
+  - Uninstalled `agora-access-token` in backend and `agora-rtc-sdk-ng` in frontend.
+  - Created migration script `scripts/removeVideoAudio.js` supporting `--dry-run` to switch existing records to `in-clinic` and notify affected patients.
+
+### 6. Data Cleanup & Migration Script (§6)
+- Created `scripts/cleanup.js`:
+  - Supports `--dry-run`.
+  - Backs up existing `prescriptions` collection documents to `backups/prescriptions_<timestamp>.json`, then safely drops the collection.
+  - Deletes notifications with `type: 'prescription_ready'`.
+  - Invokes `removePlatformFee` and `removeVideoAudio` migrations.
+
+---
+
+### Verification Results Matrix (Milestone 4)
+
+| Test Suite / Build Target | Scope Verified | Tests Passed | Status |
+| :--- | :--- | :--- | :--- |
+| **Backend Jest Suite** | 14 test suites covering auth, appointments, single-dentist, reception, notifications, upload engine, security | 114 / 114 tests | **PASSED (100%)** |
+| **Frontend Vitest Suite** | 10 test suites covering OTP layout, responsive grids, countdowns, portal routing, appointment lookup, queue, invoices, settings | 66 / 66 tests | **PASSED (100%)** |
+| **Frontend Vite Production Build** | Full production build (`npm run build`) with minification, CSS transformation, dynamic chunking | 0 errors | **PASSED (100%)** |
+| **Prescription Code Search** | `git grep -rniE "prescription"` across backend/src, frontend/src, docs, README.md | Only legacy display mapping & FIXES.md | **VERIFIED (0 leaks)** |
+| **Platform Fee Code Search** | `git grep -i "platform fee"` across backend/src, frontend/src | 0 matches | **VERIFIED (0 leaks)** |
+| **Agora Code Search** | `git grep -rniE "agora"` across backend/src, frontend/src | 0 matches | **VERIFIED (0 leaks)** |

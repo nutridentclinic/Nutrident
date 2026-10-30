@@ -58,7 +58,7 @@ const templates = {
     const safeDoctor = escapeHtml(doctorName || 'Doctor');
     const safeDate = escapeHtml(date);
     const safeTime = escapeHtml(time);
-    const safeMode = escapeHtml(mode === 'video' ? 'Video Consultation' : 'In-Clinic Visit');
+    const safeMode = 'In-Clinic Visit';
 
     const subject = `Appointment Confirmed: ${safeDate} at ${safeTime} - ${clinicName || 'DrNutrident'}`;
     const content = `
@@ -74,7 +74,7 @@ const templates = {
       </div>
       <p>Please arrive 10 minutes prior to your scheduled time. If you need to make changes or have questions, contact our front desk.</p>
     `;
-    const text = `Hello ${patientName},\n\nYour appointment with Dr. ${doctorName} on ${date} at ${time} (${mode}) is confirmed.\n\n${clinicName || 'DrNutrident Dental Clinic'}\nPhone: ${clinicPhone || '+91 98765 43210'}`;
+    const text = `Hello ${patientName},\n\nYour appointment with Dr. ${doctorName} on ${date} at ${time} (In-Clinic Visit) is confirmed.\n\n${clinicName || 'DrNutrident Dental Clinic'}\nPhone: ${clinicPhone || '+91 98765 43210'}`;
 
     return { subject, html: layout({ title: subject, content, clinicName, clinicPhone, clinicAddress }), text };
   },
@@ -143,58 +143,13 @@ const templates = {
       <div style="text-align: center; margin: 24px 0;">
         <a href="${safeUrl}" class="btn">Leave a Review</a>
       </div>
-      <p>Any medical prescriptions or invoices generated for your visit are available in your portal.</p>
+      <p>Any invoices generated for your visit are available in your portal.</p>
     `;
     const text = `Hello ${patientName},\n\nThank you for visiting Dr. ${doctorName} on ${date}. We would love to hear your feedback!\n\nReview link: ${reviewUrl}\n\n${clinicName || 'DrNutrident'}`;
 
     return { subject, html: layout({ title: subject, content, clinicName, clinicPhone }), text };
   },
 
-  prescriptionIssued({ patientName, doctorName, date, medicines = [], portalUrl, clinicName, clinicPhone }) {
-    const safePatient = escapeHtml(patientName || 'Patient');
-    const safeDoctor = escapeHtml(doctorName || 'Doctor');
-    const safeDate = escapeHtml(date);
-    const safeUrl = escapeHtml(portalUrl || '#');
-
-    const medRows = (medicines || [])
-      .map(
-        (m) => `
-        <tr>
-          <td style="padding: 6px 10px; border-bottom: 1px solid #e2e8f0;"><strong>${escapeHtml(m.name)}</strong></td>
-          <td style="padding: 6px 10px; border-bottom: 1px solid #e2e8f0;">${escapeHtml(m.dosage)}</td>
-          <td style="padding: 6px 10px; border-bottom: 1px solid #e2e8f0;">${escapeHtml(m.frequency)}</td>
-          <td style="padding: 6px 10px; border-bottom: 1px solid #e2e8f0;">${escapeHtml(String(m.durationDays))} days</td>
-        </tr>
-      `
-      )
-      .join('');
-
-    const subject = `New Prescription Issued - Dr. ${safeDoctor}`;
-    const content = `
-      <h2 style="margin-top:0; color:#0f172a;">New Prescription Issued</h2>
-      <p>Hello <strong>${safePatient}</strong>,</p>
-      <p>Dr. ${safeDoctor} has issued a new prescription for your visit on ${safeDate}.</p>
-      <table style="width:100%; border-collapse: collapse; margin: 16px 0; font-size: 13px;">
-        <thead>
-          <tr style="background:#f1f5f9; text-align:left;">
-            <th style="padding: 8px 10px;">Medicine</th>
-            <th style="padding: 8px 10px;">Dosage</th>
-            <th style="padding: 8px 10px;">Frequency</th>
-            <th style="padding: 8px 10px;">Duration</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${medRows}
-        </tbody>
-      </table>
-      <div style="text-align: center; margin: 20px 0;">
-        <a href="${safeUrl}" class="btn">View & Download PDF</a>
-      </div>
-    `;
-    const text = `Hello ${patientName},\n\nDr. ${doctorName} has issued a new prescription on ${date}.\n\nView prescription: ${portalUrl}\n\n${clinicName || 'DrNutrident'}`;
-
-    return { subject, html: layout({ title: subject, content, clinicName, clinicPhone }), text };
-  },
 
   invoiceReady({ patientName, invoiceNumber, amount, date, portalUrl, clinicName, clinicPhone }) {
     const safePatient = escapeHtml(patientName || 'Patient');

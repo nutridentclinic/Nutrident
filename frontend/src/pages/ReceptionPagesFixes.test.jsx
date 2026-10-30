@@ -96,7 +96,7 @@ describe('Reception Portal Comprehensive Fixes (Areas 1–6)', () => {
             endTime: '11:30',
             status: 'pending',
             paymentStatus: 'unpaid',
-            mode: 'video',
+            mode: 'in-clinic',
             patient: { name: 'Vikram Seth', phone: '9876500002' },
             dentist: { user: { name: 'Dr. Patil' } },
             fees: { totalAmount: 600 },

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 
-export function OtpInput({ value = '', onChange, disabled = false, autoFocus = true, id = 'otp-input' }) {
+export function OtpInput({ value = '', onChange, disabled = false, autoFocus = true, id = 'otp-input', hasError = false }) {
   const inputRefs = useRef([])
   const digits = Array.from({ length: 6 }, (_, i) => value[i] || '')
 
@@ -76,13 +76,6 @@ export function OtpInput({ value = '', onChange, disabled = false, autoFocus = t
       role="group"
       aria-label="6-digit verification code"
       id={id}
-      style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(6, 1fr)',
-        gap: '0.5rem',
-        maxWidth: '360px',
-        margin: '0 auto',
-      }}
     >
       {Array.from({ length: 6 }).map((_, index) => (
         <input
@@ -91,6 +84,7 @@ export function OtpInput({ value = '', onChange, disabled = false, autoFocus = t
             inputRefs.current[index] = el
           }}
           type="text"
+          size={1}
           inputMode="numeric"
           autoComplete={index === 0 ? 'one-time-code' : 'off'}
           pattern="[0-9]*"
@@ -102,19 +96,7 @@ export function OtpInput({ value = '', onChange, disabled = false, autoFocus = t
           onKeyDown={(e) => handleKeyDown(index, e)}
           onPaste={handlePaste}
           onFocus={(e) => e.target.select?.()}
-          className="otp-digit-box"
-          style={{
-            height: '3.25rem',
-            textAlign: 'center',
-            fontSize: '1.5rem',
-            fontWeight: 700,
-            borderRadius: '0.625rem',
-            border: '2px solid var(--border, #e2e8f0)',
-            background: 'var(--surface, #ffffff)',
-            color: 'var(--text, #0f172a)',
-            outline: 'none',
-            transition: 'border-color 0.15s ease, box-shadow 0.15s ease',
-          }}
+          className={`otp-digit-box ${digits[index] ? 'is-filled' : ''} ${hasError ? 'has-error' : ''}`}
         />
       ))}
     </div>

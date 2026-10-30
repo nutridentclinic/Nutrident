@@ -454,7 +454,6 @@ describe('Problem 3: Cloudinary Normaliser, Uploads & System Status', () => {
     expect(typeof adminRes.body.data.uploads).toBe('boolean');
     expect(typeof adminRes.body.data.email).toBe('boolean');
     expect(typeof adminRes.body.data.payments).toBe('boolean');
-    expect(typeof adminRes.body.data.video).toBe('boolean');
     expect(['ok', 'unauthorized', 'unreachable', 'not_configured']).toContain(adminRes.body.data.cloudinaryPing);
 
     // Ensure no secrets leaked

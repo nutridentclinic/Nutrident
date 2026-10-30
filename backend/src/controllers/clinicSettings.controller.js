@@ -9,7 +9,9 @@ exports.getSettings = catchAsync(async (req, res) => {
 });
 
 exports.updateSettings = catchAsync(async (req, res) => {
-  const settings = await ClinicSettings.findByIdAndUpdate('default', req.body, {
+  const payload = { ...req.body };
+  delete payload.platformFee;
+  const settings = await ClinicSettings.findByIdAndUpdate('default', payload, {
     new: true,
     upsert: true,
     runValidators: true,

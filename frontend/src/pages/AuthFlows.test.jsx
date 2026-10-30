@@ -10,6 +10,7 @@ import {
   ResetPasswordNewPage,
   ResetPasswordVerifyPage,
   VerifyOtpPage,
+  formatCountdown,
 } from './AuthPages.jsx'
 import { ToastProvider } from '../components/ui.jsx'
 import { useAuthStore } from '../store/auth.js'
@@ -103,6 +104,24 @@ describe('OtpInput component', () => {
 
     fireEvent.keyDown(inputs[2], { key: 'Backspace' })
     expect(handleChange).toHaveBeenCalledWith('12')
+  })
+
+  it('renders six equal-width digit boxes with CSS classes and size=1', () => {
+    const { container } = render(<OtpInput value="" onChange={() => {}} />)
+    const grid = container.querySelector('.otp-boxes-grid')
+    expect(grid).toBeTruthy()
+    const inputs = container.querySelectorAll('.otp-digit-box')
+    expect(inputs).toHaveLength(6)
+    inputs.forEach((input) => {
+      expect(input.getAttribute('size')).toBe('1')
+      expect(input.getAttribute('inputmode')).toBe('numeric')
+    })
+  })
+
+  it('formats countdown as mm:ss', () => {
+    expect(formatCountdown(60)).toBe('01:00')
+    expect(formatCountdown(634)).toBe('10:34')
+    expect(formatCountdown(5)).toBe('00:05')
   })
 })
 

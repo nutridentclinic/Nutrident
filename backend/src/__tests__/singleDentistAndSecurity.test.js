@@ -207,7 +207,7 @@ describe('Workstream B & D Integration Tests', () => {
           dentistId: fakeId,
           date: nextMondayStr,
           startTime: '10:00',
-          mode: 'video',
+          mode: 'in-clinic',
         });
       expect(resWrong.status).toBe(400);
       expect(resWrong.body.message).toMatch(/not the clinic doctor/i);
@@ -219,7 +219,7 @@ describe('Workstream B & D Integration Tests', () => {
         .send({
           date: nextMondayStr,
           startTime: '10:00',
-          mode: 'video',
+          mode: 'in-clinic',
           reasonForVisit: 'Checkup',
         });
       expect(resOk.status).toBe(201);
@@ -306,70 +306,6 @@ describe('Workstream B & D Integration Tests', () => {
       expect(bookRes.body.data.status).toBe('confirmed');
       expect(bookRes.body.data.paymentStatus).toBe('pending');
       expect(bookRes.body.data.dentist).toBe(String(dentist._id));
-    });
-  });
-
-  describe('Audio & Video Call Join (C4 & P9)', () => {
-    it('allows joining both video and audio appointments', async () => {
-      const docUser = await User.create({
-        name: 'Dr. Call',
-        email: 'doccall@clinic.test',
-        phone: '9999995555',
-        password: 'Password123!',
-        role: 'dentist',
-      });
-      const dentist = await Dentist.create({
-        user: docUser._id,
-        specialization: 'Telehealth',
-        consultationFee: 300,
-        isVerified: true,
-        isActive: true,
-      });
-
-      const patient = await User.create({
-        name: 'Patient Call',
-        email: 'patientcall@clinic.test',
-        phone: '9999996666',
-        password: 'Password123!',
-        role: 'patient',
-        isEmailVerified: true,
-      });
-      const patientToken = signAccessToken({ id: patient._id, role: 'patient', tv: 0 });
-
-      // Mock Agora configured
-      process.env.AGORA_APP_ID = 'test-agora-app-id';
-      process.env.AGORA_APP_CERTIFICATE = 'test-agora-cert';
-
-      // Create an appointment for right now in clinic timezone
-      const now = new Date();
-      const hh = String(now.getHours()).padStart(2, '0');
-      const mm = String(now.getMinutes()).padStart(2, '0');
-      const yr = now.getFullYear();
-      const mon = String(now.getMonth() + 1).padStart(2, '0');
-      const dy = String(now.getDate()).padStart(2, '0');
-      const todayStr = `${yr}-${mon}-${dy}`;
-
-      const apptAudio = await Appointment.create({
-        patient: patient._id,
-        dentist: dentist._id,
-        date: new Date(`${todayStr}T00:00:00.000Z`),
-        startTime: `${hh}:${mm}`,
-        endTime: `${hh}:${mm}`,
-        mode: 'audio',
-        status: 'confirmed',
-        paymentStatus: 'paid',
-        payment: new mongoose.Types.ObjectId(),
-        fees: { consultationFee: 300, platformFee: 20, totalAmount: 320 },
-      });
-
-      const res = await request(app)
-        .post(`/api/appointments/${apptAudio._id}/video/join`)
-        .set('Authorization', `Bearer ${patientToken}`);
-
-      expect(res.status).toBe(200);
-      expect(res.body.success).toBe(true);
-      expect(res.body.data.mode).toBe('audio');
-      expect(res.body.data.token).toBeTruthy();
     });
   });
 

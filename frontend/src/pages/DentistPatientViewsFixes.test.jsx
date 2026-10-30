@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ToastProvider } from '../components/ui.jsx'
 import { NotificationsPage } from './ReceptionPages.jsx'
 import { DentistSchedule } from './TeamPages.jsx'
-import { PatientTreatmentsPage, PatientPrescriptions } from './PatientPages.jsx'
+import { PatientTreatmentsPage } from './PatientPages.jsx'
 import { api } from '../api/domains.js'
 import { useAuthStore } from '../store/auth.js'
 
@@ -47,7 +47,7 @@ function renderWithProviders(ui) {
   )
 }
 
-describe('Dentist, Patient, Notifications & Prescriptions Views', () => {
+describe('Dentist, Patient & Notifications Views', () => {
   afterEach(() => {
     cleanup()
     vi.clearAllMocks()
@@ -255,40 +255,6 @@ describe('Dentist, Patient, Notifications & Prescriptions Views', () => {
       // Book button points to /app/book?reason=...
       const bookButtons = screen.getAllByRole('link', { name: /Book this treatment/ })
       expect(bookButtons[0].getAttribute('href')).toContain('reason=Root%20Canal%20Treatment')
-    })
-  })
-
-  describe('PatientPrescriptions: Active & Voided Display', () => {
-    beforeEach(() => {
-      vi.spyOn(api.prescriptions, 'mine').mockResolvedValue({
-        success: true,
-        data: [
-          {
-            _id: 'rx-1',
-            diagnosis: 'Toothache & Abscess',
-            createdAt: '2026-10-28T12:00:00.000Z',
-            status: 'voided',
-            voidReason: 'Patient allergic to Amoxicillin',
-            dentist: { user: { name: 'Dr. John Doe' } },
-            medicines: [
-              {
-                name: 'Amoxicillin',
-                dosage: '500mg',
-                frequency: '1-0-1',
-                durationDays: 5,
-                instructions: 'After food',
-              },
-            ],
-          },
-        ],
-      })
-    })
-
-    it('renders voided badge and void reason for voided prescriptions', async () => {
-      renderWithProviders(<PatientPrescriptions />)
-      await waitFor(() => expect(screen.getByText('Toothache & Abscess')).toBeTruthy())
-      expect(screen.getByText('VOIDED')).toBeTruthy()
-      expect(screen.getByText(/Patient allergic to Amoxicillin/)).toBeTruthy()
     })
   })
 })

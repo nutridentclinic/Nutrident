@@ -36,7 +36,7 @@ describe('API domain mappings', () => {
       return HttpResponse.json({ success: true, message: 'Appointment created.', data: { _id: 'appt-1', fees: { totalAmount: 120 } } }, { status: 201 })
     }))
 
-    const payload = { dentistId: 'dentist-1', date: '2026-10-23', startTime: '10:00', mode: 'video', reasonForVisit: 'Consultation' }
+    const payload = { dentistId: 'dentist-1', date: '2026-10-23', startTime: '10:00', mode: 'in-clinic', reasonForVisit: 'Consultation' }
     const result = await api.appointments.create(payload)
     expect(observed).toEqual({ method: 'POST', body: payload })
     expect(result.data.fees.totalAmount).toBe(120)

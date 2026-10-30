@@ -51,13 +51,4 @@ const getClinicDateTime = (now = new Date(), timeZone = process.env.CLINIC_TIMEZ
   return { date: `${values.year}-${values.month}-${values.day}`, time: `${values.hour}:${values.minute}` };
 };
 
-const isWithinVideoWindow = (appointment, now = new Date(), env = process.env) => {
-  const earlyMinutes = Number(env.VIDEO_JOIN_EARLY_MINUTES) || 15;
-  const lateMinutes = Number(env.VIDEO_JOIN_LATE_MINUTES) || 30;
-  const start = toClinicDate(appointment.date, appointment.startTime).getTime();
-  const end = toClinicDate(appointment.date, appointment.endTime).getTime();
-  const timestamp = new Date(now).getTime();
-  return timestamp >= start - earlyMinutes * 60_000 && timestamp <= end + lateMinutes * 60_000;
-};
-
-module.exports = { getClinicDateTime, isAppointmentParticipant, isWithinVideoWindow, toClinicDate };
+module.exports = { getClinicDateTime, isAppointmentParticipant, toClinicDate };

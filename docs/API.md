@@ -47,7 +47,6 @@ Base URL is `VITE_API_BASE_URL` (default `https://drnutrident-backend-wj1n.onren
 ## 3. Patient Care & Medical Records
 
 - `GET /patients/me`, `PATCH /patients/me`: Patient profile management.
-- `GET /prescriptions/me`, `GET /prescriptions/:id/pdf`: Prescription access and downloadable formatted PDF.
 - `GET /medical-records/me`: Patient's own records.
 - `POST /medical-records`: Multipart file upload with MIME type validation (`file`).
 - `GET /medical-records/:id/download`: Secure file download strictly authorized to the patient owner, treating dentist, or receptionist/admin.
@@ -81,7 +80,6 @@ Base URL is `VITE_API_BASE_URL` (default `https://drnutrident-backend-wj1n.onren
 - `GET /dentists/me/patients`: Patients under the doctor's care.
 - `PATCH /dentists/me/toggle-active`: Toggle clinician availability.
 - `POST /dental-charts`: Save tooth findings with strict FDI 32 adult teeth validation (quadrants 1–4, teeth 1–8).
-- `POST /prescriptions`: Issue digital prescription with medications, dosage, instructions, and follow-up date.
 - `POST /treatment-plans`: Formulate multi-stage treatment plan.
 - `GET /reviews/dentist/me`, `POST /reviews/:id/reply`: Review moderation and responses.
 - `GET /notifications/me`: Clinician notification alerts for new bookings and cancellations.

@@ -14,8 +14,7 @@ const { notify, notifyUser, notifyRoles } = require('../services/notification.se
 const { createInvoiceForAppointment } = require('../services/invoice.service');
 const { parseDateOnly, dayRange, todayInClinic } = require('../utils/clinicDate');
 const { processRefund } = require('../services/payment.service');
-const { generateAgoraToken, mongoIdToAgoraUid, isConfigured } = require('../config/agora');
-const { isAppointmentParticipant, isWithinVideoWindow } = require('../utils/appointmentAccess');
+const { isAppointmentParticipant } = require('../utils/appointmentAccess');
 const { resolvePrimaryDentist } = require('../utils/clinicDentist');
 const { computeBookableChecklist } = require('./dentist.controller');
 
@@ -96,9 +95,8 @@ exports.createAppointment = catchAsync(async (req, res, next) => {
   const endMinutes = h * 60 + m + duration;
   const endTime = `${String(Math.floor(endMinutes / 60)).padStart(2, '0')}:${String(endMinutes % 60).padStart(2, '0')}`;
 
-  const settings = (await ClinicSettings.findById('default')) || { platformFee: 0, allowPayAtClinic: true };
+  const settings = (await ClinicSettings.findById('default')) || { allowPayAtClinic: true };
   const consultationFee = dentist.consultationFee;
-  const platformFee = settings.platformFee || 0;
 
   const isPayAtClinic = Boolean(payAtClinic || paymentOption === 'clinic');
   if (isPayAtClinic && settings.allowPayAtClinic === false) {
@@ -113,12 +111,12 @@ exports.createAppointment = catchAsync(async (req, res, next) => {
     date,
     startTime,
     endTime,
-    mode: mode || 'in-clinic',
+    mode: 'in-clinic',
     reasonForVisit,
     fees: {
       consultationFee,
-      platformFee,
-      totalAmount: consultationFee + platformFee,
+      platformFee: 0,
+      totalAmount: consultationFee,
     },
     status: isPayAtClinic ? 'confirmed' : 'pending',
     paymentStatus: 'pending',
@@ -202,9 +200,7 @@ exports.createStaffAppointment = catchAsync(async (req, res, next) => {
   const endMinutes = h * 60 + m + duration;
   const endTime = `${String(Math.floor(endMinutes / 60)).padStart(2, '0')}:${String(endMinutes % 60).padStart(2, '0')}`;
 
-  const settings = (await ClinicSettings.findById('default')) || { platformFee: 0 };
   const consultationFee = dentist.consultationFee;
-  const platformFee = settings.platformFee || 0;
 
   const appointment = await createAppointmentSafe({
     patient: patientId,
@@ -214,12 +210,12 @@ exports.createStaffAppointment = catchAsync(async (req, res, next) => {
     date,
     startTime,
     endTime,
-    mode: mode || 'in-clinic',
+    mode: 'in-clinic',
     reasonForVisit,
     fees: {
       consultationFee,
-      platformFee,
-      totalAmount: consultationFee + platformFee,
+      platformFee: 0,
+      totalAmount: consultationFee,
     },
     status: 'confirmed',
     paymentStatus: 'pending',
@@ -470,7 +466,7 @@ exports.rescheduleAppointment = catchAsync(async (req, res, next) => {
     date,
     startTime,
     endTime,
-    mode: oldAppointment.mode,
+    mode: 'in-clinic',
     reasonForVisit: oldAppointment.reasonForVisit,
     fees: oldAppointment.fees,
     paymentStatus,
@@ -657,46 +653,6 @@ exports.markNoShow = catchAsync(async (req, res, next) => {
   appointment.status = 'no-show';
   await appointment.save();
   success(res, 200, 'Appointment marked as no-show.', appointment);
-});
-
-// @route POST /api/appointments/:id/video/join  (returns an Agora token to join the call)
-exports.joinVideoCall = catchAsync(async (req, res, next) => {
-  const appointment = await Appointment.findById(req.params.id).populate('dentist');
-  if (!appointment) return next(new AppError('Appointment not found.', 404));
-  if (!isAppointmentParticipant(appointment, req.user)) {
-    return next(new AppError('Only the patient or dentist for this appointment can join.', 403));
-  }
-  if (!['video', 'audio'].includes(appointment.mode)) {
-    return next(new AppError('This appointment is not a remote (video or audio) consultation.', 400));
-  }
-  if (appointment.status !== 'confirmed') return next(new AppError('Appointment is not confirmed yet.', 400));
-  if (appointment.paymentStatus !== 'paid' && appointment.payment) {
-    return next(new AppError('Payment is required before joining this consultation.', 400));
-  }
-  if (!isWithinVideoWindow(appointment)) {
-    return next(new AppError('Consultation call access is available 15 minutes before the appointment until 30 minutes after it ends.', 403));
-  }
-  if (!isConfigured()) return next(new AppError('Video/audio calling is not configured on the server yet.', 503));
-
-  // One Agora channel per appointment - both sides join the same channel name.
-  const channelName = `appt_${appointment._id}`;
-  const uid = mongoIdToAgoraUid(req.user._id);
-  const token = generateAgoraToken(channelName, uid);
-  if (!token) return next(new AppError('Could not generate a call token. Please try again.', 500));
-
-  if (!appointment.videoCall.roomId) appointment.videoCall.roomId = channelName;
-  if (req.user.role === 'patient') appointment.videoCall.joinedByPatientAt = new Date();
-  if (req.user.role === 'dentist') appointment.videoCall.joinedByDentistAt = new Date();
-  await appointment.save();
-
-  success(res, 200, 'Call token issued.', {
-    appId: process.env.AGORA_APP_ID,
-    channelName,
-    uid,
-    token,
-    mode: appointment.mode,
-    expiresInSeconds: 7200,
-  });
 });
 
 // @route GET /api/appointments (E3 - receptionist/admin appointment list)

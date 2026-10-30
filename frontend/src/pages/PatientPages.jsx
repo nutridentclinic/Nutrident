@@ -191,11 +191,6 @@ export function PatientDashboard() {
               <span>Medical records</span>
               <ArrowRight size={15} />
             </Link>
-            <Link to="/app/prescriptions">
-              <Plus size={17} />
-              <span>Prescriptions</span>
-              <ArrowRight size={15} />
-            </Link>
             <Link to="/app/billing">
               <CreditCard size={17} />
               <span>Invoices & payments</span>
@@ -402,14 +397,6 @@ export function PatientAppointments() {
                   >
                     Reschedule
                   </button>
-                )}
-                {["video", "audio"].includes(item.mode) && item.status === "confirmed" && (
-                  <Link
-                    to={`/consultation/${item._id}/lobby`}
-                    className="button button-primary button-small"
-                  >
-                    {item.mode === "audio" ? "Join audio" : "Join video"}
-                  </Link>
                 )}
               </div>
             </article>
@@ -642,9 +629,6 @@ export function AppointmentDetail() {
                   Consultation{" "}
                   <strong>{rupees(item.fees?.consultationFee)}</strong>
                 </span>
-                <span>
-                  Platform fee <strong>{rupees(item.fees?.platformFee)}</strong>
-                </span>
                 <span className="fee-total">
                   Total <strong>{rupees(item.fees?.totalAmount)}</strong>
                 </span>
@@ -653,14 +637,6 @@ export function AppointmentDetail() {
                 Cancellation refunds follow the clinic policy shown at the time
                 of booking.
               </p>
-              {["video", "audio"].includes(item.mode) && item.status === "confirmed" && (
-                <Link
-                  className="button button-primary button-wide"
-                  to={`/consultation/${id}/lobby`}
-                >
-                  {item.mode === "audio" ? "Join audio consultation" : "Join video consultation"} <ArrowRight size={16} />
-                </Link>
-              )}
             </SectionPanel>
             {item.status === "completed" && (
               <ReviewForm
@@ -971,10 +947,8 @@ export function AppointmentBooking() {
 
   const consultationFee =
     serverFees?.consultationFee ?? dentist?.consultationFee ?? 0;
-  const platformFee =
-    serverFees?.platformFee ?? settingsQuery.data?.data?.platformFee ?? 0;
   const totalFee =
-    serverFees?.totalAmount ?? Number(consultationFee) + Number(platformFee);
+    serverFees?.totalAmount ?? Number(consultationFee);
 
   return (
     <div>
@@ -1145,8 +1119,6 @@ export function AppointmentBooking() {
                     onChange={(event) => setMode(event.target.value)}
                   >
                     <option value="in-clinic">In clinic</option>
-                    <option value="video">Video consultation</option>
-                    <option value="audio">Audio consultation</option>
                   </TextInput>
                 </Field>
                 <Field label="Booking for">
@@ -1261,10 +1233,6 @@ export function AppointmentBooking() {
               <span>Consultation fee</span>
               <strong>{rupees(consultationFee)}</strong>
             </div>
-            <div className="summary-line">
-              <span>Platform fee</span>
-              <strong>{rupees(platformFee)}</strong>
-            </div>
             <div className="summary-total">
               <span>Total due</span>
               <strong>{rupees(totalFee)}</strong>
@@ -1338,98 +1306,6 @@ export function AppointmentBooking() {
           </aside>
         </form>
       )}
-    </div>
-  );
-}
-
-export function PatientPrescriptions() {
-  const notify = useToast();
-  const query = useQuery({
-    queryKey: ["prescriptions"],
-    queryFn: api.prescriptions.mine,
-    ...queryOptions,
-  });
-  const items = query.data?.data || [];
-  return (
-    <div>
-      <PageTitle
-        eyebrow="Medication and instructions"
-        title="Prescriptions"
-        description="Prescriptions issued by your care team, with authenticated PDF downloads."
-      />
-      <AsyncView
-        query={query}
-        empty={!query.isLoading && !query.isError && !items.length}
-        emptyTitle="No prescriptions yet"
-      >
-        <div className="record-grid">
-          {items.map((item) => (
-            <article
-              className="record-card"
-              key={item._id}
-              style={{
-                opacity: item.status === "voided" ? 0.8 : 1,
-                border: item.status === "voided" ? "1px solid #fecaca" : undefined,
-                background: item.status === "voided" ? "#fff5f5" : undefined,
-              }}
-            >
-              <div className="record-card-head">
-                <span className="catalog-icon">
-                  <FileText size={18} color={item.status === "voided" ? "#dc2626" : undefined} />
-                </span>
-                <span>{fmtDate(item.createdAt)}</span>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                <h2>{item.diagnosis || "Prescription"}</h2>
-                {item.status === "voided" && (
-                  <span style={{ fontSize: "0.75rem", padding: "0.15rem 0.4rem", background: "#fee2e2", color: "#dc2626", borderRadius: "4px", fontWeight: 700 }}>
-                    VOIDED
-                  </span>
-                )}
-              </div>
-              <p>Dr. {item.dentist?.user?.name || "Your dentist"}</p>
-              {item.status === "voided" && (
-                <p style={{ color: "#dc2626", fontSize: "0.85rem", fontStyle: "italic", margin: "0.2rem 0" }}>
-                  This prescription was voided{item.voidReason ? `: ${item.voidReason}` : " and is no longer valid."}
-                </p>
-              )}
-              <ul className="medicine-list">
-                {(item.medicines || []).map((medicine, index) => (
-                  <li key={`${medicine.name}-${index}`}>
-                    <strong>{medicine.name}</strong>
-                    <span>
-                      {medicine.dosage} · {medicine.frequency} ·{" "}
-                      {medicine.durationDays} days
-                      {medicine.instructions ? ` (${medicine.instructions})` : ""}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-              {item.additionalNotes && (
-                <p style={{ fontSize: "0.85rem", color: "#475569", margin: "0.5rem 0" }}>
-                  <strong>Notes:</strong> {item.additionalNotes}
-                </p>
-              )}
-              {item.followUpDate && (
-                <p style={{ fontSize: "0.85rem", color: "#475569", margin: "0.2rem 0" }}>
-                  <strong>Follow-up:</strong> {item.followUpDate}
-                </p>
-              )}
-              <button
-                className="button button-outline button-small"
-                onClick={() =>
-                  downloadPdf(
-                    `/prescriptions/${item._id}/pdf`,
-                    `prescription-${item._id}.pdf`,
-                  ).catch((error) => notify(error.message, "error"))
-                }
-              >
-                <Download size={15} /> Download PDF
-              </button>
-            </article>
-          ))}
-        </div>
-      </AsyncView>
     </div>
   );
 }

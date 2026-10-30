@@ -21,6 +21,7 @@ import {
 } from 'lucide-react'
 import { useAuthStore } from '../store/auth.js'
 import { logout } from '../auth/session.js'
+import { getPortalBase } from '../auth/routes.js'
 import { api } from '../api/domains.js'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useIdleLogout, IdleWarningModal } from '../hooks/useIdleLogout.jsx'
@@ -31,7 +32,6 @@ const navigation = {
     { to: '/app', label: 'Overview', icon: Home, end: true },
     { to: '/app/appointments', label: 'Appointments', icon: CalendarDays },
     { to: '/app/book', label: 'Book appointment', icon: Search },
-    { to: '/app/prescriptions', label: 'Prescriptions', icon: FileText },
     { to: '/app/records', label: 'Medical records', icon: ClipboardList },
     { to: '/app/treatments', label: 'Treatments & catalog', icon: Sparkles },
     { to: '/app/care', label: 'Care & dental chart', icon: HeartPulse },
@@ -125,8 +125,8 @@ export default function PortalLayout() {
     refetchIntervalInBackground: false,
   })
   const unreadCount = notificationData?.meta?.unreadCount || 0
-  const homePath = { patient: '/app', dentist: '/dentist', receptionist: '/reception', admin: '/admin' }[role]
-  const notificationsPath = `/${role === 'patient' ? 'app' : role}/notifications`
+  const homePath = getPortalBase(role)
+  const notificationsPath = `${homePath}/notifications`
 
   // Shared PC idle logout hook
   const { warningOpen, secondsRemaining, stayLoggedIn, logoutNow } = useIdleLogout()
