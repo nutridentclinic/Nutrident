@@ -148,7 +148,7 @@ describe('Role Portal Header & Sections (Workstream 3)', () => {
   })
 
   describe('3. Portal Layout: Breadcrumbs, Friendly Roles, and Nested Route Highlighting', () => {
-    it('renders Doctor Portal breadcrumb and friendly role chip for dentist', () => {
+    it('renders section name breadcrumb and friendly role chip for dentist', () => {
       useAuthStore.setState({
         status: 'authed',
         user: { _id: 'd-1', name: 'Dr. Siddhesh', role: 'dentist' },
@@ -157,8 +157,8 @@ describe('Role Portal Header & Sections (Workstream 3)', () => {
       renderWithProviders(<PortalLayout />, { route: '/dentist/appointments' })
 
       const breadcrumb = screen.getByLabelText(/Portal section navigation/i)
-      expect(breadcrumb.textContent).toContain('Doctor Portal')
-      expect(breadcrumb.textContent).toContain('Schedule')
+      expect(breadcrumb.textContent).not.toContain('Doctor Portal')
+      expect(breadcrumb.textContent).toBe('Schedule')
 
       // Topbar profile chip shows friendly name "Doctor" instead of raw "dentist"
       const profile = screen.getByText('Doctor')
@@ -166,7 +166,7 @@ describe('Role Portal Header & Sections (Workstream 3)', () => {
       expect(screen.queryByText('dentist')).toBeNull()
     })
 
-    it('renders Receptionist Portal breadcrumb and highlights Patients on nested route /reception/patients/:id', () => {
+    it('renders section name breadcrumb and highlights Patients on nested route /reception/patients/:id', () => {
       useAuthStore.setState({
         status: 'authed',
         user: { _id: 'r-1', name: 'Front Desk User', role: 'receptionist' },
@@ -175,8 +175,8 @@ describe('Role Portal Header & Sections (Workstream 3)', () => {
       renderWithProviders(<PortalLayout />, { route: '/reception/patients/patient-999' })
 
       const breadcrumb = screen.getByLabelText(/Portal section navigation/i)
-      expect(breadcrumb.textContent).toContain('Receptionist Portal')
-      expect(breadcrumb.textContent).toContain('Patients')
+      expect(breadcrumb.textContent).not.toContain('Receptionist Portal')
+      expect(breadcrumb.textContent).toBe('Patients')
 
       // Check active item resolution helper directly
       const active = getActiveNavItem(navigation.receptionist, '/reception/patients/patient-999')
@@ -187,7 +187,7 @@ describe('Role Portal Header & Sections (Workstream 3)', () => {
       expect(screen.getByText('Receptionist')).toBeTruthy()
     })
 
-    it('renders Patient Portal breadcrumb and highlights My appointments on nested route /app/appointments/:id', () => {
+    it('renders section name breadcrumb and highlights My appointments on nested route /app/appointments/:id', () => {
       useAuthStore.setState({
         status: 'authed',
         user: { _id: 'p-1', name: 'Jayesh Landage', role: 'patient' },
@@ -196,8 +196,8 @@ describe('Role Portal Header & Sections (Workstream 3)', () => {
       renderWithProviders(<PortalLayout />, { route: '/app/appointments/appt-888' })
 
       const breadcrumb = screen.getByLabelText(/Portal section navigation/i)
-      expect(breadcrumb.textContent).toContain('Patient Portal')
-      expect(breadcrumb.textContent).toContain('My appointments')
+      expect(breadcrumb.textContent).not.toContain('Patient Portal')
+      expect(breadcrumb.textContent).toBe('My appointments')
 
       const active = getActiveNavItem(navigation.patient, '/app/appointments/appt-888')
       expect(active?.label).toBe('My appointments')
@@ -207,7 +207,7 @@ describe('Role Portal Header & Sections (Workstream 3)', () => {
       expect(screen.getByText('Patient')).toBeTruthy()
     })
 
-    it('renders Admin Portal breadcrumb on /admin/settings', () => {
+    it('renders section name breadcrumb on /admin/settings', () => {
       useAuthStore.setState({
         status: 'authed',
         user: { _id: 'a-1', name: 'Admin Manager', role: 'admin' },
@@ -216,8 +216,8 @@ describe('Role Portal Header & Sections (Workstream 3)', () => {
       renderWithProviders(<PortalLayout />, { route: '/admin/settings' })
 
       const breadcrumb = screen.getByLabelText(/Portal section navigation/i)
-      expect(breadcrumb.textContent).toContain('Admin Portal')
-      expect(breadcrumb.textContent).toContain('Clinic settings')
+      expect(breadcrumb.textContent).not.toContain('Admin Portal')
+      expect(breadcrumb.textContent).toBe('Clinic settings')
 
       // Profile chip shows friendly name "Admin"
       expect(screen.getByText('Admin')).toBeTruthy()
@@ -234,8 +234,8 @@ describe('Role Portal Header & Sections (Workstream 3)', () => {
 
       const breadcrumb = screen.getByLabelText(/Portal section navigation/i)
       expect(breadcrumb).toBeTruthy()
-      expect(breadcrumb.textContent).toContain('Doctor Portal')
-      expect(breadcrumb.textContent).toContain('Live queue')
+      expect(breadcrumb.textContent).not.toContain('Doctor Portal')
+      expect(breadcrumb.textContent).toBe('Live queue')
 
       const roleChip = screen.getByText('Doctor')
       expect(roleChip).toBeTruthy()

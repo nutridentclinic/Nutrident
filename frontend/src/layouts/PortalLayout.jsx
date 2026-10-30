@@ -213,8 +213,6 @@ export default function PortalLayout() {
             {menuOpen ? <X size={21} /> : <Menu size={21} />}
           </button>
           <div className="breadcrumb" aria-label="Portal section navigation">
-            <span>{portalName}</span>
-            <i className="breadcrumb-dot">·</i>
             <strong>{currentSection}</strong>
           </div>
           <Link

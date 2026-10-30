@@ -434,9 +434,9 @@ textarea.input { min-height: 88px; resize: vertical; }
 }
 .portal-main { width: calc(100% - 244px); min-height: 100vh; margin-left: 244px; }
 .portal-topbar { height: 66px; padding: 0 35px; display: flex; align-items: center; justify-content: space-between; background: #fff; border-bottom: 1px solid var(--line); }
-.breadcrumb { display: flex; align-items: center; gap: 10px; color: #91a0a0; font-size: 12px; }
+.breadcrumb { display: flex; align-items: center; gap: 10px; color: #91a0a0; font-size: 14px; }
 .breadcrumb i { color: #c0cbc7; font-style: normal; }
-.breadcrumb strong { color: #38525c; font-weight: 700; }
+.breadcrumb strong { color: #1e3a47; font-weight: 700; font-size: 15px; }
 .topbar-profile { display: flex; align-items: center; gap: 9px; }
 .topbar-profile strong, .topbar-profile small { display: block; }
 .topbar-profile strong { color: var(--ink); font-size: 11px; }
