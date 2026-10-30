@@ -1,5 +1,5 @@
 import React from 'react'
-import { Server, AlertCircle } from 'lucide-react'
+import { Server } from 'lucide-react'
 
 /**
  * Friendly notice component shown when a frontend feature requires
@@ -12,36 +12,36 @@ export function BackendPendingNotice({
   onRetry = null,
 }) {
   return (
-    <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-5 my-4 text-amber-200">
-      <div className="flex items-start gap-3">
-        <div className="p-2 bg-amber-500/20 rounded-lg text-amber-400 shrink-0">
-          <Server className="w-5 h-5" />
+    <div className="notice notice-warn" style={{ marginBottom: '1.5rem', display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
+      <div style={{ color: 'var(--coral)', flexShrink: 0, marginTop: '2px' }}>
+        <Server size={20} />
+      </div>
+      <div style={{ flex: 1 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <strong style={{ color: 'var(--ink)' }}>{featureName} — Backend Update Pending</strong>
+          <span className="status-badge status-pending">Pending Redeploy</span>
         </div>
-        <div className="flex-1">
-          <div className="flex items-center gap-2">
-            <h4 className="font-semibold text-amber-300">{featureName} — Backend Update Pending</h4>
-            <span className="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full border border-amber-500/30">
-              Pending Redeploy
-            </span>
-          </div>
-          <p className="text-sm text-slate-300 mt-1">{description}</p>
-          {endpoint && (
-            <p className="text-xs font-mono text-slate-400 mt-2 bg-slate-900/60 p-2 rounded border border-slate-700/50">
-              Endpoint: {endpoint}
-            </p>
-          )}
-          {onRetry && (
+        <p style={{ marginTop: '0.25rem', color: 'var(--body)', fontSize: '13.5px' }}>{description}</p>
+        {endpoint && (
+          <code style={{ display: 'inline-block', marginTop: '0.5rem', fontSize: '12px' }}>
+            Endpoint: {endpoint}
+          </code>
+        )}
+        {onRetry && (
+          <div style={{ marginTop: '0.75rem' }}>
             <button
+              type="button"
               onClick={onRetry}
-              className="mt-3 text-xs bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40 px-3 py-1.5 rounded-lg transition"
+              className="button button-quiet button-small"
             >
               Check Again
             </button>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </div>
   )
 }
 
 export default BackendPendingNotice
+

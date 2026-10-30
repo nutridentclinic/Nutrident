@@ -1851,5 +1851,240 @@ button.tooth-cell { cursor: pointer; }
   }
 }
 
+/* Patient 360 Light Theme Styles */
+.patient-summary-hero {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 24px;
+  margin-bottom: 24px;
+  box-shadow: 0 4px 16px rgba(16, 45, 67, 0.04);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.patient-summary-left {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex: 1;
+  min-width: 280px;
+}
+
+.patient-avatar-circle {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--teal-soft);
+  color: var(--teal);
+  border: 2px solid #c8e2da;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  font-weight: 800;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.patient-avatar-circle img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.patient-identity h2 {
+  font-size: 22px;
+  font-weight: 750;
+  color: var(--ink);
+  margin: 0;
+  line-height: 1.2;
+}
+
+.patient-meta-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.patient-meta-tags span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.blood-badge {
+  background: #fbeee9;
+  color: #c04e38;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 700;
+  font-size: 11px;
+}
+
+.patient-summary-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(110px, 1fr));
+  gap: 16px;
+  padding-left: 24px;
+  border-left: 1px solid var(--line);
+}
+
+.patient-stat-pill small {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  margin-bottom: 2px;
+}
+
+.patient-stat-pill strong {
+  font-size: 15px;
+  font-weight: 750;
+  color: var(--ink);
+}
+
+.patient-stat-pill .highlight-teal {
+  color: var(--teal);
+}
+
+.patient-stat-pill .highlight-coral {
+  color: var(--coral);
+}
+
+/* Patient 360 Tabs Navigation */
+.patient-360-tabs {
+  margin-bottom: 24px;
+  display: flex;
+  gap: 6px;
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+  white-space: nowrap;
+  -webkit-overflow-scrolling: touch;
+}
+
+.patient-360-tabs button {
+  min-height: 44px;
+  padding: 0 16px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 13.5px;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.patient-360-tabs button:hover {
+  color: var(--ink);
+}
+
+.patient-360-tabs button.active {
+  color: var(--teal);
+  border-bottom-color: var(--teal);
+}
+
+/* Patient 360 Alert / Condition Cards */
+.condition-alert-box {
+  background: #f8fbf9;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 12px 14px;
+  margin-top: 4px;
+  color: var(--ink);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+/* Patient 360 Progress Bar */
+.plan-progress-bar {
+  margin: 12px 0;
+}
+
+.plan-progress-track {
+  width: 100%;
+  height: 8px;
+  background: #e5ece8;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.plan-progress-fill {
+  height: 100%;
+  background: var(--teal);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+/* Patient 360 Data Table */
+.clinic-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 13px;
+}
+
+.clinic-table th {
+  padding: 11px 14px;
+  background: #f4f8f6;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 750;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--line);
+}
+
+.clinic-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  color: var(--body);
+}
+
+.clinic-table tr:hover td {
+  background: #fbfdfc;
+}
+
+.clinic-table td strong {
+  color: var(--ink);
+}
+
+/* Patient 360 Responsive Adjustments */
+@media (max-width: 768px) {
+  .patient-summary-hero {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 18px;
+    gap: 18px;
+  }
+  .patient-summary-stats {
+    width: 100%;
+    padding-left: 0;
+    border-left: none;
+    border-top: 1px solid var(--line);
+    padding-top: 16px;
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 480px) {
+  .patient-summary-stats {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+}
+
+
 
 
